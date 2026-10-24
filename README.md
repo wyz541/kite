@@ -18,6 +18,10 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 ![Kite wide hierarchy](docs/screenshots/column-view-wide.png)
 
+### Horizontal column scrolling
+
+![Kite horizontal column scrolling](docs/screenshots/column-horizontal-scroll.png)
+
 ### Context menu
 
 ![Kite context menu](docs/screenshots/context-menu.png)
@@ -86,6 +90,11 @@ Kite 需要 `git` 和 `svn` 在 `PATH` 中。缺少对应命令时，Kite 不显
 
 Kite 默认使用分栏视图。每一栏显示一级文件夹的内容。
 选中文件夹后，Kite 在右侧加载下一栏。
+
+Kite 不设置固定栏数上限。
+窗口宽度决定同时可见的栏数。
+窗口变窄时，深层栏目保留在横向滚动区域中。
+使用触控板横向滚动或拖动分栏底部滚动条即可查看。
 
 路径栏显示当前项目的完整路径。
 点击任意文件夹段可返回对应层级。
@@ -221,7 +230,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.1-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.2-windows-x64.zip`。
 
 ### 测试
 

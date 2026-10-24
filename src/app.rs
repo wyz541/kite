@@ -16,6 +16,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, Size, StyledExt as _, Theme, ThemeMode,
@@ -1454,7 +1455,19 @@ impl KiteApp {
         for index in 0..self.column_panes.len() {
             strip = strip.child(self.render_column(index, window, cx));
         }
-        strip.into_any_element()
+        div()
+            .relative()
+            .size_full()
+            .child(strip.into_any_element())
+            .child(
+                div().absolute().inset_0().child(
+                    Scrollbar::horizontal(&scroll_handle)
+                        .id("column-horizontal-scrollbar")
+                        .mode(ScrollbarMode::Always)
+                        .viewport_from_layout(),
+                ),
+            )
+            .into_any_element()
     }
 
     fn render_column(
