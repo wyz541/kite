@@ -1020,8 +1020,21 @@ impl KiteApp {
             VcsMenuCommand::GitAdd => {
                 self.run_vcs_task(VcsTool::Git, VcsOperation::Add, path, window, cx)
             }
+            VcsMenuCommand::GitUnstage => {
+                self.run_vcs_task(VcsTool::Git, VcsOperation::Unstage, path, window, cx)
+            }
             VcsMenuCommand::GitCommit => self.begin_vcs_commit(VcsTool::Git, path, window, cx),
+            VcsMenuCommand::GitPull => {
+                self.run_vcs_task(VcsTool::Git, VcsOperation::Pull, path, window, cx)
+            }
+            VcsMenuCommand::GitPush => {
+                self.run_vcs_task(VcsTool::Git, VcsOperation::Push, path, window, cx)
+            }
+            VcsMenuCommand::GitFetch => {
+                self.run_vcs_task(VcsTool::Git, VcsOperation::Fetch, path, window, cx)
+            }
             VcsMenuCommand::GitRevert => self.confirm_vcs_revert(VcsTool::Git, path, window, cx),
+            VcsMenuCommand::GitClean => self.confirm_git_clean(path, window, cx),
             VcsMenuCommand::SvnUpdate => {
                 self.run_vcs_task(VcsTool::Svn, VcsOperation::Update, path, window, cx)
             }
@@ -1029,7 +1042,16 @@ impl KiteApp {
                 self.run_vcs_task(VcsTool::Svn, VcsOperation::Add, path, window, cx)
             }
             VcsMenuCommand::SvnCommit => self.begin_vcs_commit(VcsTool::Svn, path, window, cx),
+            VcsMenuCommand::SvnLock => {
+                self.run_vcs_task(VcsTool::Svn, VcsOperation::Lock, path, window, cx)
+            }
+            VcsMenuCommand::SvnUnlock => {
+                self.run_vcs_task(VcsTool::Svn, VcsOperation::Unlock, path, window, cx)
+            }
             VcsMenuCommand::SvnRevert => self.confirm_vcs_revert(VcsTool::Svn, path, window, cx),
+            VcsMenuCommand::SvnCleanup => {
+                self.run_vcs_task(VcsTool::Svn, VcsOperation::Cleanup, path, window, cx)
+            }
         }
     }
 
@@ -1043,9 +1065,17 @@ impl KiteApp {
     ) {
         let pending = match &operation {
             VcsOperation::Add => format!("正在{}添加…", tool.label()),
+            VcsOperation::Unstage => format!("正在{}取消暂存…", tool.label()),
             VcsOperation::Commit(_) => format!("正在{}提交…", tool.label()),
+            VcsOperation::Pull => format!("正在{}拉取…", tool.label()),
+            VcsOperation::Push => format!("正在{}推送…", tool.label()),
+            VcsOperation::Fetch => format!("正在{}获取…", tool.label()),
             VcsOperation::Revert => format!("正在{}还原…", tool.label()),
+            VcsOperation::Clean => format!("正在{}清理…", tool.label()),
             VcsOperation::Update => format!("正在{}更新…", tool.label()),
+            VcsOperation::Lock => format!("正在{}锁定…", tool.label()),
+            VcsOperation::Unlock => format!("正在{}解锁…", tool.label()),
+            VcsOperation::Cleanup => format!("正在{}清理…", tool.label()),
         };
         self.error = None;
         self.notice = Some(pending.into());
@@ -1130,6 +1160,38 @@ impl KiteApp {
                 .background_spawn(
                     async move { run_vcs_operation(tool, VcsOperation::Revert, &path) },
                 )
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(message) => {
+                    this.notice = Some(message.into());
+                    this.refresh(window, cx);
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn confirm_git_clean(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let message = "清理所选路径的未跟踪文件和文件夹？";
+        let detail = format!("{}\n此操作不可撤销。忽略文件不受影响。", path_text(&path));
+        let answers = [PromptButton::ok("清理"), PromptButton::cancel("取消")];
+        let answer = window.prompt(PromptLevel::Warning, message, Some(&detail), &answers, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(choice) = answer.await else {
+                return;
+            };
+            if choice != 0 {
+                return;
+            }
+            let result = cx
+                .background_spawn(async move {
+                    run_vcs_operation(VcsTool::Git, VcsOperation::Clean, &path)
+                })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(message) => {
@@ -2246,76 +2308,149 @@ fn build_column_context_menu(
             false,
         );
 
-    if git_available {
-        menu = menu.separator().submenu_with_icon(
-            Some(IconName::GitBranch.into()),
-            "Git",
-            window,
-            cx,
-            |menu, _, _| {
-                menu.menu_with_icon(
-                    "添加",
-                    IconName::GitBranch,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::GitAdd,
-                    }),
-                )
-                .menu_with_icon(
-                    "提交…",
-                    IconName::GitBranch,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::GitCommit,
-                    }),
-                )
-                .menu_with_icon(
-                    "还原…",
-                    IconName::GitBranch,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::GitRevert,
-                    }),
-                )
-            },
-        );
-    }
+    let git_disabled = !git_available;
+    menu = menu.separator().submenu_with_icon(
+        Some(IconName::GitBranch.into()),
+        "Git",
+        window,
+        cx,
+        move |menu, _, _| {
+            menu.menu_with_icon_and_disabled(
+                "添加",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitAdd,
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "取消暂存",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitUnstage,
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "提交…",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitCommit,
+                }),
+                git_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "拉取",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitPull,
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "推送",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitPush,
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "获取",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitFetch,
+                }),
+                git_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "还原…",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitRevert,
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "清理工作区…",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitClean,
+                }),
+                git_disabled,
+            )
+        },
+    );
 
-    if svn_available {
-        menu = menu.separator().submenu_with_icon(
-            Some(IconName::Boxes.into()),
-            "SVN",
-            window,
-            cx,
-            |menu, _, _| {
-                menu.menu_with_icon(
-                    "更新",
-                    IconName::Boxes,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::SvnUpdate,
-                    }),
-                )
-                .menu_with_icon(
-                    "添加",
-                    IconName::Boxes,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::SvnAdd,
-                    }),
-                )
-                .menu_with_icon(
-                    "提交…",
-                    IconName::Boxes,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::SvnCommit,
-                    }),
-                )
-                .menu_with_icon(
-                    "还原…",
-                    IconName::Boxes,
-                    Box::new(VcsMenuAction {
-                        command: VcsMenuCommand::SvnRevert,
-                    }),
-                )
-            },
-        );
-    }
+    let svn_disabled = !svn_available;
+    menu = menu.separator().submenu_with_icon(
+        Some(IconName::Boxes.into()),
+        "SVN",
+        window,
+        cx,
+        move |menu, _, _| {
+            menu.menu_with_icon_and_disabled(
+                "更新",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnUpdate,
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "添加",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnAdd,
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "提交…",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnCommit,
+                }),
+                svn_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "锁定",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnLock,
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "解锁",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnUnlock,
+                }),
+                svn_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "还原…",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnRevert,
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "清理工作副本",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnCleanup,
+                }),
+                svn_disabled,
+            )
+        },
+    );
 
     menu.separator().menu_with_icon_and_disabled(
         "刷新",

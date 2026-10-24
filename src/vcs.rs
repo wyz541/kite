@@ -51,9 +51,17 @@ impl VcsTool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VcsOperation {
     Add,
+    Unstage,
     Commit(String),
+    Pull,
+    Push,
+    Fetch,
     Revert,
+    Clean,
     Update,
+    Lock,
+    Unlock,
+    Cleanup,
 }
 
 pub fn load_vcs_snapshot(view_root: &Path) -> VcsSnapshot {
@@ -310,7 +318,10 @@ pub fn run_vcs_operation(
 }
 
 fn run_git_operation(operation: VcsOperation, target: &Path) -> Result<String, String> {
-    if operation == VcsOperation::Update {
+    if matches!(
+        &operation,
+        VcsOperation::Update | VcsOperation::Lock | VcsOperation::Unlock | VcsOperation::Cleanup
+    ) {
         return Err("Git 不支持更新操作".to_string());
     }
 
@@ -340,6 +351,10 @@ fn run_git_operation(operation: VcsOperation, target: &Path) -> Result<String, S
             command.args(["add", "--"]).arg(relative);
             "Git 添加"
         }
+        VcsOperation::Unstage => {
+            command.args(["restore", "--staged", "--"]).arg(relative);
+            "Git 取消暂存"
+        }
         VcsOperation::Commit(message) => {
             command
                 .args(["commit", "-m"])
@@ -348,18 +363,47 @@ fn run_git_operation(operation: VcsOperation, target: &Path) -> Result<String, S
                 .arg(relative);
             "Git 提交"
         }
+        VcsOperation::Pull => {
+            command.args(["pull", "--no-edit"]);
+            "Git 拉取"
+        }
+        VcsOperation::Push => {
+            command.arg("push");
+            "Git 推送"
+        }
+        VcsOperation::Fetch => {
+            command.args(["fetch", "--prune"]);
+            "Git 获取"
+        }
         VcsOperation::Revert => {
             command
                 .args(["restore", "--source=HEAD", "--staged", "--worktree", "--"])
                 .arg(relative);
             "Git 还原"
         }
-        VcsOperation::Update => unreachable!(),
+        VcsOperation::Clean => {
+            command.args(["clean", "-fd", "--"]).arg(relative);
+            "Git 清理"
+        }
+        VcsOperation::Update
+        | VcsOperation::Lock
+        | VcsOperation::Unlock
+        | VcsOperation::Cleanup => unreachable!(),
     };
     run_operation_command(label, command)
 }
 
 fn run_svn_operation(operation: VcsOperation, target: &Path) -> Result<String, String> {
+    if matches!(
+        &operation,
+        VcsOperation::Unstage
+            | VcsOperation::Pull
+            | VcsOperation::Push
+            | VcsOperation::Fetch
+            | VcsOperation::Clean
+    ) {
+        return Err("SVN 不支持此操作".to_string());
+    }
     let start = working_directory(target);
     let mut command = configured_command("svn", start);
 
@@ -383,6 +427,23 @@ fn run_svn_operation(operation: VcsOperation, target: &Path) -> Result<String, S
             command.args(["update", "--non-interactive"]).arg(target);
             "SVN 更新"
         }
+        VcsOperation::Lock => {
+            command.args(["lock", "--non-interactive"]).arg(target);
+            "SVN 锁定"
+        }
+        VcsOperation::Unlock => {
+            command.args(["unlock", "--non-interactive"]).arg(target);
+            "SVN 解锁"
+        }
+        VcsOperation::Cleanup => {
+            command.arg("cleanup").arg(target);
+            "SVN 清理"
+        }
+        VcsOperation::Unstage
+        | VcsOperation::Pull
+        | VcsOperation::Push
+        | VcsOperation::Fetch
+        | VcsOperation::Clean => unreachable!(),
     };
     run_operation_command(label, command)
 }
@@ -641,12 +702,23 @@ mod tests {
             .contains("完成")
         );
         std::fs::write(&file, b"after").expect("modify note");
+        run_vcs_operation(VcsTool::Git, VcsOperation::Add, &file).expect("git stage change");
+        assert!(
+            run_vcs_operation(VcsTool::Git, VcsOperation::Unstage, &file)
+                .expect("git unstage")
+                .contains("完成")
+        );
         assert!(
             run_vcs_operation(VcsTool::Git, VcsOperation::Revert, &file)
                 .expect("git revert")
                 .contains("完成")
         );
         assert_eq!(std::fs::read(&file).expect("read note"), b"before");
+
+        let untracked = root.join("junk.tmp");
+        std::fs::write(&untracked, b"junk").expect("write untracked file");
+        run_vcs_operation(VcsTool::Git, VcsOperation::Clean, &untracked).expect("git clean");
+        assert!(!untracked.exists());
         std::fs::remove_dir_all(root).expect("clean git operations root");
     }
 
@@ -725,6 +797,11 @@ mod tests {
         assert!(
             run_vcs_operation(VcsTool::Svn, VcsOperation::Revert, &new_file)
                 .expect("svn revert")
+                .contains("完成")
+        );
+        assert!(
+            run_vcs_operation(VcsTool::Svn, VcsOperation::Cleanup, &working_copy)
+                .expect("svn cleanup")
                 .contains("完成")
         );
         std::fs::remove_dir_all(base).expect("clean svn test base");
