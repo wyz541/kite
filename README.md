@@ -184,6 +184,8 @@ WPD/MTP 文件浏览尚未支持。
 
 - 读取失败时保留原文件夹内容。
 - 不可读取的项目会计入跳过数量。单个坏项目不终止文件夹读取。
+- 隐藏的系统联接点不会显示为普通文件夹。
+- 受保护文件夹显示明确权限提示，不显示原始 Windows 错误码。
 - 复制冲突自动生成“ - 副本”名称。复制操作不覆盖已有项目。
 - 文件夹不能复制到自身内部。
 - 删除操作使用 Windows 回收站。
@@ -247,7 +249,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.3-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.4-windows-x64.zip`。
 
 ### 测试
 
