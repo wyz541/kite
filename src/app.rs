@@ -14,7 +14,7 @@ use crate::fs::{
     rename_entry, search_directory, transfer_entry, validate_name,
 };
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_badge};
-use crate::vcs::{apply_statuses, load_vcs_snapshot};
+use crate::vcs::{VcsOperation, VcsTool, apply_statuses, load_vcs_snapshot, run_vcs_operation};
 use devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -62,6 +62,8 @@ enum ModalKind {
     NewFolder,
     Rename(PathBuf),
     GoToFolder,
+    GitCommit(PathBuf),
+    SvnCommit(PathBuf),
 }
 
 struct ModalState {
@@ -105,6 +107,8 @@ struct ColumnPane {
     selected_path: Option<PathBuf>,
     loading: bool,
     skipped: usize,
+    git_available: bool,
+    svn_available: bool,
 }
 
 pub struct KiteApp {
@@ -677,6 +681,8 @@ impl KiteApp {
                 selected_path: None,
                 loading: true,
                 skipped: 0,
+                git_available: false,
+                svn_available: false,
             })
             .collect();
         self.column_selected_path = None;
@@ -694,6 +700,8 @@ impl KiteApp {
                             .map(|snapshot| (snapshot.entries, snapshot.skipped))
                             .unwrap_or_default();
                         let snapshot = load_vcs_snapshot(&path);
+                        let git_available = snapshot.git_available();
+                        let svn_available = snapshot.svn_available();
                         apply_statuses(&mut entries, &path, &snapshot);
                         panes.push(ColumnPane {
                             path,
@@ -701,6 +709,8 @@ impl KiteApp {
                             selected_path: None,
                             loading: false,
                             skipped,
+                            git_available,
+                            svn_available,
                         });
                     }
                     panes
@@ -979,7 +989,161 @@ impl KiteApp {
             RowContextCommand::Cut => self.set_clipboard_entry(entry, ClipboardMode::Cut, cx),
             RowContextCommand::Rename => self.begin_rename_entry(entry, window, cx),
             RowContextCommand::Recycle => self.confirm_recycle_entry(entry, window, cx),
+            RowContextCommand::Vcs(command) => {
+                self.run_vcs_command(command, entry.path, window, cx)
+            }
         }
+    }
+
+    fn on_vcs_menu_action(
+        &mut self,
+        action: &VcsMenuAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(entry) = self.selected_entry(cx) else {
+            self.error = Some("请先选择一个项目".into());
+            cx.notify();
+            return;
+        };
+        self.run_vcs_command(action.command, entry.path, window, cx);
+    }
+
+    fn run_vcs_command(
+        &mut self,
+        command: VcsMenuCommand,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match command {
+            VcsMenuCommand::GitAdd => {
+                self.run_vcs_task(VcsTool::Git, VcsOperation::Add, path, window, cx)
+            }
+            VcsMenuCommand::GitCommit => self.begin_vcs_commit(VcsTool::Git, path, window, cx),
+            VcsMenuCommand::GitRevert => self.confirm_vcs_revert(VcsTool::Git, path, window, cx),
+            VcsMenuCommand::SvnUpdate => {
+                self.run_vcs_task(VcsTool::Svn, VcsOperation::Update, path, window, cx)
+            }
+            VcsMenuCommand::SvnAdd => {
+                self.run_vcs_task(VcsTool::Svn, VcsOperation::Add, path, window, cx)
+            }
+            VcsMenuCommand::SvnCommit => self.begin_vcs_commit(VcsTool::Svn, path, window, cx),
+            VcsMenuCommand::SvnRevert => self.confirm_vcs_revert(VcsTool::Svn, path, window, cx),
+        }
+    }
+
+    fn run_vcs_task(
+        &mut self,
+        tool: VcsTool,
+        operation: VcsOperation,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = match &operation {
+            VcsOperation::Add => format!("正在{}添加…", tool.label()),
+            VcsOperation::Commit(_) => format!("正在{}提交…", tool.label()),
+            VcsOperation::Revert => format!("正在{}还原…", tool.label()),
+            VcsOperation::Update => format!("正在{}更新…", tool.label()),
+        };
+        self.error = None;
+        self.notice = Some(pending.into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { run_vcs_operation(tool, operation, &path) })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(message) => {
+                    this.notice = Some(message.into());
+                    this.refresh(window, cx);
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn begin_vcs_commit(
+        &mut self,
+        tool: VcsTool,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("提交说明")
+                .clean_on_escape()
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this: &mut Self, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.submit_modal(window, cx);
+                }
+            },
+        );
+        let kind = match tool {
+            VcsTool::Git => ModalKind::GitCommit(path),
+            VcsTool::Svn => ModalKind::SvnCommit(path),
+        };
+        self.modal = Some(ModalState {
+            kind,
+            input: input.clone(),
+            _subscription: subscription,
+        });
+        input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn confirm_vcs_revert(
+        &mut self,
+        tool: VcsTool,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path_text(&path));
+        let message = format!("还原“{name}”？{} 将丢弃未提交更改。", tool.label());
+        let detail = path_text(&path);
+        let answers = [PromptButton::ok("还原"), PromptButton::cancel("取消")];
+        let answer = window.prompt(PromptLevel::Warning, &message, Some(&detail), &answers, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(choice) = answer.await else {
+                return;
+            };
+            if choice != 0 {
+                return;
+            }
+            let result = cx
+                .background_spawn(
+                    async move { run_vcs_operation(tool, VcsOperation::Revert, &path) },
+                )
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(message) => {
+                    this.notice = Some(message.into());
+                    this.refresh(window, cx);
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn sync_clipboard_state(&mut self, cx: &mut Context<Self>) {
@@ -1215,9 +1379,14 @@ impl KiteApp {
         };
         let value = modal.input.read(cx).value().trim().to_string();
         let kind = modal.kind.clone();
-        if !matches!(&kind, ModalKind::GoToFolder)
-            && let Err(error) = validate_name(&value)
-        {
+        let validation = match &kind {
+            ModalKind::NewFolder | ModalKind::Rename(_) => validate_name(&value),
+            ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) if value.is_empty() => {
+                Err("请输入提交说明".to_string())
+            }
+            ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) | ModalKind::GoToFolder => Ok(()),
+        };
+        if let Err(error) = validation {
             self.error = Some(error.into());
             cx.notify();
             return;
@@ -1275,6 +1444,14 @@ impl KiteApp {
                     cx.notify();
                 }
             },
+            ModalKind::GitCommit(path) => {
+                self.modal = None;
+                self.run_vcs_task(VcsTool::Git, VcsOperation::Commit(value), path, window, cx);
+            }
+            ModalKind::SvnCommit(path) => {
+                self.modal = None;
+                self.run_vcs_task(VcsTool::Svn, VcsOperation::Commit(value), path, window, cx);
+            }
         }
     }
 
@@ -1705,6 +1882,8 @@ impl KiteApp {
         let entries = pane.entries.clone();
         let selected_path = pane.selected_path.clone();
         let can_paste = self.clipboard.borrow().is_some();
+        let git_available = pane.git_available;
+        let svn_available = pane.svn_available;
         let accent = cx.theme().accent;
         let hover = cx.theme().muted;
         let muted = cx.theme().muted_foreground;
@@ -1717,6 +1896,8 @@ impl KiteApp {
                 .as_ref()
                 .is_some_and(|path| same_path(path, &entry.path));
             let menu_entry = entry.clone();
+            let row_git_available = git_available || entry.git_status.is_some();
+            let row_svn_available = svn_available || entry.svn_status.is_some();
             let row = h_flex()
                 .id(("column-row", column * 100_000 + row_ix))
                 .h(px(30.))
@@ -1761,7 +1942,13 @@ impl KiteApp {
                     }),
                 )
                 .context_menu(move |menu, _, _| {
-                    build_column_context_menu(menu, &menu_entry, can_paste)
+                    build_column_context_menu(
+                        menu,
+                        &menu_entry,
+                        can_paste,
+                        row_git_available,
+                        row_svn_available,
+                    )
                 })
                 .into_any_element();
             rows.push(row);
@@ -1788,6 +1975,16 @@ impl KiteApp {
                 "前往文件夹",
                 "输入路径。~ 表示个人文件夹。/ 表示当前磁盘根目录。",
                 "前往",
+            ),
+            ModalKind::GitCommit(_) => (
+                "Git 提交",
+                "输入提交说明。Git 将提交所选路径的已暂存更改。",
+                "提交",
+            ),
+            ModalKind::SvnCommit(_) => (
+                "SVN 提交",
+                "输入提交说明。SVN 将提交所选路径的本地更改。",
+                "提交",
             ),
         };
         let input = Input::new(&modal.input)
@@ -2000,13 +2197,20 @@ fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, St
     }
 }
 
-fn build_column_context_menu(menu: PopupMenu, entry: &FileEntry, can_paste: bool) -> PopupMenu {
+fn build_column_context_menu(
+    menu: PopupMenu,
+    entry: &FileEntry,
+    can_paste: bool,
+    git_available: bool,
+    svn_available: bool,
+) -> PopupMenu {
     let open_label = if entry.is_dir() {
         "打开文件夹"
     } else {
         "打开文件"
     };
-    menu.label(entry.name.clone())
+    let mut menu = menu
+        .label(entry.name.clone())
         .separator()
         .menu_with_icon_and_disabled(
             open_label,
@@ -2036,9 +2240,80 @@ fn build_column_context_menu(menu: PopupMenu, entry: &FileEntry, can_paste: bool
             IconName::Trash,
             Box::new(RecycleSelection),
             false,
-        )
-        .separator()
-        .menu_with_icon_and_disabled("刷新", IconName::RotateCw, Box::new(RefreshFolder), false)
+        );
+
+    if git_available {
+        menu = menu
+            .separator()
+            .menu_with_icon_and_disabled(
+                "Git 添加",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitAdd,
+                }),
+                false,
+            )
+            .menu_with_icon_and_disabled(
+                "Git 提交…",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitCommit,
+                }),
+                false,
+            )
+            .menu_with_icon_and_disabled(
+                "Git 还原…",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitRevert,
+                }),
+                false,
+            );
+    }
+
+    if svn_available {
+        menu = menu
+            .separator()
+            .menu_with_icon_and_disabled(
+                "SVN 更新",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnUpdate,
+                }),
+                false,
+            )
+            .menu_with_icon_and_disabled(
+                "SVN 添加",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnAdd,
+                }),
+                false,
+            )
+            .menu_with_icon_and_disabled(
+                "SVN 提交…",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnCommit,
+                }),
+                false,
+            )
+            .menu_with_icon_and_disabled(
+                "SVN 还原…",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnRevert,
+                }),
+                false,
+            );
+    }
+
+    menu.separator().menu_with_icon_and_disabled(
+        "刷新",
+        IconName::RotateCw,
+        Box::new(RefreshFolder),
+        false,
+    )
 }
 
 fn path_segments(path: &Path, final_is_file: bool) -> Vec<PathSegment> {
@@ -2227,6 +2502,7 @@ impl Render for KiteApp {
                 cx.listener(|this, _: &OpenSelection, window, cx| this.open_selected(window, cx)),
             )
             .on_action(cx.listener(Self::on_row_context_action))
+            .on_action(cx.listener(Self::on_vcs_menu_action))
             .on_action(cx.listener(Self::show_list_view))
             .on_action(cx.listener(Self::show_columns_view))
             .on_action(cx.listener(Self::toggle_path_bar))
@@ -2562,6 +2838,8 @@ mod path_bar_tests {
             selected_path: None,
             loading,
             skipped: 0,
+            git_available: false,
+            svn_available: false,
         }
     }
 

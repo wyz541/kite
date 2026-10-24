@@ -14,6 +14,8 @@ pub struct FileTableDelegate {
     sort: SortSpec,
     loading: bool,
     can_paste: bool,
+    git_available: bool,
+    svn_available: bool,
     active_query: Option<String>,
 }
 
@@ -24,6 +26,8 @@ impl FileTableDelegate {
             sort,
             loading: false,
             can_paste: false,
+            git_available: false,
+            svn_available: false,
             active_query: None,
         }
     }
@@ -40,6 +44,8 @@ impl FileTableDelegate {
         self.entries = entries;
         self.active_query = query;
         self.loading = false;
+        self.git_available = false;
+        self.svn_available = false;
         sort_entries(&mut self.entries, self.sort);
     }
 
@@ -52,6 +58,8 @@ impl FileTableDelegate {
     }
 
     pub fn apply_vcs_statuses(&mut self, view_root: &std::path::Path, snapshot: &VcsSnapshot) {
+        self.git_available = snapshot.git_available();
+        self.svn_available = snapshot.svn_available();
         apply_statuses(&mut self.entries, view_root, snapshot);
         sort_entries(&mut self.entries, self.sort);
     }
@@ -150,7 +158,8 @@ impl TableDelegate for FileTableDelegate {
         let disabled = self.loading;
         let can_paste = self.can_paste && !disabled;
 
-        menu.label(title)
+        let mut menu = menu
+            .label(title)
             .separator()
             .menu_with_icon_and_disabled(
                 open_label,
@@ -210,9 +219,87 @@ impl TableDelegate for FileTableDelegate {
                     command: RowContextCommand::Recycle,
                 }),
                 disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled("刷新", IconName::RotateCw, Box::new(RefreshFolder), false)
+            );
+
+        if self.git_available {
+            menu = menu
+                .separator()
+                .menu_with_icon_and_disabled(
+                    "Git 添加",
+                    IconName::GitBranch,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::GitAdd),
+                    }),
+                    disabled,
+                )
+                .menu_with_icon_and_disabled(
+                    "Git 提交…",
+                    IconName::GitBranch,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::GitCommit),
+                    }),
+                    disabled,
+                )
+                .menu_with_icon_and_disabled(
+                    "Git 还原…",
+                    IconName::GitBranch,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::GitRevert),
+                    }),
+                    disabled,
+                );
+        }
+
+        if self.svn_available {
+            menu = menu
+                .separator()
+                .menu_with_icon_and_disabled(
+                    "SVN 更新",
+                    IconName::Boxes,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnUpdate),
+                    }),
+                    disabled,
+                )
+                .menu_with_icon_and_disabled(
+                    "SVN 添加",
+                    IconName::Boxes,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnAdd),
+                    }),
+                    disabled,
+                )
+                .menu_with_icon_and_disabled(
+                    "SVN 提交…",
+                    IconName::Boxes,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnCommit),
+                    }),
+                    disabled,
+                )
+                .menu_with_icon_and_disabled(
+                    "SVN 还原…",
+                    IconName::Boxes,
+                    Box::new(RowContextAction {
+                        row: row_ix,
+                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnRevert),
+                    }),
+                    disabled,
+                );
+        }
+
+        menu.separator().menu_with_icon_and_disabled(
+            "刷新",
+            IconName::RotateCw,
+            Box::new(RefreshFolder),
+            false,
+        )
     }
 
     fn render_td(

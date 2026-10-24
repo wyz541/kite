@@ -30,6 +30,10 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 ![Kite context menu](docs/screenshots/context-menu.png)
 
+### Git and SVN context menu
+
+![Kite Git and SVN context menu](docs/screenshots/vcs-context-menu.png)
+
 ## 当前能力
 
 - 浏览本机文件夹。
@@ -48,6 +52,7 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 - 新建文件夹、重命名和移到回收站。
 - 复制、剪切和粘贴文件或文件夹。
 - 右键文件行打开操作菜单。
+- 在右键菜单中执行 Git 和 SVN 操作。
 - 显示 Git 和 SVN 状态徽标。
 - 在浅色主题和深色主题之间切换。
 - 过滤 Windows 隐藏属性和系统属性的项目。
@@ -66,6 +71,9 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 - 重命名
 - 移到回收站
 - 刷新
+
+在 Git 工作区中，菜单增加 Git 添加、Git 提交和 Git 还原。
+在 SVN 工作副本中，菜单增加 SVN 更新、SVN 添加、SVN 提交和 SVN 还原。
 
 菜单显示对应快捷键。
 
@@ -90,6 +98,19 @@ Kite 在“版本控制”列显示 Git 和 SVN 状态。Git 使用分支图标�
 状态查询在后台任务中执行。命令不可用或目录不属于工作副本时，状态列保持空白。
 
 Kite 需要 `git` 和 `svn` 在 `PATH` 中。缺少对应命令时，Kite 不显示对应状态。
+
+### Git 与 SVN 操作
+
+Kite 只在 Git 工作区显示 Git 操作。Kite 只在 SVN 工作副本显示 SVN 操作。
+
+Git 操作支持添加、提交和还原。
+Git 提交使用所选路径的已暂存更改。
+
+SVN 操作支持更新、添加、提交和还原。
+SVN 提交提交所选路径的本地更改。
+
+提交操作要求输入提交说明。还原操作要求确认。
+命令在后台任务中执行。旧文件状态不会阻塞界面。
 
 ## 分栏视图与路径栏
 
@@ -221,6 +242,7 @@ py .\assets\generate_icon.py
 - 当前版本没有自定义列布局。
 - Git/SVN 状态只覆盖当前视图和当前视图的子项目。
 - WPD/MTP 便携设备当前不支持文件浏览。
+- Git 和 SVN 认证使用本机凭据缓存，不显示交互式登录窗口。
 
 ## 构建
 
@@ -249,7 +271,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.4-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.0-windows-x64.zip`。
 
 ### 测试
 
