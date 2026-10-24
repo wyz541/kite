@@ -109,6 +109,9 @@ Git 提交使用所选路径的已暂存更改。
 SVN 操作支持更新、添加、提交和还原。
 SVN 提交提交所选路径的本地更改。
 
+Git 和 SVN 操作位于右键菜单的二级菜单。
+一级菜单只显示 Git 或 SVN 入口。指向入口后展开操作项。
+
 提交操作要求输入提交说明。还原操作要求确认。
 命令在后台任务中执行。旧文件状态不会阻塞界面。
 
@@ -271,7 +274,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.0-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.1-windows-x64.zip`。
 
 ### 测试
 
