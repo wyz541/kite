@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -69,15 +71,25 @@ enum ClipboardMode {
 }
 
 #[derive(Clone)]
-struct FileClipboard {
+pub(crate) struct FileClipboard {
     path: PathBuf,
     mode: ClipboardMode,
 }
+
+pub(crate) type SharedClipboard = Rc<RefCell<Option<FileClipboard>>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ViewMode {
     Columns,
     List,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TabRequest {
+    New,
+    Close,
+    Next,
+    Previous,
 }
 
 #[derive(Clone)]
@@ -105,7 +117,7 @@ pub struct KiteApp {
     error: Option<SharedString>,
     notice: Option<SharedString>,
     modal: Option<ModalState>,
-    clipboard: Option<FileClipboard>,
+    clipboard: SharedClipboard,
     load_generation: u64,
     search_generation: u64,
     vcs_generation: u64,
@@ -127,14 +139,22 @@ pub struct KiteApp {
 }
 
 impl KiteApp {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let home = std::env::args_os()
+    pub(crate) fn default_directory() -> PathBuf {
+        std::env::args_os()
             .nth(1)
             .map(PathBuf::from)
             .filter(|path| path.is_dir())
             .or_else(dirs::home_dir)
             .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("C:\\"));
+            .unwrap_or_else(|| PathBuf::from("C:\\"))
+    }
+
+    pub(crate) fn new_at(
+        home: PathBuf,
+        clipboard: SharedClipboard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let quick_links = build_quick_links();
         let drives = build_drives();
         let address_input = cx.new(|cx| {
@@ -198,7 +218,7 @@ impl KiteApp {
             error: None,
             notice: None,
             modal: None,
-            clipboard: None,
+            clipboard,
             load_generation: 0,
             search_generation: 0,
             vcs_generation: 0,
@@ -226,6 +246,14 @@ impl KiteApp {
         app
     }
 
+    pub(crate) fn current_dir(&self) -> &Path {
+        &self.current_dir
+    }
+
+    fn request_tab(&mut self, request: TabRequest, cx: &mut Context<Self>) {
+        cx.emit(request);
+    }
+
     pub fn bind_keys(cx: &mut App) {
         cx.bind_keys([
             KeyBinding::new("alt-left", NavigateBack, Some("Kite")),
@@ -236,6 +264,10 @@ impl KiteApp {
             KeyBinding::new("secondary-f", FocusSearch, Some("Kite")),
             KeyBinding::new("secondary-1", ShowListView, Some("Kite")),
             KeyBinding::new("secondary-2", ShowColumnsView, Some("Kite")),
+            KeyBinding::new("secondary-t", NewTab, Some("Kite")),
+            KeyBinding::new("secondary-w", CloseTab, Some("Kite")),
+            KeyBinding::new("secondary-tab", NextTab, Some("Kite")),
+            KeyBinding::new("secondary-shift-tab", PreviousTab, Some("Kite")),
             KeyBinding::new("alt-p", TogglePathBar, Some("Kite")),
             KeyBinding::new("secondary-shift-g", GoToFolder, Some("Kite")),
             KeyBinding::new("secondary-shift-n", CreateFolder, Some("Kite")),
@@ -250,6 +282,13 @@ impl KiteApp {
     }
     pub fn install_menus(cx: &mut App) {
         cx.set_menus([
+            Menu::new("文件").items([
+                MenuItem::action("新建页签", NewTab),
+                MenuItem::action("关闭页签", CloseTab),
+                MenuItem::separator(),
+                MenuItem::action("下一个页签", NextTab),
+                MenuItem::action("上一个页签", PreviousTab),
+            ]),
             Menu::new("前往").items([
                 MenuItem::action("上层文件夹", NavigateUp),
                 MenuItem::separator(),
@@ -317,8 +356,6 @@ impl KiteApp {
                         this.search_input.update(cx, |input, cx| {
                             input.set_value("", window, cx);
                         });
-                        let title = format!("Kite — {}", snapshot.path.display());
-                        window.set_window_title(&title);
                         this.table.update(cx, |state, cx| {
                             state.delegate_mut().replace_entries(snapshot.entries, None);
                             state.clear_selection(cx);
@@ -819,8 +856,8 @@ impl KiteApp {
         }
     }
 
-    fn sync_clipboard_state(&mut self, cx: &mut Context<Self>) {
-        let can_paste = self.clipboard.is_some();
+    pub(crate) fn sync_clipboard_state(&mut self, cx: &mut Context<Self>) {
+        let can_paste = self.clipboard.borrow().is_some();
         self.table.update(cx, |state, cx| {
             state.delegate_mut().set_can_paste(can_paste);
             cx.notify();
@@ -883,7 +920,7 @@ impl KiteApp {
         mode: ClipboardMode,
         cx: &mut Context<Self>,
     ) {
-        self.clipboard = Some(FileClipboard {
+        *self.clipboard.borrow_mut() = Some(FileClipboard {
             path: entry.path,
             mode,
         });
@@ -910,7 +947,7 @@ impl KiteApp {
     }
 
     fn paste_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(clipboard) = self.clipboard.clone() else {
+        let Some(clipboard) = self.clipboard.borrow().clone() else {
             return;
         };
         let source = clipboard.path;
@@ -931,7 +968,7 @@ impl KiteApp {
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(_) => {
                     if move_source {
-                        this.clipboard = None;
+                        *this.clipboard.borrow_mut() = None;
                         this.sync_clipboard_state(cx);
                     }
                     this.notice = Some(if move_source {
@@ -1442,7 +1479,7 @@ impl KiteApp {
         };
         let entries = pane.entries.clone();
         let selected_path = pane.selected_path.clone();
-        let can_paste = self.clipboard.is_some();
+        let can_paste = self.clipboard.borrow().is_some();
         let accent = cx.theme().accent;
         let hover = cx.theme().muted;
         let muted = cx.theme().muted_foreground;
@@ -1777,6 +1814,8 @@ impl Focusable for KiteApp {
     }
 }
 
+impl EventEmitter<TabRequest> for KiteApp {}
+
 impl Render for KiteApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_dark = cx.theme().mode.is_dark();
@@ -1785,7 +1824,7 @@ impl Render for KiteApp {
         let can_up = self.current_dir.parent().is_some();
         let selected = self.selected_entry(cx);
         let selected_exists = selected.is_some();
-        let has_clipboard = self.clipboard.is_some();
+        let has_clipboard = self.clipboard.borrow().is_some();
         let column_mode = self.view_mode == ViewMode::Columns && self.active_search.is_none();
         let item_count = if column_mode {
             self.column_panes
@@ -1961,6 +2000,16 @@ impl Render for KiteApp {
             }))
             .on_action(cx.listener(|this, _: &ClearSearchOverlay, window, cx| {
                 this.clear_search_or_modal(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NewTab, _, cx| this.request_tab(TabRequest::New, cx)))
+            .on_action(
+                cx.listener(|this, _: &CloseTab, _, cx| this.request_tab(TabRequest::Close, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &NextTab, _, cx| this.request_tab(TabRequest::Next, cx)),
+            )
+            .on_action(cx.listener(|this, _: &PreviousTab, _, cx| {
+                this.request_tab(TabRequest::Previous, cx)
             }))
             .child(
                 h_flex()
@@ -2214,5 +2263,28 @@ impl Render for KiteApp {
                     .child(div().max_w(px(520.)).truncate().child(footer_right)),
             )
             .child(self.render_modal(cx))
+    }
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::{ClipboardMode, FileClipboard, SharedClipboard};
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    #[test]
+    fn shared_clipboard_changes_are_visible_to_every_handle() {
+        let source: SharedClipboard = Rc::new(RefCell::new(None));
+        let destination = source.clone();
+
+        *source.borrow_mut() = Some(FileClipboard {
+            path: PathBuf::from(r"C:\example.txt"),
+            mode: ClipboardMode::Copy,
+        });
+
+        assert!(destination.borrow().is_some());
+        *destination.borrow_mut() = None;
+        assert!(source.borrow().is_none());
     }
 }

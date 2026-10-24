@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSCommandPath
 $dist = Join-Path $root 'dist'
 $binary = Join-Path $root 'target\release\kite-explorer.exe'
-$version = '0.1.0'
+$version = '0.2.0'
 $releaseName = "Kite-v$version-windows-x64"
 $staging = Join-Path $dist $releaseName
 $archive = Join-Path $dist "$releaseName.zip"
@@ -44,7 +44,17 @@ try {
     }
     Compress-Archive -Path (Join-Path $resolvedStaging '*') -DestinationPath $archive -CompressionLevel Optimal
 
-    Write-Output (Join-Path $dist 'Kite.exe')
+    $distBinary = Join-Path $dist 'Kite.exe'
+    Copy-Item -LiteralPath $binary -Destination $distBinary -Force
+
+    $exeHash = (Get-FileHash -LiteralPath $distBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+    $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath (Join-Path $dist 'SHA256SUMS.txt') -Encoding ascii -Value @(
+        "$exeHash  Kite.exe"
+        "$archiveHash  $releaseName.zip"
+    )
+
+    Write-Output $distBinary
     Write-Output $archive
 }
 finally {
