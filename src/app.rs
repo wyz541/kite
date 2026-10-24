@@ -1564,12 +1564,31 @@ impl KiteApp {
             .overflow_x_scroll()
             .track_scroll(&scroll_handle);
         if self.column_panes.is_empty() {
+            if let Some(error) = self.error.clone() {
+                return v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .px_8()
+                    .child(
+                        div()
+                            .max_w(px(560.))
+                            .text_sm()
+                            .text_color(cx.theme().danger)
+                            .child(error),
+                    )
+                    .into_any_element();
+            }
             return strip
                 .items_center()
                 .justify_center()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("正在读取分栏…")
+                .child(if self.loading {
+                    "正在读取分栏…"
+                } else {
+                    "文件夹不可用"
+                })
                 .into_any_element();
         }
         for index in 0..self.column_panes.len() {

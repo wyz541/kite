@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fs::{self, Metadata};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::SystemTime;
@@ -171,8 +172,14 @@ pub struct SearchSnapshot {
 }
 
 pub fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
-    let path = dunce::canonicalize(path).map_err(|error| format!("无法打开文件夹：{error}"))?;
-    let reader = fs::read_dir(&path).map_err(|error| format!("无法读取文件夹：{error}"))?;
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("无法确定当前文件夹：{error}"))?
+            .join(path)
+    };
+    let reader = fs::read_dir(&path).map_err(|error| folder_error("读取", &error))?;
     let mut entries = Vec::new();
     let mut skipped = 0usize;
 
@@ -190,18 +197,23 @@ pub fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, 
                 continue;
             }
         };
+        let link_metadata = fs::symlink_metadata(&entry_path);
+        let Ok(link_metadata) = link_metadata else {
+            skipped += 1;
+            continue;
+        };
+        if is_hidden(&link_metadata, &name) {
+            continue;
+        }
         let metadata = if file_type.is_symlink() {
             fs::metadata(&entry_path)
         } else {
-            item.metadata()
+            Ok(link_metadata)
         };
         let Ok(metadata) = metadata else {
             skipped += 1;
             continue;
         };
-        if is_hidden(&metadata, &name) {
-            continue;
-        }
         entries.push(file_entry_from_metadata(entry_path, name, &metadata));
     }
 
@@ -211,6 +223,15 @@ pub fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, 
         entries,
         skipped,
     })
+}
+
+fn folder_error(action: &str, error: &io::Error) -> String {
+    let reason = match error.kind() {
+        io::ErrorKind::PermissionDenied => "拒绝访问。此文件夹可能受系统保护",
+        io::ErrorKind::NotFound => "路径不存在",
+        _ => return format!("无法{action}文件夹：{error}"),
+    };
+    format!("无法{action}文件夹：{reason}。")
 }
 
 pub fn search_directory(
@@ -736,5 +757,15 @@ mod transfer_tests {
         let result = transfer_entry(&source, &destination, false);
         assert!(result.is_err());
         fs::remove_dir_all(root).expect("clean test root");
+    }
+
+    #[test]
+    fn explains_permission_denied_without_raw_windows_error() {
+        let error = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let message = super::folder_error("打开", &error);
+
+        assert!(message.contains("拒绝访问"));
+        assert!(message.contains("系统保护"));
+        assert!(!message.contains("os error 5"));
     }
 }
