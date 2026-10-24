@@ -1,0 +1,7 @@
+/target
+/dist
+/.cargo/
+cargo-check.log
+*.png
+!assets/kite-icon-master.png
+!docs/screenshots/*.png
