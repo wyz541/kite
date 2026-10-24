@@ -4,14 +4,18 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+mod devices;
 
 use crate::actions::*;
 use crate::fs::{
-    FileEntry, SortSpec, create_folder, load_directory, open_file, recycle_entry, rename_entry,
-    search_directory, transfer_entry, validate_name,
+    FileEntry, SortSpec, create_folder, format_size, load_directory, open_file, recycle_entry,
+    rename_entry, search_directory, transfer_entry, validate_name,
 };
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_badge};
 use crate::vcs::{apply_statuses, load_vcs_snapshot};
+use devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -44,6 +48,7 @@ struct QuickLink {
     label: SharedString,
     path: PathBuf,
     icon: IconName,
+    detail: Option<SharedString>,
 }
 
 #[derive(Clone)]
@@ -107,7 +112,9 @@ pub struct KiteApp {
     history: Vec<PathBuf>,
     history_index: usize,
     quick_links: Vec<QuickLink>,
+    connected_devices: Vec<QuickLink>,
     drives: Vec<QuickLink>,
+    portable_devices: Vec<PortableDevice>,
     address_input: Entity<InputState>,
     search_input: Entity<InputState>,
     table: Entity<TableState<FileTableDelegate>>,
@@ -137,6 +144,7 @@ pub struct KiteApp {
     path_bar_scroll_pending: bool,
     column_generation: u64,
     _column_task: Task<()>,
+    _device_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -158,7 +166,9 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) -> Self {
         let quick_links = build_quick_links();
-        let drives = build_drives();
+        let snapshot = devices::snapshot();
+        let (connected_devices, drives) = volume_quick_links(&snapshot.volumes);
+        let portable_devices = snapshot.portable_devices;
         let address_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("输入文件夹路径，按 Enter 打开")
@@ -208,7 +218,9 @@ impl KiteApp {
             history: Vec::new(),
             history_index: 0,
             quick_links,
+            connected_devices,
             drives,
+            portable_devices,
             address_input,
             search_input,
             table,
@@ -238,6 +250,7 @@ impl KiteApp {
             path_bar_scroll_pending: false,
             column_generation: 0,
             _column_task: Task::ready(()),
+            _device_task: Task::ready(()),
             _subscriptions: vec![
                 address_subscription,
                 search_subscription,
@@ -245,11 +258,45 @@ impl KiteApp {
             ],
         };
         app.request_load(home, NavigationIntent::Initial, window, cx);
+        app.start_device_watcher(cx);
         app
     }
 
     pub(crate) fn current_dir(&self) -> &Path {
         &self.current_dir
+    }
+
+    fn start_device_watcher(&mut self, cx: &mut Context<Self>) {
+        self._device_task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+                let snapshot = cx.background_spawn(async { devices::snapshot() }).await;
+                if this
+                    .update(cx, |this, cx| this.apply_device_snapshot(snapshot, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
+
+    fn apply_device_snapshot(&mut self, snapshot: DeviceSnapshot, cx: &mut Context<Self>) {
+        let (connected_devices, drives) = volume_quick_links(&snapshot.volumes);
+        let volumes_changed = !same_quick_links(&self.connected_devices, &connected_devices)
+            || !same_quick_links(&self.drives, &drives);
+        let portable_changed = self.portable_devices != snapshot.portable_devices;
+
+        if volumes_changed {
+            self.connected_devices = connected_devices;
+            self.drives = drives;
+        }
+        if portable_changed {
+            self.portable_devices = snapshot.portable_devices;
+        }
+        if volumes_changed || portable_changed {
+            cx.notify();
+        }
     }
 
     fn request_tab(&mut self, request: TabRequest, cx: &mut Context<Self>) {
@@ -1294,6 +1341,7 @@ impl KiteApp {
         label: SharedString,
         icon: IconName,
         path: PathBuf,
+        detail: Option<SharedString>,
         active: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1324,10 +1372,44 @@ impl KiteApp {
                     .size_4()
                     .text_color(if active { active_fg } else { muted }),
             )
-            .child(div().min_w_0().truncate().child(label))
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .when_some(detail, |this, detail| {
+                this.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_xs()
+                        .text_color(if active { active_fg } else { muted })
+                        .child(detail),
+                )
+            })
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.navigate_to(path.clone(), NavigationIntent::Push, window, cx);
             }))
+            .into_any_element()
+    }
+
+    fn portable_device_item(&self, name: SharedString, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        div()
+            .id(SharedString::from(format!("portable-device-{name}")))
+            .h(px(32.))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .rounded_md()
+            .text_sm()
+            .text_color(cx.theme().sidebar_foreground)
+            .child(Icon::new(IconName::Usb).size_4().text_color(muted))
+            .child(div().flex_1().min_w_0().truncate().child(name))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("MTP"),
+            )
             .into_any_element()
     }
 
@@ -1346,8 +1428,40 @@ impl KiteApp {
         );
         for link in self.quick_links.clone() {
             let active = same_path(&link.path, &self.current_dir);
-            content =
-                content.child(self.sidebar_item(link.label, link.icon, link.path, active, cx));
+            content = content.child(self.sidebar_item(
+                link.label,
+                link.icon,
+                link.path,
+                link.detail,
+                active,
+                cx,
+            ));
+        }
+        if !self.connected_devices.is_empty() || !self.portable_devices.is_empty() {
+            content = content.child(
+                div()
+                    .px_2()
+                    .pt_4()
+                    .pb_1()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(section_color)
+                    .child("设备"),
+            );
+            for device in self.connected_devices.clone() {
+                let active = same_path(&device.path, &self.current_dir);
+                content = content.child(self.sidebar_item(
+                    device.label,
+                    device.icon,
+                    device.path,
+                    device.detail,
+                    active,
+                    cx,
+                ));
+            }
+            for device in self.portable_devices.clone() {
+                content = content.child(self.portable_device_item(device.name.into(), cx));
+            }
         }
         content = content.child(
             div()
@@ -1361,8 +1475,14 @@ impl KiteApp {
         );
         for drive in self.drives.clone() {
             let active = same_path(&drive.path, &self.current_dir);
-            content =
-                content.child(self.sidebar_item(drive.label, drive.icon, drive.path, active, cx));
+            content = content.child(self.sidebar_item(
+                drive.label,
+                drive.icon,
+                drive.path,
+                drive.detail,
+                active,
+                cx,
+            ));
         }
 
         v_flex()
@@ -1753,35 +1873,64 @@ fn push_quick_link(links: &mut Vec<QuickLink>, label: &str, path: Option<PathBuf
         label: label.into(),
         path,
         icon,
+        detail: None,
     });
 }
 
-#[cfg(target_os = "windows")]
-fn build_drives() -> Vec<QuickLink> {
-    let mask = unsafe { windows_sys::Win32::Storage::FileSystem::GetLogicalDrives() };
+fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLink>) {
+    let mut connected_devices = Vec::new();
     let mut drives = Vec::new();
-    for index in 0..26 {
-        if mask & (1 << index) == 0 {
-            continue;
+
+    for volume in volumes {
+        let letter = volume.path.to_string_lossy().chars().next().unwrap_or('?');
+        let name = volume
+            .volume_name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                volume
+                    .kind
+                    .is_removable()
+                    .then_some(volume.device_name.as_deref())
+                    .flatten()
+            })
+            .unwrap_or(match volume.kind {
+                VolumeKind::Usb => "USB 设备",
+                VolumeKind::Removable => "可移动磁盘",
+                VolumeKind::Fixed => "本地磁盘",
+                VolumeKind::Optical => "光驱",
+                VolumeKind::Network => "网络驱动器",
+                VolumeKind::Other => "磁盘",
+            });
+        let icon = match volume.kind {
+            VolumeKind::Usb => IconName::Usb,
+            VolumeKind::Optical => IconName::Disc,
+            _ => IconName::HardDrive,
+        };
+        let link = QuickLink {
+            label: format!("{name} ({letter}:)").into(),
+            path: volume.path.clone(),
+            icon,
+            detail: volume
+                .total_bytes
+                .map(|bytes| SharedString::from(format_size(bytes))),
+        };
+
+        if volume.kind.is_removable() {
+            connected_devices.push(link);
+        } else {
+            drives.push(link);
         }
-        let letter = (b'A' + index as u8) as char;
-        let path = PathBuf::from(format!("{letter}:\\"));
-        drives.push(QuickLink {
-            label: format!("{letter}:").into(),
-            path,
-            icon: IconName::HardDrive,
-        });
     }
-    drives
+
+    (connected_devices, drives)
 }
 
-#[cfg(not(target_os = "windows"))]
-fn build_drives() -> Vec<QuickLink> {
-    vec![QuickLink {
-        label: "根目录".into(),
-        path: PathBuf::from("/"),
-        icon: IconName::HardDrive,
-    }]
+fn same_quick_links(left: &[QuickLink], right: &[QuickLink]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.label == right.label && left.path == right.path && left.detail == right.detail
+        })
 }
 
 fn path_text(path: &Path) -> String {

@@ -22,6 +22,10 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 ![Kite horizontal column scrolling](docs/screenshots/column-horizontal-scroll.png)
 
+### Device detection
+
+![Kite device detection](docs/screenshots/device-detection.png)
+
 ### Context menu
 
 ![Kite context menu](docs/screenshots/context-menu.png)
@@ -30,6 +34,7 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 - 浏览本机文件夹。
 - 使用多个页签替换多个窗口。
+- 识别 USB 存储设备、可移动磁盘和 WPD/MTP 便携设备。
 - 使用侧边栏访问主文件夹、桌面、文档、下载、图片和本机驱动器。
 - 使用并排分栏浏览多级文件夹。
 - 使用可点击路径栏返回任意上级文件夹。
@@ -128,6 +133,17 @@ Kite 使用一个窗口承载多个页签。
 页签栏右侧的 `+` 按钮新建页签。
 页签的 `×` 按钮关闭页签。
 
+## 设备识别
+
+Kite 在侧边栏显示已连接的存储设备和便携设备。
+USB 存储设备通过存储总线类型识别。
+可移动磁盘显示卷名称、盘符和总容量。
+设备列表每 2 秒自动刷新。
+
+USB 存储设备可直接浏览。
+WPD/MTP 便携设备当前只支持识别和显示。
+WPD/MTP 文件浏览尚未支持。
+
 ## 快捷键
 
 | 快捷键 | 操作 |
@@ -202,6 +218,7 @@ py .\assets\generate_icon.py
 - 表格空白区域尚未提供右键菜单。
 - 当前版本没有自定义列布局。
 - Git/SVN 状态只覆盖当前视图和当前视图的子项目。
+- WPD/MTP 便携设备当前不支持文件浏览。
 
 ## 构建
 
@@ -230,7 +247,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.2-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.3-windows-x64.zip`。
 
 ### 测试
 
@@ -242,6 +259,7 @@ cargo clippy --all-targets -- -D warnings
 ## 项目结构
 
 - `src/app.rs`：页签内容、导航状态、剪贴板、文件操作和界面。
+- `src/app/devices.rs`：USB 卷、存储设备属性和 WPD 设备枚举。
 - `src/tabs.rs`：窗口页签栏、页签切换和窗口级共享剪贴板。
 - `src/fs.rs`：文件夹读取、搜索、排序、格式化、复制和回收站操作。
 - `src/table.rs`：虚拟文件表格和列定义。
