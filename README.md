@@ -6,6 +6,10 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 ## Screenshots
 
+### Tabbed workspace
+
+![Kite tabbed workspace](docs/screenshots/tabbed-view.png)
+
 ### Column view
 
 ![Kite column view](docs/screenshots/column-view.png)
@@ -21,6 +25,7 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 ## 当前能力
 
 - 浏览本机文件夹。
+- 使用多个页签替换多个窗口。
 - 使用侧边栏访问主文件夹、桌面、文档、下载、图片和本机驱动器。
 - 使用并排分栏浏览多级文件夹。
 - 使用可点击路径栏返回任意上级文件夹。
@@ -101,6 +106,18 @@ Windows 使用 `Alt+P` 切换路径栏。
 `~` 表示个人文件夹。
 `/` 表示当前磁盘根目录。
 
+## 多页签
+
+Kite 使用一个窗口承载多个页签。
+每个页签保留独立的路径、历史、分栏、搜索和视图状态。
+文件剪贴板由同一窗口的全部页签共享。
+
+新建页签打开当前页签的文件夹。
+最后一个页签不能关闭。
+
+页签栏右侧的 `+` 按钮新建页签。
+页签的 `×` 按钮关闭页签。
+
 ## 快捷键
 
 | 快捷键 | 操作 |
@@ -112,6 +129,10 @@ Windows 使用 `Alt+P` 切换路径栏。
 | `Ctrl+F` | 聚焦搜索框 |
 | `Ctrl+1` | 切换到列表视图 |
 | `Ctrl+2` | 切换到分栏视图 |
+| `Ctrl+T` | 新建页签 |
+| `Ctrl+W` | 关闭页签 |
+| `Ctrl+Tab` | 下一个页签 |
+| `Ctrl+Shift+Tab` | 上一个页签 |
 | `Alt+P` | 显示或隐藏路径栏 |
 | `Ctrl+Shift+G` | 前往文件夹 |
 | `Enter` | 打开选中项目 |
@@ -164,7 +185,7 @@ py .\assets\generate_icon.py
 ## 当前限制
 
 - 文件表格当前支持单选。
-- 复制和剪切使用 Kite 内部剪贴板。Kite 当前不与 Windows 资源管理器共享文件剪贴板。
+- 复制和剪切使用 Kite 内部剪贴板。内部剪贴板在同一窗口的页签之间共享。Kite 当前不与 Windows 资源管理器共享文件剪贴板。
 - 复制操作不支持符号链接。
 - 搜索只匹配项目名称。
 - 搜索显示前 1000 个匹配项目。
@@ -199,7 +220,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.1.0-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.0-windows-x64.zip`。
 
 ### 测试
 
@@ -210,12 +231,13 @@ cargo clippy --all-targets -- -D warnings
 
 ## 项目结构
 
-- `src/app.rs`：窗口、导航状态、剪贴板、文件操作和界面。
+- `src/app.rs`：页签内容、导航状态、剪贴板、文件操作和界面。
+- `src/tabs.rs`：窗口页签栏、页签切换和窗口级共享剪贴板。
 - `src/fs.rs`：文件夹读取、搜索、排序、格式化、复制和回收站操作。
 - `src/table.rs`：虚拟文件表格和列定义。
-- src/main.rs：应用入口、主题和窗口创建。
-- uild.rs：Windows 图标和版本资源。
-- ssets/kite.ico：应用图标。
+- `src/main.rs`：应用入口、主题和窗口创建。
+- `build.rs`：Windows 图标和版本资源。
+- `assets/kite.ico`：应用图标。
 
 ## 技术栈
 

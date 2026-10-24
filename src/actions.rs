@@ -21,6 +21,10 @@ actions!(
         ShowListView,
         ShowColumnsView,
         TogglePathBar,
+        NewTab,
+        CloseTab,
+        NextTab,
+        PreviousTab,
     ]
 );
 

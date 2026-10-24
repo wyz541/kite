@@ -5,11 +5,13 @@ mod actions;
 mod app;
 mod fs;
 mod table;
+mod tabs;
 mod vcs;
 
 use app::KiteApp;
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
+use tabs::KiteWindow;
 
 fn main() {
     gpui_kit::application()
@@ -30,7 +32,7 @@ fn main() {
             };
 
             gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| KiteApp::new(window, cx))
+                cx.new(|cx| KiteWindow::new(window, cx))
             })
             .expect("failed to open Kite window");
             cx.activate(true);
