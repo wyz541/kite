@@ -1,4 +1,4 @@
-use gpui_kit::component::menu::PopupMenu;
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::table::{Column, ColumnSort, TableDelegate, TableState};
 use gpui_kit::component::{ActiveTheme as _, Icon, StyledExt as _, h_flex, v_flex};
 use gpui_kit::*;
@@ -143,8 +143,8 @@ impl TableDelegate for FileTableDelegate {
         &mut self,
         row_ix: usize,
         menu: PopupMenu,
-        _: &mut Window,
-        _: &mut Context<TableState<Self>>,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
     ) -> PopupMenu {
         let Some(entry) = self.entries.get(row_ix) else {
             return menu;
@@ -222,10 +222,9 @@ impl TableDelegate for FileTableDelegate {
             );
 
         if self.git_available {
-            menu = menu
-                .separator()
-                .menu_with_icon_and_disabled(
-                    "Git 添加",
+            let submenu = PopupMenu::build(window, cx, move |menu, _, _| {
+                menu.menu_with_icon_and_disabled(
+                    "添加",
                     IconName::GitBranch,
                     Box::new(RowContextAction {
                         row: row_ix,
@@ -234,7 +233,7 @@ impl TableDelegate for FileTableDelegate {
                     disabled,
                 )
                 .menu_with_icon_and_disabled(
-                    "Git 提交…",
+                    "提交…",
                     IconName::GitBranch,
                     Box::new(RowContextAction {
                         row: row_ix,
@@ -243,21 +242,26 @@ impl TableDelegate for FileTableDelegate {
                     disabled,
                 )
                 .menu_with_icon_and_disabled(
-                    "Git 还原…",
+                    "还原…",
                     IconName::GitBranch,
                     Box::new(RowContextAction {
                         row: row_ix,
                         command: RowContextCommand::Vcs(VcsMenuCommand::GitRevert),
                     }),
                     disabled,
-                );
+                )
+            });
+            menu = menu.separator().item(
+                PopupMenuItem::submenu("Git", submenu)
+                    .icon(IconName::GitBranch)
+                    .disabled(disabled),
+            );
         }
 
         if self.svn_available {
-            menu = menu
-                .separator()
-                .menu_with_icon_and_disabled(
-                    "SVN 更新",
+            let submenu = PopupMenu::build(window, cx, move |menu, _, _| {
+                menu.menu_with_icon_and_disabled(
+                    "更新",
                     IconName::Boxes,
                     Box::new(RowContextAction {
                         row: row_ix,
@@ -266,7 +270,7 @@ impl TableDelegate for FileTableDelegate {
                     disabled,
                 )
                 .menu_with_icon_and_disabled(
-                    "SVN 添加",
+                    "添加",
                     IconName::Boxes,
                     Box::new(RowContextAction {
                         row: row_ix,
@@ -275,7 +279,7 @@ impl TableDelegate for FileTableDelegate {
                     disabled,
                 )
                 .menu_with_icon_and_disabled(
-                    "SVN 提交…",
+                    "提交…",
                     IconName::Boxes,
                     Box::new(RowContextAction {
                         row: row_ix,
@@ -284,14 +288,20 @@ impl TableDelegate for FileTableDelegate {
                     disabled,
                 )
                 .menu_with_icon_and_disabled(
-                    "SVN 还原…",
+                    "还原…",
                     IconName::Boxes,
                     Box::new(RowContextAction {
                         row: row_ix,
                         command: RowContextCommand::Vcs(VcsMenuCommand::SvnRevert),
                     }),
                     disabled,
-                );
+                )
+            });
+            menu = menu.separator().item(
+                PopupMenuItem::submenu("SVN", submenu)
+                    .icon(IconName::Boxes)
+                    .disabled(disabled),
+            );
         }
 
         menu.separator().menu_with_icon_and_disabled(

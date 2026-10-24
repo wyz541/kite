@@ -1941,9 +1941,11 @@ impl KiteApp {
                         this.select_column_entry(column, row_ix, cx)
                     }),
                 )
-                .context_menu(move |menu, _, _| {
+                .context_menu(move |menu, window, cx| {
                     build_column_context_menu(
                         menu,
+                        window,
+                        cx,
                         &menu_entry,
                         can_paste,
                         row_git_available,
@@ -2199,6 +2201,8 @@ fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, St
 
 fn build_column_context_menu(
     menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
     entry: &FileEntry,
     can_paste: bool,
     git_available: bool,
@@ -2243,69 +2247,74 @@ fn build_column_context_menu(
         );
 
     if git_available {
-        menu = menu
-            .separator()
-            .menu_with_icon_and_disabled(
-                "Git 添加",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitAdd,
-                }),
-                false,
-            )
-            .menu_with_icon_and_disabled(
-                "Git 提交…",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitCommit,
-                }),
-                false,
-            )
-            .menu_with_icon_and_disabled(
-                "Git 还原…",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitRevert,
-                }),
-                false,
-            );
+        menu = menu.separator().submenu_with_icon(
+            Some(IconName::GitBranch.into()),
+            "Git",
+            window,
+            cx,
+            |menu, _, _| {
+                menu.menu_with_icon(
+                    "添加",
+                    IconName::GitBranch,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::GitAdd,
+                    }),
+                )
+                .menu_with_icon(
+                    "提交…",
+                    IconName::GitBranch,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::GitCommit,
+                    }),
+                )
+                .menu_with_icon(
+                    "还原…",
+                    IconName::GitBranch,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::GitRevert,
+                    }),
+                )
+            },
+        );
     }
 
     if svn_available {
-        menu = menu
-            .separator()
-            .menu_with_icon_and_disabled(
-                "SVN 更新",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnUpdate,
-                }),
-                false,
-            )
-            .menu_with_icon_and_disabled(
-                "SVN 添加",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnAdd,
-                }),
-                false,
-            )
-            .menu_with_icon_and_disabled(
-                "SVN 提交…",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnCommit,
-                }),
-                false,
-            )
-            .menu_with_icon_and_disabled(
-                "SVN 还原…",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnRevert,
-                }),
-                false,
-            );
+        menu = menu.separator().submenu_with_icon(
+            Some(IconName::Boxes.into()),
+            "SVN",
+            window,
+            cx,
+            |menu, _, _| {
+                menu.menu_with_icon(
+                    "更新",
+                    IconName::Boxes,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::SvnUpdate,
+                    }),
+                )
+                .menu_with_icon(
+                    "添加",
+                    IconName::Boxes,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::SvnAdd,
+                    }),
+                )
+                .menu_with_icon(
+                    "提交…",
+                    IconName::Boxes,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::SvnCommit,
+                    }),
+                )
+                .menu_with_icon(
+                    "还原…",
+                    IconName::Boxes,
+                    Box::new(VcsMenuAction {
+                        command: VcsMenuCommand::SvnRevert,
+                    }),
+                )
+            },
+        );
     }
 
     menu.separator().menu_with_icon_and_disabled(
