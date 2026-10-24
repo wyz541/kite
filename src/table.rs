@@ -221,88 +221,162 @@ impl TableDelegate for FileTableDelegate {
                 disabled,
             );
 
-        if self.git_available {
-            let submenu = PopupMenu::build(window, cx, move |menu, _, _| {
-                menu.menu_with_icon_and_disabled(
-                    "添加",
-                    IconName::GitBranch,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::GitAdd),
-                    }),
-                    disabled,
-                )
-                .menu_with_icon_and_disabled(
-                    "提交…",
-                    IconName::GitBranch,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::GitCommit),
-                    }),
-                    disabled,
-                )
-                .menu_with_icon_and_disabled(
-                    "还原…",
-                    IconName::GitBranch,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::GitRevert),
-                    }),
-                    disabled,
-                )
-            });
-            menu = menu.separator().item(
-                PopupMenuItem::submenu("Git", submenu)
-                    .icon(IconName::GitBranch)
-                    .disabled(disabled),
-            );
-        }
+        let git_disabled = disabled || !self.git_available;
+        let git_submenu = PopupMenu::build(window, cx, move |menu, _, _| {
+            menu.menu_with_icon_and_disabled(
+                "添加",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitAdd),
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "取消暂存",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitUnstage),
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "提交…",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitCommit),
+                }),
+                git_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "拉取",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitPull),
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "推送",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitPush),
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "获取",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitFetch),
+                }),
+                git_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "还原…",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitRevert),
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "清理工作区…",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitClean),
+                }),
+                git_disabled,
+            )
+        });
+        menu = menu.separator().item(
+            PopupMenuItem::submenu("Git", git_submenu)
+                .icon(IconName::GitBranch)
+                .disabled(disabled),
+        );
 
-        if self.svn_available {
-            let submenu = PopupMenu::build(window, cx, move |menu, _, _| {
-                menu.menu_with_icon_and_disabled(
-                    "更新",
-                    IconName::Boxes,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnUpdate),
-                    }),
-                    disabled,
-                )
-                .menu_with_icon_and_disabled(
-                    "添加",
-                    IconName::Boxes,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnAdd),
-                    }),
-                    disabled,
-                )
-                .menu_with_icon_and_disabled(
-                    "提交…",
-                    IconName::Boxes,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnCommit),
-                    }),
-                    disabled,
-                )
-                .menu_with_icon_and_disabled(
-                    "还原…",
-                    IconName::Boxes,
-                    Box::new(RowContextAction {
-                        row: row_ix,
-                        command: RowContextCommand::Vcs(VcsMenuCommand::SvnRevert),
-                    }),
-                    disabled,
-                )
-            });
-            menu = menu.separator().item(
-                PopupMenuItem::submenu("SVN", submenu)
-                    .icon(IconName::Boxes)
-                    .disabled(disabled),
-            );
-        }
+        let svn_disabled = disabled || !self.svn_available;
+        let svn_submenu = PopupMenu::build(window, cx, move |menu, _, _| {
+            menu.menu_with_icon_and_disabled(
+                "更新",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnUpdate),
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "添加",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnAdd),
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "提交…",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnCommit),
+                }),
+                svn_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "锁定",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnLock),
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "解锁",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnUnlock),
+                }),
+                svn_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "还原…",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnRevert),
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "清理工作副本",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnCleanup),
+                }),
+                svn_disabled,
+            )
+        });
+        menu = menu.separator().item(
+            PopupMenuItem::submenu("SVN", svn_submenu)
+                .icon(IconName::Boxes)
+                .disabled(disabled),
+        );
 
         menu.separator().menu_with_icon_and_disabled(
             "刷新",

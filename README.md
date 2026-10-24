@@ -30,10 +30,6 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 ![Kite context menu](docs/screenshots/context-menu.png)
 
-### Git and SVN context menu
-
-![Kite Git and SVN context menu](docs/screenshots/vcs-context-menu.png)
-
 ## 当前能力
 
 - 浏览本机文件夹。
@@ -103,14 +99,14 @@ Kite 需要 `git` 和 `svn` 在 `PATH` 中。缺少对应命令时，Kite 不显
 
 Kite 只在 Git 工作区显示 Git 操作。Kite 只在 SVN 工作副本显示 SVN 操作。
 
-Git 操作支持添加、提交和还原。
+Git 和 SVN 始终显示在右键菜单的一级菜单中。
+子菜单在非对应工作区中保持可见，操作项显示为禁用。
+
+Git 子菜单支持添加、取消暂存、提交、拉取、推送、获取、还原和清理工作区。
 Git 提交使用所选路径的已暂存更改。
 
-SVN 操作支持更新、添加、提交和还原。
+SVN 子菜单支持更新、添加、提交、锁定、解锁、还原和清理工作副本。
 SVN 提交提交所选路径的本地更改。
-
-Git 和 SVN 操作位于右键菜单的二级菜单。
-一级菜单只显示 Git 或 SVN 入口。指向入口后展开操作项。
 
 提交操作要求输入提交说明。还原操作要求确认。
 命令在后台任务中执行。旧文件状态不会阻塞界面。
@@ -274,7 +270,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.1-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.2-windows-x64.zip`。
 
 ### 测试
 

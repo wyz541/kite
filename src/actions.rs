@@ -48,12 +48,20 @@ pub struct RowContextAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VcsMenuCommand {
     GitAdd,
+    GitUnstage,
     GitCommit,
+    GitPull,
+    GitPush,
+    GitFetch,
     GitRevert,
+    GitClean,
     SvnUpdate,
     SvnAdd,
     SvnCommit,
+    SvnLock,
+    SvnUnlock,
     SvnRevert,
+    SvnCleanup,
 }
 
 #[derive(Clone, Debug, PartialEq, Action)]
