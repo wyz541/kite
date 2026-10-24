@@ -89,6 +89,7 @@ Kite 默认使用分栏视图。每一栏显示一级文件夹的内容。
 
 路径栏显示当前项目的完整路径。
 点击任意文件夹段可返回对应层级。
+点击路径栏时，Kite 复用已加载的上级栏目。未变化的栏目不重新加载。
 
 Windows 使用 `Alt+P` 切换路径栏。
 该快捷键对应 macOS 的 Option 组合键。
@@ -220,7 +221,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.0-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.2.1-windows-x64.zip`。
 
 ### 测试
 

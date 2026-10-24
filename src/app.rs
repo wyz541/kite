@@ -98,6 +98,7 @@ struct ColumnPane {
     entries: Vec<FileEntry>,
     selected_path: Option<PathBuf>,
     loading: bool,
+    skipped: usize,
 }
 
 pub struct KiteApp {
@@ -422,6 +423,81 @@ impl KiteApp {
         self.request_load(path, intent, window, cx);
     }
 
+    fn navigate_from_path_bar(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let loaded_column = if self.view_mode == ViewMode::Columns && self.active_search.is_none() {
+            loaded_column_index(&self.column_panes, &path)
+        } else {
+            None
+        };
+
+        if let Some(column) = loaded_column {
+            self.navigate_to_loaded_column(column, window, cx);
+        } else {
+            self.navigate_to(path, NavigationIntent::Push, window, cx);
+        }
+    }
+
+    fn navigate_to_loaded_column(
+        &mut self,
+        column: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((entries, skipped)) = self
+            .column_panes
+            .get(column)
+            .map(|pane| (pane.entries.clone(), pane.skipped))
+        else {
+            return;
+        };
+        let path = self.column_panes[column].path.clone();
+
+        self.cancel_search();
+        self.invalidate_vcs();
+        self._load_task = Task::ready(());
+        self.load_generation = self.load_generation.wrapping_add(1);
+        self.loading = false;
+        self.error = None;
+        self.notice = None;
+        self.active_search = None;
+        self.search_truncated = false;
+        self.skipped = skipped;
+        self.apply_history(path.clone(), NavigationIntent::Push);
+        self.current_dir = path;
+
+        self.address_input.update(cx, |input, cx| {
+            input.set_value(path_text(&self.current_dir), window, cx);
+        });
+        self.search_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        self.table.update(cx, |state, cx| {
+            state.delegate_mut().set_loading(false);
+            state.delegate_mut().replace_entries(entries, None);
+            state.clear_selection(cx);
+            state.refresh(cx);
+            cx.notify();
+        });
+
+        self.column_panes.truncate(column + 1);
+        for index in 0..self.column_panes.len().saturating_sub(1) {
+            self.column_panes[index].selected_path =
+                Some(self.column_panes[index + 1].path.clone());
+        }
+        if let Some(pane) = self.column_panes.last_mut() {
+            pane.selected_path = None;
+        }
+        self.column_selected_path = None;
+        self.column_scroll_pending = true;
+        self.path_bar_scroll_pending = true;
+        cx.notify();
+    }
+
     fn navigate_from_text(&mut self, value: String, window: &mut Window, cx: &mut Context<Self>) {
         match resolve_location_input(&value, &self.current_dir) {
             Ok(path) => self.navigate_to(path, NavigationIntent::Push, window, cx),
@@ -552,6 +628,7 @@ impl KiteApp {
                 entries: Vec::new(),
                 selected_path: None,
                 loading: true,
+                skipped: 0,
             })
             .collect();
         self.column_selected_path = None;
@@ -565,8 +642,8 @@ impl KiteApp {
                 .background_spawn(async move {
                     let mut panes = Vec::with_capacity(load_paths.len());
                     for path in load_paths {
-                        let mut entries = load_directory(&path, sort)
-                            .map(|snapshot| snapshot.entries)
+                        let (mut entries, skipped) = load_directory(&path, sort)
+                            .map(|snapshot| (snapshot.entries, snapshot.skipped))
                             .unwrap_or_default();
                         let snapshot = load_vcs_snapshot(&path);
                         apply_statuses(&mut entries, &path, &snapshot);
@@ -575,6 +652,7 @@ impl KiteApp {
                             entries,
                             selected_path: None,
                             loading: false,
+                            skipped,
                         });
                     }
                     panes
@@ -1339,12 +1417,7 @@ impl KiteApp {
                         .label(segment.label)
                         .tooltip(path_text(&segment.path))
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.navigate_to(
-                                segment.path.clone(),
-                                NavigationIntent::Push,
-                                window,
-                                cx,
-                            );
+                            this.navigate_from_path_bar(segment.path.clone(), window, cx);
                         })),
                 );
             } else {
@@ -1808,6 +1881,13 @@ fn path_segments(path: &Path, final_is_file: bool) -> Vec<PathSegment> {
         })
         .collect()
 }
+
+fn loaded_column_index(panes: &[ColumnPane], path: &Path) -> Option<usize> {
+    panes
+        .iter()
+        .position(|pane| !pane.loading && same_path(&pane.path, path))
+}
+
 impl Focusable for KiteApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -2286,5 +2366,37 @@ mod clipboard_tests {
         assert!(destination.borrow().is_some());
         *destination.borrow_mut() = None;
         assert!(source.borrow().is_none());
+    }
+}
+
+#[cfg(test)]
+mod path_bar_tests {
+    use super::{ColumnPane, loaded_column_index};
+    use std::path::{Path, PathBuf};
+
+    fn pane(path: &str, loading: bool) -> ColumnPane {
+        ColumnPane {
+            path: PathBuf::from(path),
+            entries: Vec::new(),
+            selected_path: None,
+            loading,
+            skipped: 0,
+        }
+    }
+
+    #[test]
+    fn path_bar_reuses_only_loaded_columns() {
+        let panes = [
+            pane(r"C:\", false),
+            pane(r"C:\Users", false),
+            pane(r"C:\Users\fengqy", true),
+        ];
+
+        assert_eq!(loaded_column_index(&panes, Path::new(r"C:\Users")), Some(1));
+        assert_eq!(
+            loaded_column_index(&panes, Path::new(r"C:\Users\fengqy")),
+            None
+        );
+        assert_eq!(loaded_column_index(&panes, Path::new(r"C:\Windows")), None);
     }
 }
