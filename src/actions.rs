@@ -35,6 +35,7 @@ pub enum RowContextCommand {
     Cut,
     Rename,
     Recycle,
+    Vcs(VcsMenuCommand),
 }
 
 #[derive(Clone, Debug, PartialEq, Action)]
@@ -42,4 +43,21 @@ pub enum RowContextCommand {
 pub struct RowContextAction {
     pub row: usize,
     pub command: RowContextCommand,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VcsMenuCommand {
+    GitAdd,
+    GitCommit,
+    GitRevert,
+    SvnUpdate,
+    SvnAdd,
+    SvnCommit,
+    SvnRevert,
+}
+
+#[derive(Clone, Debug, PartialEq, Action)]
+#[action(namespace = kite, no_json)]
+pub struct VcsMenuAction {
+    pub command: VcsMenuCommand,
 }
