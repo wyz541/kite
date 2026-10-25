@@ -34,6 +34,7 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 
 - 浏览本机文件夹。
 - 使用多个页签替换多个窗口。
+- 工具栏不重复显示应用图标和应用名。
 - 识别 USB 存储设备、可移动磁盘和 WPD/MTP 便携设备。
 - 使用侧边栏访问主文件夹、桌面、文档、下载、图片和本机驱动器。
 - 使用并排分栏浏览多级文件夹。
@@ -274,7 +275,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.3-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.4-windows-x64.zip`。
 
 ### 测试
 
