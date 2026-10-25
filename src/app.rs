@@ -114,6 +114,18 @@ struct ColumnPane {
     svn_available: bool,
 }
 
+#[derive(Clone)]
+struct ColumnListScroll {
+    path: PathBuf,
+    handle: UniformListScrollHandle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DirectoryScrollRoute {
+    directory_offset: f32,
+    column_delta: f32,
+}
+
 pub struct KiteApp {
     current_dir: PathBuf,
     history: Vec<PathBuf>,
@@ -146,6 +158,7 @@ pub struct KiteApp {
     column_panes: Vec<ColumnPane>,
     column_selected_path: Option<PathBuf>,
     column_scroll: ScrollHandle,
+    column_vertical_scrolls: Vec<ColumnListScroll>,
     column_scroll_pending: bool,
     path_bar_scroll: ScrollHandle,
     path_bar_scroll_pending: bool,
@@ -252,6 +265,7 @@ impl KiteApp {
             column_panes: Vec::new(),
             column_selected_path: None,
             column_scroll: ScrollHandle::new(),
+            column_vertical_scrolls: Vec::new(),
             column_scroll_pending: false,
             path_bar_scroll: ScrollHandle::new(),
             path_bar_scroll_pending: false,
@@ -1960,7 +1974,6 @@ impl KiteApp {
             .size_full()
             .items_stretch()
             .overflow_x_scroll()
-            .restrict_scroll_to_axis()
             .track_scroll(&scroll_handle);
         if self.column_panes.is_empty() {
             if let Some(error) = self.error.clone() {
@@ -1990,6 +2003,7 @@ impl KiteApp {
                 })
                 .into_any_element();
         }
+        self.sync_column_list_scrolls();
         for index in 0..self.column_panes.len() {
             strip = strip.child(self.render_column(index, window, cx));
         }
@@ -2008,6 +2022,28 @@ impl KiteApp {
             .into_any_element()
     }
 
+    fn sync_column_list_scrolls(&mut self) {
+        self.column_vertical_scrolls
+            .truncate(self.column_panes.len());
+        for (index, pane) in self.column_panes.iter().enumerate() {
+            let path_changed = self
+                .column_vertical_scrolls
+                .get(index)
+                .is_none_or(|state| !same_path(&state.path, &pane.path));
+            if path_changed {
+                let state = ColumnListScroll {
+                    path: pane.path.clone(),
+                    handle: UniformListScrollHandle::new(),
+                };
+                if let Some(slot) = self.column_vertical_scrolls.get_mut(index) {
+                    *slot = state;
+                } else {
+                    self.column_vertical_scrolls.push(state);
+                }
+            }
+        }
+    }
+
     fn render_column(
         &mut self,
         index: usize,
@@ -2020,6 +2056,11 @@ impl KiteApp {
         let path = pane.path.clone();
         let loading = pane.loading;
         let count = pane.entries.len();
+        let vertical_scroll = self
+            .column_vertical_scrolls
+            .get(index)
+            .map(|state| state.handle.clone())
+            .unwrap_or_default();
         let active = same_path(&path, &self.current_dir);
         let title = path
             .file_name()
@@ -2048,7 +2089,7 @@ impl KiteApp {
                 .into_any_element()
         } else {
             uniform_list(
-                SharedString::from(format!("column-list-{index}")),
+                SharedString::from(format!("column-list-{index}-{}", path.display())),
                 count,
                 cx.processor(move |this, range, window, cx| {
                     this.render_column_rows(index, range, window, cx)
@@ -2057,6 +2098,7 @@ impl KiteApp {
             .flex_1()
             .min_h_0()
             .w_full()
+            .track_scroll(&vertical_scroll)
             .into_any_element()
         };
         v_flex()
@@ -2087,8 +2129,85 @@ impl KiteApp {
                             .child(title),
                     ),
             )
-            .child(body)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .when(!loading && count > 0, |this| {
+                        this.on_scroll_wheel(cx.listener(
+                            move |this, event: &ScrollWheelEvent, window, cx| {
+                                this.handle_column_scroll_wheel(index, event, window, cx)
+                            },
+                        ))
+                    })
+                    .child(body),
+            )
             .into_any_element()
+    }
+
+    fn handle_column_scroll_wheel(
+        &mut self,
+        index: usize,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let handle = match self.column_vertical_scrolls.get(index) {
+            Some(state) => state.handle.clone(),
+            None => return,
+        };
+        let base = handle.0.borrow().base_handle.clone();
+        let delta = event.delta.pixel_delta(window.line_height());
+        let delta_x = delta.x.as_f32();
+        let delta_y = delta.y.as_f32();
+        let current = base.offset();
+
+        if wheel_scrolls_columns(delta_x, delta_y) {
+            // The list maps one-axis gestures to its vertical offset. Restore it
+            // before the column strip receives this horizontal gesture.
+            let applied_y = if delta.y.is_zero() { delta_x } else { delta_y };
+            let max_y = base.max_offset().y.as_f32().max(0.0);
+            let restored_y = (current.y.as_f32() - applied_y).clamp(-max_y, 0.0);
+            base.set_offset(point(current.x, px(restored_y)));
+            cx.notify();
+            return;
+        }
+
+        if delta.y.is_zero() {
+            return;
+        }
+
+        let max_y = base.max_offset().y.as_f32();
+        if !handle.is_scrollable() || max_y <= 0.0 {
+            base.set_offset(point(current.x, px(0.0)));
+            cx.notify();
+            return;
+        }
+
+        let route = route_directory_scroll(current.y.as_f32(), max_y);
+        base.set_offset(point(current.x, px(route.directory_offset)));
+        if route.column_delta != 0.0 {
+            self.scroll_columns_by(route.column_delta, cx);
+        }
+        // The list handles wheel input before this wrapper during bubbling.
+        // Stop the parent strip only after the directory consumes the gesture.
+        cx.notify();
+        cx.stop_propagation();
+    }
+
+    fn scroll_columns_by(&self, delta: f32, cx: &mut Context<Self>) {
+        if delta == 0.0 {
+            return;
+        }
+        let handle = self.column_scroll.clone();
+        let offset = handle.offset();
+        let max_x = handle.max_offset().x.as_f32().max(0.0);
+        let target_x = (offset.x.as_f32() + delta).clamp(-max_x, 0.0);
+        if (target_x - offset.x.as_f32()).abs() > f32::EPSILON {
+            handle.set_offset(point(px(target_x), offset.y));
+            cx.notify();
+        }
     }
 
     fn render_column_rows(
@@ -2386,6 +2505,25 @@ fn same_path(left: &Path, right: &Path) -> bool {
         value
     };
     normalize(left) == normalize(right)
+}
+
+fn wheel_scrolls_columns(delta_x: f32, delta_y: f32) -> bool {
+    delta_x != 0.0 && delta_x.abs() > delta_y.abs()
+}
+
+fn route_directory_scroll(offset_after_scroll: f32, max_offset: f32) -> DirectoryScrollRoute {
+    if max_offset <= 0.0 {
+        return DirectoryScrollRoute {
+            directory_offset: 0.0,
+            column_delta: offset_after_scroll,
+        };
+    }
+
+    let directory_offset = offset_after_scroll.clamp(-max_offset, 0.0);
+    DirectoryScrollRoute {
+        directory_offset,
+        column_delta: offset_after_scroll - directory_offset,
+    }
 }
 
 fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, String> {
@@ -3231,5 +3369,62 @@ mod path_bar_tests {
         ];
 
         assert_eq!(common_column_prefix(&panes, &chain), 2);
+    }
+}
+
+#[cfg(test)]
+mod scroll_routing_tests {
+    use super::{DirectoryScrollRoute, route_directory_scroll, wheel_scrolls_columns};
+
+    #[test]
+    fn horizontal_gesture_takes_priority_over_vertical_noise() {
+        assert!(wheel_scrolls_columns(18.0, 3.0));
+        assert!(wheel_scrolls_columns(8.0, 7.0));
+        assert!(!wheel_scrolls_columns(3.0, 18.0));
+        assert!(!wheel_scrolls_columns(0.0, 18.0));
+    }
+
+    #[test]
+    fn directory_interior_consumes_vertical_wheel_input() {
+        assert_eq!(
+            route_directory_scroll(-420.0, 800.0),
+            DirectoryScrollRoute {
+                directory_offset: -420.0,
+                column_delta: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn bottom_boundary_routes_only_overflow_to_columns() {
+        assert_eq!(
+            route_directory_scroll(-830.0, 800.0),
+            DirectoryScrollRoute {
+                directory_offset: -800.0,
+                column_delta: -30.0,
+            }
+        );
+    }
+
+    #[test]
+    fn top_boundary_routes_only_overflow_to_columns() {
+        assert_eq!(
+            route_directory_scroll(25.0, 800.0),
+            DirectoryScrollRoute {
+                directory_offset: 0.0,
+                column_delta: 25.0,
+            }
+        );
+    }
+
+    #[test]
+    fn non_scrollable_directory_passes_full_delta_to_columns() {
+        assert_eq!(
+            route_directory_scroll(-90.0, 0.0),
+            DirectoryScrollRoute {
+                directory_offset: 0.0,
+                column_delta: -90.0,
+            }
+        );
     }
 }
