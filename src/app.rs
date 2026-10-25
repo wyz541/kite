@@ -399,6 +399,9 @@ impl KiteApp {
 
                 match result {
                     Ok(snapshot) => {
+                        let column_entries =
+                            (this.view_mode == ViewMode::Columns).then(|| snapshot.entries.clone());
+                        let column_skipped = snapshot.skipped;
                         this.apply_history(snapshot.path.clone(), intent);
                         this.current_dir = snapshot.path.clone();
                         this.skipped = snapshot.skipped;
@@ -416,7 +419,15 @@ impl KiteApp {
                             cx.notify();
                         });
                         if this.view_mode == ViewMode::Columns {
-                            this.load_columns(this.current_dir.clone(), cx);
+                            if let Some(entries) = column_entries {
+                                this.update_columns_for_loaded_path(
+                                    this.current_dir.clone(),
+                                    entries,
+                                    column_skipped,
+                                    cx,
+                                );
+                            }
+                            this.refresh_vcs_statuses(this.current_dir.clone(), cx);
                         } else {
                             this.refresh_vcs_statuses(this.current_dir.clone(), cx);
                         }
@@ -657,6 +668,15 @@ impl KiteApp {
                     state.refresh(cx);
                     cx.notify();
                 });
+                if let Some(pane) = this
+                    .column_panes
+                    .iter_mut()
+                    .find(|pane| same_path(&pane.path, &root))
+                {
+                    apply_statuses(&mut pane.entries, &root, &snapshot);
+                    pane.git_available = snapshot.git_available();
+                    pane.svn_available = snapshot.svn_available();
+                }
                 cx.notify();
             });
         });
@@ -670,8 +690,7 @@ impl KiteApp {
     fn load_columns(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         self.column_generation = self.column_generation.wrapping_add(1);
         let generation = self.column_generation;
-        let mut chain = root.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
-        chain.reverse();
+        let chain = column_chain(&root);
         let sort = self.table.read(cx).delegate().sort_spec();
         self.column_panes = chain
             .iter()
@@ -696,22 +715,7 @@ impl KiteApp {
                 .background_spawn(async move {
                     let mut panes = Vec::with_capacity(load_paths.len());
                     for path in load_paths {
-                        let (mut entries, skipped) = load_directory(&path, sort)
-                            .map(|snapshot| (snapshot.entries, snapshot.skipped))
-                            .unwrap_or_default();
-                        let snapshot = load_vcs_snapshot(&path);
-                        let git_available = snapshot.git_available();
-                        let svn_available = snapshot.svn_available();
-                        apply_statuses(&mut entries, &path, &snapshot);
-                        panes.push(ColumnPane {
-                            path,
-                            entries,
-                            selected_path: None,
-                            loading: false,
-                            skipped,
-                            git_available,
-                            svn_available,
-                        });
+                        panes.push(load_column_pane(path, sort));
                     }
                     panes
                 })
@@ -730,6 +734,95 @@ impl KiteApp {
                 cx.notify();
             });
         });
+    }
+
+    fn update_columns_for_loaded_path(
+        &mut self,
+        root: PathBuf,
+        entries: Vec<FileEntry>,
+        skipped: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.column_generation = self.column_generation.wrapping_add(1);
+        let generation = self.column_generation;
+        let chain = column_chain(&root);
+        let common = common_column_prefix(&self.column_panes, &chain);
+        let inherited = self.column_panes.get(common.saturating_sub(1));
+        let git_available = inherited.is_some_and(|pane| pane.git_available);
+        let svn_available = inherited.is_some_and(|pane| pane.svn_available);
+        let final_index = chain.len() - 1;
+        let mut entries = Some(entries);
+        let mut panes = self.column_panes[..common].to_vec();
+
+        for (index, path) in chain.iter().enumerate().skip(common) {
+            let ready_entries = (index == final_index).then(|| entries.take().unwrap_or_default());
+            panes.push(ColumnPane {
+                path: path.clone(),
+                entries: ready_entries.unwrap_or_default(),
+                selected_path: None,
+                loading: index != final_index,
+                skipped: if index == final_index { skipped } else { 0 },
+                git_available,
+                svn_available,
+            });
+        }
+        if let Some(entries) = entries
+            && let Some(last) = panes.get_mut(final_index)
+        {
+            last.entries = entries;
+            last.skipped = skipped;
+            last.loading = false;
+        }
+
+        self.column_panes = panes;
+        for index in 0..self.column_panes.len().saturating_sub(1) {
+            self.column_panes[index].selected_path =
+                Some(self.column_panes[index + 1].path.clone());
+        }
+        if let Some(last) = self.column_panes.last_mut() {
+            last.selected_path = None;
+        }
+        self.column_selected_path = None;
+        self.column_scroll_pending = true;
+        self.path_bar_scroll_pending = true;
+
+        let load_paths = (common..final_index)
+            .map(|index| (index, chain[index].clone()))
+            .collect::<Vec<_>>();
+        if load_paths.is_empty() {
+            self._column_task = Task::ready(());
+        } else {
+            let sort = self.table.read(cx).delegate().sort_spec();
+            self._column_task = cx.spawn(async move |this, cx| {
+                let loaded = cx
+                    .background_spawn(async move {
+                        load_paths
+                            .into_iter()
+                            .map(|(index, path)| (index, load_column_pane(path, sort)))
+                            .collect::<Vec<_>>()
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.column_generation != generation {
+                        return;
+                    }
+                    for (index, pane) in loaded {
+                        if let Some(slot) = this.column_panes.get_mut(index) {
+                            *slot = pane;
+                        }
+                    }
+                    for index in 0..this.column_panes.len().saturating_sub(1) {
+                        this.column_panes[index].selected_path =
+                            Some(this.column_panes[index + 1].path.clone());
+                    }
+                    if let Some(last) = this.column_panes.last_mut() {
+                        last.selected_path = None;
+                    }
+                    cx.notify();
+                });
+            });
+        }
+        cx.notify();
     }
 
     fn show_list_view(&mut self, _: &ShowListView, _: &mut Window, cx: &mut Context<Self>) {
@@ -2460,6 +2553,37 @@ fn build_column_context_menu(
     )
 }
 
+fn column_chain(root: &Path) -> Vec<PathBuf> {
+    let mut chain = root.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
+    chain.reverse();
+    chain
+}
+
+fn common_column_prefix(panes: &[ColumnPane], chain: &[PathBuf]) -> usize {
+    panes
+        .iter()
+        .zip(chain)
+        .take_while(|(pane, path)| !pane.loading && same_path(&pane.path, path))
+        .count()
+}
+
+fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
+    let (mut entries, skipped) = load_directory(&path, sort)
+        .map(|snapshot| (snapshot.entries, snapshot.skipped))
+        .unwrap_or_default();
+    let snapshot = load_vcs_snapshot(&path);
+    apply_statuses(&mut entries, &path, &snapshot);
+    ColumnPane {
+        path,
+        entries,
+        selected_path: None,
+        loading: false,
+        skipped,
+        git_available: snapshot.git_available(),
+        svn_available: snapshot.svn_available(),
+    }
+}
+
 fn path_segments(path: &Path, final_is_file: bool) -> Vec<PathSegment> {
     let mut ancestors = path.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
     ancestors.reverse();
@@ -2972,7 +3096,7 @@ mod clipboard_tests {
 
 #[cfg(test)]
 mod path_bar_tests {
-    use super::{ColumnPane, loaded_column_index};
+    use super::{ColumnPane, common_column_prefix, loaded_column_index};
     use std::path::{Path, PathBuf};
 
     fn pane(path: &str, loading: bool) -> ColumnPane {
@@ -3001,5 +3125,22 @@ mod path_bar_tests {
             None
         );
         assert_eq!(loaded_column_index(&panes, Path::new(r"C:\Windows")), None);
+    }
+
+    #[test]
+    fn column_update_keeps_only_loaded_common_prefix() {
+        let panes = [
+            pane(r"C:\", false),
+            pane(r"C:\Users", false),
+            pane(r"C:\Users\fengqy", true),
+        ];
+        let chain = [
+            PathBuf::from(r"C:\"),
+            PathBuf::from(r"C:\Users"),
+            PathBuf::from(r"C:\Users\fengqy"),
+            PathBuf::from(r"C:\Users\fengqy\Documents"),
+        ];
+
+        assert_eq!(common_column_prefix(&panes, &chain), 2);
     }
 }
