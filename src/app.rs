@@ -2828,18 +2828,6 @@ impl Render for KiteApp {
                     .border_b_1()
                     .border_color(cx.theme().title_bar_border)
                     .child(
-                        h_flex()
-                            .w(px(84.))
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                Icon::new(IconName::Navigation)
-                                    .size_5()
-                                    .text_color(cx.theme().primary),
-                            )
-                            .child(div().text_lg().font_semibold().child("Kite")),
-                    )
-                    .child(
                         Button::new("nav-back")
                             .ghost()
                             .compact()
