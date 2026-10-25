@@ -64,6 +64,21 @@ pub enum VcsOperation {
     Cleanup,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VcsQuery {
+    Diff,
+    Log,
+}
+
+impl VcsQuery {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Diff => "差异",
+            Self::Log => "日志",
+        }
+    }
+}
+
 pub fn load_vcs_snapshot(view_root: &Path) -> VcsSnapshot {
     let (git_available, git) = git_statuses(view_root);
     let (svn_available, svn) = svn_statuses(view_root);
@@ -314,6 +329,102 @@ pub fn run_vcs_operation(
     match tool {
         VcsTool::Git => run_git_operation(operation, target),
         VcsTool::Svn => run_svn_operation(operation, target),
+    }
+}
+
+pub fn run_vcs_query(tool: VcsTool, query: VcsQuery, target: &Path) -> Result<String, String> {
+    match tool {
+        VcsTool::Git => {
+            let (root, target) = git_context(target)?;
+            let relative = if target.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                target.as_path()
+            };
+
+            match query {
+                VcsQuery::Diff => {
+                    let mut command = configured_command("git", &root);
+                    command.args(["diff", "--no-ext-diff", "--"]).arg(relative);
+                    let working = run_query_command("Git 差异", command)?;
+                    if working != "没有可显示内容。" {
+                        return Ok(working);
+                    }
+                    let mut command = configured_command("git", &root);
+                    command
+                        .args(["diff", "--cached", "--no-ext-diff", "--"])
+                        .arg(relative);
+                    run_query_command("Git 暂存差异", command)
+                }
+                VcsQuery::Log => {
+                    let mut command = configured_command("git", &root);
+                    command
+                        .args([
+                            "log",
+                            "-n",
+                            "100",
+                            "--date=short",
+                            "--pretty=format:%h  %ad  %an  %s",
+                            "--",
+                        ])
+                        .arg(relative);
+                    run_query_command("Git 日志", command)
+                }
+            }
+        }
+        VcsTool::Svn => {
+            let start = working_directory(target);
+            let mut command = configured_command("svn", start);
+            match query {
+                VcsQuery::Diff => {
+                    command.arg("diff").arg(target);
+                    run_query_command("SVN 差异", command)
+                }
+                VcsQuery::Log => {
+                    command.args(["log", "--limit", "100"]).arg(target);
+                    run_query_command("SVN 日志", command)
+                }
+            }
+        }
+    }
+}
+
+fn git_context(target: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let start = working_directory(target);
+    let root_output = run_command("git", start, &["rev-parse", "--show-toplevel"])
+        .ok_or_else(|| "未找到 Git。请确认 Git 已安装并位于 PATH 中。".to_string())?;
+    if !root_output.status.success() {
+        return Err(output_error("Git", &root_output));
+    }
+    let root_text = String::from_utf8_lossy(&root_output.stdout)
+        .trim()
+        .to_string();
+    let root = dunce::canonicalize(&root_text).unwrap_or_else(|_| PathBuf::from(root_text));
+    let target = dunce::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    let relative = target
+        .strip_prefix(&root)
+        .map_err(|_| "所选项目不在 Git 工作区中".to_string())?
+        .to_path_buf();
+    Ok((root, relative))
+}
+
+fn run_query_command(label: &str, mut command: Command) -> Result<String, String> {
+    let output = command.output().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("未找到 {label} 所需命令。请确认命令已安装并位于 PATH 中。")
+        } else {
+            format!("{label}读取失败：{error}")
+        }
+    })?;
+    if output.status.success() {
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if value.is_empty() {
+            Ok("没有可显示内容。".to_string())
+        } else {
+            Ok(value)
+        }
+    } else {
+        Err(output_error(label, &output))
     }
 }
 
@@ -702,6 +813,10 @@ mod tests {
             .contains("完成")
         );
         std::fs::write(&file, b"after").expect("modify note");
+        let diff = run_vcs_query(VcsTool::Git, VcsQuery::Diff, &file).expect("git diff");
+        assert!(diff.contains("+after"));
+        let log = run_vcs_query(VcsTool::Git, VcsQuery::Log, &file).expect("git log");
+        assert!(log.contains("initial"));
         run_vcs_operation(VcsTool::Git, VcsOperation::Add, &file).expect("git stage change");
         assert!(
             run_vcs_operation(VcsTool::Git, VcsOperation::Unstage, &file)
@@ -771,6 +886,10 @@ mod tests {
         std::fs::write(working_copy.join("src").join("nested.txt"), b"after")
             .expect("modify svn nested file");
         std::fs::write(working_copy.join("new.txt"), b"new").expect("write svn untracked file");
+
+        let diff = run_vcs_query(VcsTool::Svn, VcsQuery::Diff, &working_copy).expect("svn diff");
+        assert!(diff.contains("+after"));
+        run_vcs_query(VcsTool::Svn, VcsQuery::Log, &working_copy).expect("svn log");
 
         let nested_root = working_copy.join("src");
         let nested_snapshot = load_vcs_snapshot(&nested_root);
