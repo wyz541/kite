@@ -1,6 +1,6 @@
 [package]
 name = "kite-explorer"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 description = "A fast, native Windows file explorer built with Rust and GPUI"
 license = "MIT"

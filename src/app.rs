@@ -1960,6 +1960,7 @@ impl KiteApp {
             .size_full()
             .items_stretch()
             .overflow_x_scroll()
+            .restrict_scroll_to_axis()
             .track_scroll(&scroll_handle);
         if self.column_panes.is_empty() {
             if let Some(error) = self.error.clone() {

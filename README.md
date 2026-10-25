@@ -122,6 +122,7 @@ Kite 不设置固定栏数上限。
 窗口宽度决定同时可见的栏数。
 窗口变窄时，深层栏目保留在横向滚动区域中。
 使用触控板横向滚动或拖动分栏底部滚动条即可查看。
+分栏区域锁定横向滚动轴。纵向滚轮只滚动目录内容。
 
 路径栏显示当前项目的完整路径。
 点击任意文件夹段可返回对应层级。
@@ -275,7 +276,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.5-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.6-windows-x64.zip`。
 
 ### 测试
 
