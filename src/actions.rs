@@ -53,6 +53,8 @@ pub enum VcsMenuCommand {
     GitPull,
     GitPush,
     GitFetch,
+    GitDiff,
+    GitLog,
     GitRevert,
     GitClean,
     SvnUpdate,
@@ -60,6 +62,8 @@ pub enum VcsMenuCommand {
     SvnCommit,
     SvnLock,
     SvnUnlock,
+    SvnDiff,
+    SvnLog,
     SvnRevert,
     SvnCleanup,
 }

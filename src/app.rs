@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod devices;
 
@@ -14,7 +14,10 @@ use crate::fs::{
     rename_entry, search_directory, transfer_entry, validate_name,
 };
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_badge};
-use crate::vcs::{VcsOperation, VcsTool, apply_statuses, load_vcs_snapshot, run_vcs_operation};
+use crate::vcs::{
+    VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, run_vcs_operation,
+    run_vcs_query,
+};
 use devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -1126,6 +1129,12 @@ impl KiteApp {
             VcsMenuCommand::GitFetch => {
                 self.run_vcs_task(VcsTool::Git, VcsOperation::Fetch, path, window, cx)
             }
+            VcsMenuCommand::GitDiff => {
+                self.run_vcs_query_task(VcsTool::Git, VcsQuery::Diff, path, window, cx)
+            }
+            VcsMenuCommand::GitLog => {
+                self.run_vcs_query_task(VcsTool::Git, VcsQuery::Log, path, window, cx)
+            }
             VcsMenuCommand::GitRevert => self.confirm_vcs_revert(VcsTool::Git, path, window, cx),
             VcsMenuCommand::GitClean => self.confirm_git_clean(path, window, cx),
             VcsMenuCommand::SvnUpdate => {
@@ -1140,6 +1149,12 @@ impl KiteApp {
             }
             VcsMenuCommand::SvnUnlock => {
                 self.run_vcs_task(VcsTool::Svn, VcsOperation::Unlock, path, window, cx)
+            }
+            VcsMenuCommand::SvnDiff => {
+                self.run_vcs_query_task(VcsTool::Svn, VcsQuery::Diff, path, window, cx)
+            }
+            VcsMenuCommand::SvnLog => {
+                self.run_vcs_query_task(VcsTool::Svn, VcsQuery::Log, path, window, cx)
             }
             VcsMenuCommand::SvnRevert => self.confirm_vcs_revert(VcsTool::Svn, path, window, cx),
             VcsMenuCommand::SvnCleanup => {
@@ -1188,6 +1203,57 @@ impl KiteApp {
                     this.error = Some(error.into());
                     cx.notify();
                 }
+            });
+        })
+        .detach();
+    }
+
+    fn run_vcs_query_task(
+        &mut self,
+        tool: VcsTool,
+        query: VcsQuery,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = format!("{} {}", tool.label(), query.label());
+        self.error = None;
+        self.notice = Some(format!("正在读取{title}…").into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let content = run_vcs_query(tool, query, &path)?;
+                    let stamp = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    let kind = match query {
+                        VcsQuery::Diff => "diff",
+                        VcsQuery::Log => "log",
+                    };
+                    let file = std::env::temp_dir().join(format!(
+                        "kite-{}-{kind}-{}-{stamp}.txt",
+                        tool.label().to_lowercase(),
+                        std::process::id()
+                    ));
+                    let text = format!("{title}\n目标：{}\n\n{content}\n", path.display());
+                    std::fs::write(&file, text.as_bytes())
+                        .map_err(|error| format!("无法写入{title}临时文件：{error}"))?;
+                    open_file(&file)?;
+                    Ok::<String, String>(format!("{title}已打开"))
+                })
+                .await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                match result {
+                    Ok(message) => this.notice = Some(message.into()),
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                    }
+                }
+                cx.notify();
             });
         })
         .detach();
@@ -2459,6 +2525,23 @@ fn build_column_context_menu(
             )
             .separator()
             .menu_with_icon_and_disabled(
+                "显示差异",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitDiff,
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "显示日志",
+                IconName::GitBranch,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::GitLog,
+                }),
+                git_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
                 "还原…",
                 IconName::GitBranch,
                 Box::new(VcsMenuAction {
@@ -2522,6 +2605,23 @@ fn build_column_context_menu(
                 IconName::Boxes,
                 Box::new(VcsMenuAction {
                     command: VcsMenuCommand::SvnUnlock,
+                }),
+                svn_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "显示差异",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnDiff,
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "显示日志",
+                IconName::Boxes,
+                Box::new(VcsMenuAction {
+                    command: VcsMenuCommand::SvnLog,
                 }),
                 svn_disabled,
             )

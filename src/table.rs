@@ -280,6 +280,25 @@ impl TableDelegate for FileTableDelegate {
             )
             .separator()
             .menu_with_icon_and_disabled(
+                "显示差异",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitDiff),
+                }),
+                git_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "显示日志",
+                IconName::GitBranch,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::GitLog),
+                }),
+                git_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
                 "还原…",
                 IconName::GitBranch,
                 Box::new(RowContextAction {
@@ -349,6 +368,25 @@ impl TableDelegate for FileTableDelegate {
                 Box::new(RowContextAction {
                     row: row_ix,
                     command: RowContextCommand::Vcs(VcsMenuCommand::SvnUnlock),
+                }),
+                svn_disabled,
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                "显示差异",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnDiff),
+                }),
+                svn_disabled,
+            )
+            .menu_with_icon_and_disabled(
+                "显示日志",
+                IconName::Boxes,
+                Box::new(RowContextAction {
+                    row: row_ix,
+                    command: RowContextCommand::Vcs(VcsMenuCommand::SvnLog),
                 }),
                 svn_disabled,
             )
