@@ -67,6 +67,18 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
+      - name: Verify native UI boundary
+        run: |
+          cargo tree --locked > "$RUNNER_TEMP/macos-dependencies.txt"
+          if grep -E '(^|[^[:alnum:]_-])(gpui|egui)([^[:alnum:]_-]|$)' "$RUNNER_TEMP/macos-dependencies.txt"; then
+            echo "::error::macOS dependency graph contains gpui or egui"
+            exit 1
+          fi
+          if grep -R -E -i 'gpui|egui' apps/macos/Sources; then
+            echo "::error::macOS Swift sources contain gpui or egui"
+            exit 1
+          fi
+
       - name: Build SwiftUI application
         run: bash apps/macos/build.sh
 
