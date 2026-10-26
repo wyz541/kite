@@ -3,6 +3,7 @@
 mod actions;
 
 mod app;
+mod context_menu;
 mod fs;
 mod table;
 mod tabs;

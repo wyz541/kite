@@ -117,6 +117,22 @@ SVN 提交提交所选路径的本地更改。
 提交操作要求输入提交说明。还原操作要求确认。
 命令在后台任务中执行。旧文件状态不会阻塞界面。
 
+### 右键菜单架构
+
+Kite 使用统一的右键菜单模型。
+列表视图和分栏视图使用同一套命令。
+菜单动作携带目标路径。
+因此，旧选择不会误用在新菜单动作上。
+
+“Windows 原生菜单…”调用 Windows Shell 菜单。
+Windows Shell 菜单包含系统功能和已安装扩展。
+这些功能包括“打开方式”“属性”“发送到”、压缩工具和同步工具。
+TortoiseGit 和 TortoiseSVN 扩展也可出现在此菜单中。
+
+菜单模型按功能提供者构建。
+当前提供者包括核心文件操作、Git/SVN、Windows Shell 和刷新。
+详细设计见 `docs/architecture/context-menu.md`。
+
 ## 分栏视图与路径栏
 
 Kite 默认使用分栏视图。每一栏显示一级文件夹的内容。
@@ -284,7 +300,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.8-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.4.0-windows-x64.zip`。
 
 ### 测试
 
@@ -296,6 +312,8 @@ cargo clippy --all-targets -- -D warnings
 ## 项目结构
 
 - `src/app.rs`：页签内容、导航状态、剪贴板、文件操作和界面。
+- `src/context_menu/mod.rs`：统一菜单模型、提供者和 GPUI 渲染器。
+- `src/context_menu/windows.rs`：Windows Shell 原生菜单桥接。
 - `src/app/devices.rs`：USB 卷、存储设备属性和 WPD 设备枚举。
 - `src/tabs.rs`：窗口页签栏、页签切换和窗口级共享剪贴板。
 - `src/fs.rs`：文件夹读取、搜索、排序、格式化、复制和回收站操作。

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use gpui_kit::*;
 
 actions!(
@@ -29,20 +31,24 @@ actions!(
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RowContextCommand {
+pub enum ContextMenuCommand {
     Open,
     Copy,
     Cut,
+    Paste,
+    NewFolder,
     Rename,
     Recycle,
     Vcs(VcsMenuCommand),
+    NativeShell,
+    Refresh,
 }
 
 #[derive(Clone, Debug, PartialEq, Action)]
 #[action(namespace = kite, no_json)]
-pub struct RowContextAction {
-    pub row: usize,
-    pub command: RowContextCommand,
+pub struct ContextMenuAction {
+    pub target: PathBuf,
+    pub command: ContextMenuCommand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,10 +72,4 @@ pub enum VcsMenuCommand {
     SvnLog,
     SvnRevert,
     SvnCleanup,
-}
-
-#[derive(Clone, Debug, PartialEq, Action)]
-#[action(namespace = kite, no_json)]
-pub struct VcsMenuAction {
-    pub command: VcsMenuCommand,
 }
