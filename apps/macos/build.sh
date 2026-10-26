@@ -22,6 +22,8 @@ xcrun swiftc \
     -O \
     -parse-as-library \
     -I "$GEN_DIR" \
+    -Xcc -fmodule-map-file="$GEN_DIR/kite_coreFFI.modulemap" \
+    -Xcc -I"$GEN_DIR" \
     -L "$ROOT/target/release" \
     -lkite_core \
     -framework AppKit \
