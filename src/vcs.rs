@@ -708,10 +708,13 @@ mod tests {
     use crate::fs::EntryKind;
     use std::time::SystemTime;
 
-    fn entry(name: &str, kind: EntryKind) -> FileEntry {
+    fn entry_at(path: PathBuf, kind: EntryKind) -> FileEntry {
         FileEntry {
-            path: PathBuf::from(name),
-            name: name.to_string(),
+            name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path,
             kind,
             size: 0,
             modified: None,
@@ -782,9 +785,9 @@ mod tests {
             svn_available: false,
         };
         let mut entries = vec![
-            entry("C:\\repo\\src", EntryKind::Directory),
-            entry("C:\\repo\\readme.md", EntryKind::File),
-            entry("C:\\repo\\clean.md", EntryKind::File),
+            entry_at(root.join("src"), EntryKind::Directory),
+            entry_at(root.join("readme.md"), EntryKind::File),
+            entry_at(root.join("clean.md"), EntryKind::File),
         ];
 
         apply_statuses(&mut entries, &root, &snapshot);
@@ -845,7 +848,7 @@ mod tests {
         std::fs::write(root.join("src").join("nested.txt"), b"after").expect("modify nested file");
         std::fs::write(root.join("new.txt"), b"new").expect("write untracked file");
 
-        let nested_root = root.join("src");
+        let nested_root = dunce::canonicalize(root.join("src")).expect("canonical nested root");
         let nested_snapshot = load_vcs_snapshot(&nested_root);
         let expected_nested = nested_root.join("nested.txt");
         assert!(nested_snapshot.git.iter().any(|item| {
