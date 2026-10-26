@@ -106,9 +106,13 @@ Git 和 SVN 始终显示在右键菜单的一级菜单中。
 
 Git 子菜单支持添加、取消暂存、提交、拉取、推送、获取、显示差异、显示日志、还原和清理工作区。
 Git 提交使用所选路径的已暂存更改。
+“显示日志”打开 TortoiseGit 日志窗口。
+Kite 在 TortoiseGit 不可用时尝试 `gitk`。
+GUI 都不可用时，Kite 打开文本日志。
 
 SVN 子菜单支持更新、添加、提交、锁定、解锁、显示差异、显示日志、还原和清理工作副本。
 SVN 提交提交所选路径的本地更改。
+“显示日志”打开 TortoiseSVN 日志窗口。
 
 提交操作要求输入提交说明。还原操作要求确认。
 命令在后台任务中执行。旧文件状态不会阻塞界面。
@@ -280,7 +284,7 @@ cargo run -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.7-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.3.8-windows-x64.zip`。
 
 ### 测试
 
