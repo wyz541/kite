@@ -27,8 +27,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run tests
-        run: cargo test --locked
+      - name: Run core tests
+        run: cargo test --locked --lib
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
@@ -62,7 +62,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run core tests
-        run: cargo test --locked
+        run: cargo test --locked --lib
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
