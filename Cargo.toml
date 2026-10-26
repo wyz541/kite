@@ -2,7 +2,7 @@
 name = "kite-explorer"
 version = "0.5.0"
 edition = "2024"
-description = "A fast, native cross-platform file manager built with Rust and GPUI"
+description = "A fast, native cross-platform file manager with a shared Rust Core, Windows GPUI UI, and macOS SwiftUI UI"
 license = "MIT"
 build = "build.rs"
 
