@@ -66,6 +66,11 @@ Windows native shell screenshots:
 - [Platform architecture](https://github.com/wyz541/kite/blob/main/docs/architecture/platforms.md)
 - [Context menu architecture](https://github.com/wyz541/kite/blob/main/docs/architecture/context-menu.md)
 
+## Installation notes
+
+- Windows builds are not code-signed. Windows SmartScreen can show a warning.
+- The macOS build is arm64 and ad-hoc signed. The app is not notarized. macOS Gatekeeper can block the first launch.
+
 ## Install
 
 - Windows: use `Kite-v0.5.0-windows-x64.zip`.
