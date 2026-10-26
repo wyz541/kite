@@ -15,8 +15,8 @@ use crate::fs::{
 };
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_badge};
 use crate::vcs::{
-    VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, run_vcs_operation,
-    run_vcs_query,
+    VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
+    run_vcs_operation, run_vcs_query,
 };
 use devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use gpui_kit::assets::IconName;
@@ -1146,9 +1146,7 @@ impl KiteApp {
             VcsMenuCommand::GitDiff => {
                 self.run_vcs_query_task(VcsTool::Git, VcsQuery::Diff, path, window, cx)
             }
-            VcsMenuCommand::GitLog => {
-                self.run_vcs_query_task(VcsTool::Git, VcsQuery::Log, path, window, cx)
-            }
+            VcsMenuCommand::GitLog => self.open_vcs_log_window_task(VcsTool::Git, path, window, cx),
             VcsMenuCommand::GitRevert => self.confirm_vcs_revert(VcsTool::Git, path, window, cx),
             VcsMenuCommand::GitClean => self.confirm_git_clean(path, window, cx),
             VcsMenuCommand::SvnUpdate => {
@@ -1167,9 +1165,7 @@ impl KiteApp {
             VcsMenuCommand::SvnDiff => {
                 self.run_vcs_query_task(VcsTool::Svn, VcsQuery::Diff, path, window, cx)
             }
-            VcsMenuCommand::SvnLog => {
-                self.run_vcs_query_task(VcsTool::Svn, VcsQuery::Log, path, window, cx)
-            }
+            VcsMenuCommand::SvnLog => self.open_vcs_log_window_task(VcsTool::Svn, path, window, cx),
             VcsMenuCommand::SvnRevert => self.confirm_vcs_revert(VcsTool::Svn, path, window, cx),
             VcsMenuCommand::SvnCleanup => {
                 self.run_vcs_task(VcsTool::Svn, VcsOperation::Cleanup, path, window, cx)
@@ -1237,26 +1233,41 @@ impl KiteApp {
 
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
+                .background_spawn(async move { open_vcs_query_text(tool, query, &path) })
+                .await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                match result {
+                    Ok(message) => this.notice = Some(message.into()),
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn open_vcs_log_window_task(
+        &mut self,
+        tool: VcsTool,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.error = None;
+        self.notice = Some(format!("正在打开{}日志窗口…", tool.label()).into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
                 .background_spawn(async move {
-                    let content = run_vcs_query(tool, query, &path)?;
-                    let stamp = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos();
-                    let kind = match query {
-                        VcsQuery::Diff => "diff",
-                        VcsQuery::Log => "log",
-                    };
-                    let file = std::env::temp_dir().join(format!(
-                        "kite-{}-{kind}-{}-{stamp}.txt",
-                        tool.label().to_lowercase(),
-                        std::process::id()
-                    ));
-                    let text = format!("{title}\n目标：{}\n\n{content}\n", path.display());
-                    std::fs::write(&file, text.as_bytes())
-                        .map_err(|error| format!("无法写入{title}临时文件：{error}"))?;
-                    open_file(&file)?;
-                    Ok::<String, String>(format!("{title}已打开"))
+                    open_vcs_log_window(tool, &path).or_else(|window_error| {
+                        open_vcs_query_text(tool, VcsQuery::Log, &path).map_err(|text_error| {
+                            format!("{window_error}；文本回退失败：{text_error}")
+                        })
+                    })
                 })
                 .await;
             let _ = this.update_in(cx, |this, _, cx| {
@@ -2505,6 +2516,29 @@ fn same_path(left: &Path, right: &Path) -> bool {
         value
     };
     normalize(left) == normalize(right)
+}
+
+fn open_vcs_query_text(tool: VcsTool, query: VcsQuery, path: &Path) -> Result<String, String> {
+    let title = format!("{} {}", tool.label(), query.label());
+    let content = run_vcs_query(tool, query, path)?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let kind = match query {
+        VcsQuery::Diff => "diff",
+        VcsQuery::Log => "log",
+    };
+    let file = std::env::temp_dir().join(format!(
+        "kite-{}-{kind}-{}-{stamp}.txt",
+        tool.label().to_lowercase(),
+        std::process::id()
+    ));
+    let text = format!("{title}\n目标：{}\n\n{content}\n", path.display());
+    std::fs::write(&file, text.as_bytes())
+        .map_err(|error| format!("无法写入{title}临时文件：{error}"))?;
+    open_file(&file)?;
+    Ok(format!("{title}已打开"))
 }
 
 fn wheel_scrolls_columns(delta_x: f32, delta_y: f32) -> bool {
