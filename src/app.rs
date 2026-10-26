@@ -6,20 +6,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-mod devices;
-
 use crate::actions::*;
-use crate::context_menu::{ContextMenuTarget, render_context_menu, show_native_context_menu};
+use crate::context_menu::{ContextMenuTarget, render_context_menu, show_system_menu};
+use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
     FileEntry, SortSpec, create_folder, format_size, load_directory, open_file, recycle_entry,
     rename_entry, search_directory, transfer_entry, validate_name,
 };
+use crate::platform::{default_root_path, root_directory};
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_badge};
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
     run_vcs_operation, run_vcs_query,
 };
-use devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -177,7 +176,7 @@ impl KiteApp {
             .filter(|path| path.is_dir())
             .or_else(dirs::home_dir)
             .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("C:\\"))
+            .unwrap_or_else(default_root_path)
     }
 
     pub(crate) fn new_at(
@@ -187,7 +186,7 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) -> Self {
         let quick_links = build_quick_links();
-        let snapshot = devices::snapshot();
+        let snapshot = crate::devices::snapshot();
         let (connected_devices, drives) = volume_quick_links(&snapshot.volumes);
         let portable_devices = snapshot.portable_devices;
         let address_input = cx.new(|cx| {
@@ -292,7 +291,9 @@ impl KiteApp {
         self._device_task = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
-                let snapshot = cx.background_spawn(async { devices::snapshot() }).await;
+                let snapshot = cx
+                    .background_spawn(async { crate::devices::snapshot() })
+                    .await;
                 if this
                     .update(cx, |this, cx| this.apply_device_snapshot(snapshot, cx))
                     .is_err()
@@ -1138,20 +1139,15 @@ impl KiteApp {
             ContextMenuCommand::Vcs(command) => {
                 self.run_vcs_command(command, action.target.clone(), window, cx)
             }
-            ContextMenuCommand::NativeShell => {
-                self.open_native_shell_menu(action.target.clone(), window, cx)
+            ContextMenuCommand::SystemMenu => {
+                self.open_system_menu(action.target.clone(), window, cx)
             }
             ContextMenuCommand::Refresh => self.refresh(window, cx),
         }
     }
 
-    fn open_native_shell_menu(
-        &mut self,
-        path: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match show_native_context_menu(window, &path) {
+    fn open_system_menu(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        match show_system_menu(window, &path) {
             Ok(true) => self.refresh(window, cx),
             Ok(false) => {}
             Err(error) => {
@@ -2503,7 +2499,6 @@ fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLi
     let mut drives = Vec::new();
 
     for volume in volumes {
-        let letter = volume.path.to_string_lossy().chars().next().unwrap_or('?');
         let name = volume
             .volume_name
             .as_deref()
@@ -2529,7 +2524,7 @@ fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLi
             _ => IconName::HardDrive,
         };
         let link = QuickLink {
-            label: format!("{name} ({letter}:)").into(),
+            label: crate::platform::volume_label(name, &volume.path).into(),
             path: volume.path.clone(),
             icon,
             detail: volume
@@ -2559,14 +2554,7 @@ fn path_text(path: &Path) -> String {
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
-    let normalize = |path: &Path| {
-        let mut value = path.to_string_lossy().replace('/', "\\").to_lowercase();
-        while value.len() > 3 && value.ends_with('\\') {
-            value.pop();
-        }
-        value
-    };
-    normalize(left) == normalize(right)
+    crate::platform::paths_equal(left, right)
 }
 
 fn open_vcs_query_text(tool: VcsTool, query: VcsQuery, path: &Path) -> Result<String, String> {
@@ -2624,16 +2612,13 @@ fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, St
         return Ok(home.join(rest));
     }
 
-    let root = current_dir
-        .ancestors()
-        .last()
-        .unwrap_or(current_dir)
-        .to_path_buf();
     if raw == "/" {
-        return Ok(root);
+        return Ok(root_directory(current_dir));
     }
+
+    #[cfg(target_os = "windows")]
     if raw.starts_with('/') && !raw.starts_with("//") {
-        return Ok(root.join(raw.trim_start_matches('/')));
+        return Ok(root_directory(current_dir).join(raw.trim_start_matches('/')));
     }
 
     let path = PathBuf::from(raw);

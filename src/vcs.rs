@@ -7,6 +7,7 @@ use std::os::windows::process::CommandExt;
 
 use crate::fs::{FileEntry, VcsStatus, worse_status};
 
+#[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug)]

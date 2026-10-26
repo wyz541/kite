@@ -10,6 +10,18 @@ Kite 的右键菜单分为两层：
 这个分层避免 Kite 重写全部 Windows 功能。
 这个分层也保留快速菜单和原生系统扩展。
 
+## 跨平台边界
+
+右键菜单共享命令语义，不共享菜单渲染器。
+
+- Windows 使用 GPUI 和 Win32 Shell 扩展。
+- macOS 使用 SwiftUI `contextMenu` 和 AppKit 菜单。
+- macOS 不链接 GPUI。
+- macOS 使用 AppKit 执行 Finder、Quick Look、分享和废纸篓操作。
+
+本文件中的 `IContextMenu` 流程只属于 Windows 适配器。
+跨平台总览见 `docs/architecture/platforms.md`。
+
 ## 问题
 
 旧实现把核心操作和 Git/SVN 操作写在两个菜单构建位置。

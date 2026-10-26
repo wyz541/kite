@@ -1,19 +1,29 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[cfg(windows)]
 mod actions;
 
+#[cfg(windows)]
 mod app;
+#[cfg(windows)]
 mod context_menu;
-mod fs;
+#[cfg(windows)]
 mod table;
+#[cfg(windows)]
 mod tabs;
-mod vcs;
 
+#[cfg(windows)]
 use app::KiteApp;
+#[cfg(windows)]
 use gpui_kit::component::{Theme, ThemeMode};
+#[cfg(windows)]
 use gpui_kit::*;
+#[cfg(windows)]
+pub use kite_core::{devices, fs, platform, vcs};
+#[cfg(windows)]
 use tabs::KiteWindow;
 
+#[cfg(windows)]
 fn main() {
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
@@ -39,3 +49,6 @@ fn main() {
             cx.activate(true);
         });
 }
+
+#[cfg(not(windows))]
+fn main() {}

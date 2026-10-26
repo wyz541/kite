@@ -1,11 +1,11 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DeviceSnapshot {
+pub struct DeviceSnapshot {
     pub volumes: Vec<StorageVolume>,
     pub portable_devices: Vec<PortableDevice>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum VolumeKind {
+pub enum VolumeKind {
     Usb,
     Removable,
     Fixed,
@@ -15,13 +15,14 @@ pub(crate) enum VolumeKind {
 }
 
 impl VolumeKind {
-    pub(crate) fn is_removable(self) -> bool {
+    #[allow(dead_code)]
+    pub fn is_removable(self) -> bool {
         matches!(self, Self::Usb | Self::Removable)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct StorageVolume {
+pub struct StorageVolume {
     pub path: std::path::PathBuf,
     pub volume_name: Option<String>,
     pub device_name: Option<String>,
@@ -31,7 +32,7 @@ pub(crate) struct StorageVolume {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PortableDevice {
+pub struct PortableDevice {
     pub name: String,
 }
 
@@ -71,7 +72,7 @@ mod platform {
         product: Option<String>,
     }
 
-    pub(crate) fn snapshot() -> DeviceSnapshot {
+    pub fn snapshot() -> DeviceSnapshot {
         DeviceSnapshot {
             volumes: storage_volumes(),
             portable_devices: portable_devices(),
@@ -368,11 +369,52 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::{DeviceSnapshot, StorageVolume, VolumeKind};
+    use sysinfo::Disks;
+
+    pub fn snapshot() -> DeviceSnapshot {
+        let disks = Disks::new_with_refreshed_list();
+        let mut volumes = disks
+            .list()
+            .iter()
+            .map(|disk| {
+                let mount = disk.mount_point();
+                let file_system = disk.file_system().to_string_lossy().to_lowercase();
+                let kind = if matches!(file_system.as_str(), "smbfs" | "nfs" | "afpfs") {
+                    VolumeKind::Network
+                } else if matches!(file_system.as_str(), "cd9660" | "udf") {
+                    VolumeKind::Optical
+                } else if disk.is_removable() || mount.starts_with("/Volumes/") {
+                    VolumeKind::Removable
+                } else {
+                    VolumeKind::Fixed
+                };
+                let name = disk.name().to_string_lossy().trim().to_string();
+                StorageVolume {
+                    path: mount.to_path_buf(),
+                    volume_name: (!name.is_empty()).then_some(name.clone()),
+                    device_name: (!name.is_empty()).then_some(name),
+                    kind,
+                    free_bytes: Some(disk.available_space()),
+                    total_bytes: Some(disk.total_space()),
+                }
+            })
+            .collect::<Vec<_>>();
+        volumes.sort_by(|left, right| left.path.cmp(&right.path));
+        DeviceSnapshot {
+            volumes,
+            portable_devices: Vec::new(),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod platform {
     use super::DeviceSnapshot;
 
-    pub(crate) fn snapshot() -> DeviceSnapshot {
+    pub fn snapshot() -> DeviceSnapshot {
         DeviceSnapshot {
             volumes: Vec::new(),
             portable_devices: Vec::new(),
@@ -380,4 +422,4 @@ mod platform {
     }
 }
 
-pub(crate) use platform::snapshot;
+pub use platform::snapshot;
