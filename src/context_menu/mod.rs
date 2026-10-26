@@ -5,16 +5,49 @@ use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
 use crate::actions::{ContextMenuAction, ContextMenuCommand, VcsMenuCommand};
+use crate::platform::HostPlatform;
 
 #[cfg(target_os = "windows")]
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::show_native_context_menu;
+pub(crate) use windows::show_system_menu;
 
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn show_native_context_menu(_: &Window, _: &std::path::Path) -> Result<bool, String> {
-    Err("Windows 原生右键菜单仅支持 Windows".to_string())
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContextMenuPolicy {
+    pub platform: HostPlatform,
+    pub compact: bool,
+    pub hide_unavailable: bool,
+    system_menu_label: &'static str,
+}
+
+impl ContextMenuPolicy {
+    pub(crate) const fn current() -> Self {
+        Self::for_platform(crate::platform::host_platform())
+    }
+
+    pub(crate) const fn for_platform(platform: HostPlatform) -> Self {
+        match platform {
+            HostPlatform::Windows => Self {
+                platform,
+                compact: false,
+                hide_unavailable: false,
+                system_menu_label: "Windows 原生菜单…",
+            },
+            HostPlatform::MacOS => Self {
+                platform,
+                compact: true,
+                hide_unavailable: true,
+                system_menu_label: "macOS 系统菜单…",
+            },
+            HostPlatform::Other => Self {
+                platform,
+                compact: true,
+                hide_unavailable: true,
+                system_menu_label: "系统菜单…",
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -85,7 +118,7 @@ impl ContextMenuModel {
         });
     }
 
-    fn normalize(&mut self) {
+    fn normalize(&mut self, policy: ContextMenuPolicy) {
         let mut normalized = Vec::with_capacity(self.entries.len());
         for entry in self.entries.drain(..) {
             if matches!(entry, ContextMenuNode::Separator)
@@ -93,6 +126,13 @@ impl ContextMenuModel {
                     || matches!(normalized.last(), Some(ContextMenuNode::Separator)))
             {
                 continue;
+            }
+            if policy.hide_unavailable {
+                match &entry {
+                    ContextMenuNode::Item { enabled: false, .. }
+                    | ContextMenuNode::Submenu { enabled: false, .. } => continue,
+                    _ => {}
+                }
             }
             normalized.push(entry);
         }
@@ -104,16 +144,26 @@ impl ContextMenuModel {
 }
 
 trait ContextMenuProvider {
-    fn append(&self, target: &ContextMenuTarget, model: &mut ContextMenuModel);
+    fn append(
+        &self,
+        target: &ContextMenuTarget,
+        policy: ContextMenuPolicy,
+        model: &mut ContextMenuModel,
+    );
 }
 
 struct CoreMenuProvider;
 struct VcsMenuProvider;
-struct NativeShellMenuProvider;
+struct SystemMenuProvider;
 struct RefreshMenuProvider;
 
 impl ContextMenuProvider for CoreMenuProvider {
-    fn append(&self, target: &ContextMenuTarget, model: &mut ContextMenuModel) {
+    fn append(
+        &self,
+        target: &ContextMenuTarget,
+        policy: ContextMenuPolicy,
+        model: &mut ContextMenuModel,
+    ) {
         let disabled = target.loading;
         let open_label = if target.is_dir {
             "打开文件夹"
@@ -140,7 +190,9 @@ impl ContextMenuProvider for CoreMenuProvider {
             ContextMenuCommand::Paste,
             !disabled && target.can_paste,
         );
-        model.separator();
+        if !policy.compact {
+            model.separator();
+        }
         model.item(
             "新建文件夹",
             IconName::FolderPlus,
@@ -163,7 +215,12 @@ impl ContextMenuProvider for CoreMenuProvider {
 }
 
 impl ContextMenuProvider for VcsMenuProvider {
-    fn append(&self, target: &ContextMenuTarget, model: &mut ContextMenuModel) {
+    fn append(
+        &self,
+        target: &ContextMenuTarget,
+        _: ContextMenuPolicy,
+        model: &mut ContextMenuModel,
+    ) {
         model.separator();
         model.submenu(
             "Git",
@@ -180,20 +237,33 @@ impl ContextMenuProvider for VcsMenuProvider {
     }
 }
 
-impl ContextMenuProvider for NativeShellMenuProvider {
-    fn append(&self, target: &ContextMenuTarget, model: &mut ContextMenuModel) {
+impl ContextMenuProvider for SystemMenuProvider {
+    fn append(
+        &self,
+        target: &ContextMenuTarget,
+        policy: ContextMenuPolicy,
+        model: &mut ContextMenuModel,
+    ) {
         model.separator();
         model.item(
-            "Windows 原生菜单…",
+            policy.system_menu_label,
             IconName::Ellipsis,
-            ContextMenuCommand::NativeShell,
+            ContextMenuCommand::SystemMenu,
             !target.loading,
         );
     }
 }
 
 impl ContextMenuProvider for RefreshMenuProvider {
-    fn append(&self, _: &ContextMenuTarget, model: &mut ContextMenuModel) {
+    fn append(
+        &self,
+        _: &ContextMenuTarget,
+        policy: ContextMenuPolicy,
+        model: &mut ContextMenuModel,
+    ) {
+        if policy.compact {
+            return;
+        }
         model.separator();
         model.item(
             "刷新",
@@ -308,18 +378,18 @@ fn menu_item(
     }
 }
 
-fn build_model(target: &ContextMenuTarget) -> ContextMenuModel {
+fn build_model(target: &ContextMenuTarget, policy: ContextMenuPolicy) -> ContextMenuModel {
     let providers: [&dyn ContextMenuProvider; 4] = [
         &CoreMenuProvider,
         &VcsMenuProvider,
-        &NativeShellMenuProvider,
+        &SystemMenuProvider,
         &RefreshMenuProvider,
     ];
     let mut model = ContextMenuModel::default();
     for provider in providers {
-        provider.append(target, &mut model);
+        provider.append(target, policy, &mut model);
     }
-    model.normalize();
+    model.normalize(policy);
     model
 }
 
@@ -377,7 +447,8 @@ pub(crate) fn render_context_menu(
     window: &mut Window,
     cx: &mut App,
 ) -> PopupMenu {
-    let model = build_model(target);
+    let policy = ContextMenuPolicy::current();
+    let model = build_model(target, policy);
     let menu = menu.label(target.title.clone()).separator();
     append_nodes(menu, &model.entries, &target.path, window, cx)
 }
@@ -385,9 +456,10 @@ pub(crate) fn render_context_menu(
 #[cfg(test)]
 mod tests {
     use super::{
-        ContextMenuCommand, ContextMenuModel, ContextMenuNode, ContextMenuTarget, VcsMenuCommand,
-        build_model,
+        ContextMenuCommand, ContextMenuModel, ContextMenuNode, ContextMenuPolicy,
+        ContextMenuTarget, VcsMenuCommand, build_model,
     };
+    use crate::platform::HostPlatform;
     use std::path::PathBuf;
 
     fn target() -> ContextMenuTarget {
@@ -400,6 +472,10 @@ mod tests {
             git_available: true,
             svn_available: true,
         }
+    }
+
+    fn windows_policy() -> ContextMenuPolicy {
+        ContextMenuPolicy::for_platform(HostPlatform::Windows)
     }
 
     fn submenu_entries(model: &ContextMenuModel, label: &str) -> Vec<ContextMenuNode> {
@@ -419,7 +495,7 @@ mod tests {
 
     #[test]
     fn first_level_menu_keeps_git_svn_and_native_shell() {
-        let model = build_model(&target());
+        let model = build_model(&target(), windows_policy());
         let labels = model
             .entries
             .iter()
@@ -438,7 +514,7 @@ mod tests {
 
     #[test]
     fn git_menu_contains_complete_action_set() {
-        let model = build_model(&target());
+        let model = build_model(&target(), windows_policy());
         let entries = submenu_entries(&model, "Git");
         let commands = entries
             .iter()
@@ -462,7 +538,7 @@ mod tests {
 
     #[test]
     fn svn_menu_contains_complete_action_set() {
-        let model = build_model(&target());
+        let model = build_model(&target(), windows_policy());
         let entries = submenu_entries(&model, "SVN");
         let commands = entries
             .iter()
@@ -487,7 +563,7 @@ mod tests {
     fn loading_disables_target_actions() {
         let mut target = target();
         target.loading = true;
-        let model = build_model(&target);
+        let model = build_model(&target, windows_policy());
         let native_shell_enabled = model.entries.iter().any(|entry| {
             matches!(
                 entry,
@@ -507,5 +583,30 @@ mod tests {
 
         assert!(native_shell_enabled);
         assert!(vcs_disabled);
+    }
+
+    #[test]
+    fn macos_policy_hides_unavailable_vcs_and_uses_platform_label() {
+        let mut target = target();
+        target.git_available = false;
+        target.svn_available = false;
+        let model = build_model(
+            &target,
+            ContextMenuPolicy::for_platform(HostPlatform::MacOS),
+        );
+        let labels = model
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ContextMenuNode::Item { label, .. } | ContextMenuNode::Submenu { label, .. } => {
+                    Some(*label)
+                }
+                ContextMenuNode::Separator => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(!labels.contains(&"Git"));
+        assert!(!labels.contains(&"SVN"));
+        assert!(labels.contains(&"macOS 系统菜单…"));
     }
 }

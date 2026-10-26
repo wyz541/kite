@@ -447,23 +447,7 @@ pub fn open_file(path: &Path) -> Result<(), String> {
 }
 
 pub fn validate_name(name: &str) -> Result<(), String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("名称不能为空".to_string());
-    }
-    if name == "." || name == ".." {
-        return Err("名称无效".to_string());
-    }
-    if name
-        .chars()
-        .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
-    {
-        return Err("名称包含 Windows 不允许的字符".to_string());
-    }
-    if name.ends_with('.') || name.ends_with(' ') {
-        return Err("名称不能以点或空格结尾".to_string());
-    }
-    Ok(())
+    crate::platform::validate_file_name(name)
 }
 
 #[cfg(target_os = "windows")]
@@ -554,9 +538,13 @@ mod tests {
     fn rejects_unsafe_names() {
         assert!(validate_name("").is_err());
         assert!(validate_name("..").is_err());
-        assert!(validate_name("bad:name").is_err());
-        assert!(validate_name("bad.").is_err());
+        assert!(validate_name("bad/name").is_err());
         assert!(validate_name("valid-name.txt").is_ok());
+        #[cfg(target_os = "windows")]
+        {
+            assert!(validate_name("bad:name").is_err());
+            assert!(validate_name("bad.").is_err());
+        }
     }
 
     #[test]

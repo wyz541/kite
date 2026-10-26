@@ -40,7 +40,7 @@ pub enum ContextMenuCommand {
     Rename,
     Recycle,
     Vcs(VcsMenuCommand),
-    NativeShell,
+    SystemMenu,
     Refresh,
 }
 

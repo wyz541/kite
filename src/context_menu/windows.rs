@@ -53,7 +53,7 @@ impl Drop for MenuGuard {
     }
 }
 
-pub(crate) fn show_native_context_menu(window: &Window, path: &Path) -> Result<bool, String> {
+pub(crate) fn show_system_menu(window: &Window, path: &Path) -> Result<bool, String> {
     let hwnd = window_hwnd(window)?;
     show_native_context_menu_for_hwnd(hwnd, path)
 }

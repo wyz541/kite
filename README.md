@@ -1,8 +1,12 @@
 # Kite
 
-Kite 是一个 Windows 原生文件管理器。Kite 使用 Rust 和 GPUI 构建。
+Kite 是一个跨平台文件管理器。
+Windows 使用 Rust 和 GPUI。
+macOS 使用 SwiftUI 和 AppKit。
+两端共享 Rust Core。
 
-GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都由 GPUI 渲染。
+macOS 不使用 GPUI，也不使用 egui。
+macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 
 ## Screenshots
 
@@ -46,7 +50,8 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 - 按名称、修改日期、类型和大小排序。
 - 递归搜索当前文件夹。
 - 双击文件夹进入下级文件夹。
-- 双击文件调用 Windows 默认程序打开文件。
+- Windows 双击文件调用 Shell 默认程序。
+- macOS 双击文件调用 `NSWorkspace`。
 - 新建文件夹、重命名和移到回收站。
 - 复制、剪切和粘贴文件或文件夹。
 - 右键文件行打开操作菜单。
@@ -54,6 +59,7 @@ GPUI 是 Zed 的 GPU 界面框架。Kite 的窗口、输入、表格和主题都
 - 显示 Git 和 SVN 状态徽标。
 - 在浅色主题和深色主题之间切换。
 - 过滤 Windows 隐藏属性和系统属性的项目。
+- macOS 使用平台文件名规则和卷枚举。
 
 ## 右键菜单
 
@@ -132,6 +138,7 @@ TortoiseGit 和 TortoiseSVN 扩展也可出现在此菜单中。
 菜单模型按功能提供者构建。
 当前提供者包括核心文件操作、Git/SVN、Windows Shell 和刷新。
 详细设计见 `docs/architecture/context-menu.md`。
+跨平台边界见 `docs/architecture/platforms.md`。
 
 ## 分栏视图与路径栏
 
@@ -275,14 +282,14 @@ py .\assets\generate_icon.py
 
 ## 构建
 
-### 环境
+### Windows 环境
 
 1. 安装稳定版 Rust。
 2. 安装 Visual Studio 2022 C++ 生成工具。
 3. 安装 Windows 10 或 Windows 11 SDK。
 4. 确认 `cargo` 和 `rustc` 在 `PATH` 中。
 
-### 开发运行
+### Windows 开发运行
 
 ```powershell
 cargo run
@@ -294,13 +301,24 @@ Kite 接受一个可选的启动文件夹：
 cargo run -- "C:\Work\Project"
 ```
 
-### 发布构建
+### Windows 发布构建
 
 ```powershell
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.4.0-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.5.0-windows-x64.zip`。
+
+### macOS 构建
+
+macOS 需要稳定版 Rust、Xcode 和 Xcode Command Line Tools。
+
+```bash
+bash apps/macos/build.sh
+```
+
+脚本生成 `apps/macos/build/Kite.app`。
+脚本同时生成 UniFFI Swift 绑定。
 
 ### 测试
 
@@ -311,23 +329,28 @@ cargo clippy --all-targets -- -D warnings
 
 ## 项目结构
 
-- `src/app.rs`：页签内容、导航状态、剪贴板、文件操作和界面。
-- `src/context_menu/mod.rs`：统一菜单模型、提供者和 GPUI 渲染器。
+- `src/app.rs`：Windows GPUI 页签内容、导航状态、剪贴板、文件操作和界面。
+- `src/lib.rs`：跨平台 Rust Core 入口和 UniFFI 基础。
+- `src/ffi.rs`：Swift 可调用的类型化 Core 接口。
+- `src/context_menu/mod.rs`：Windows 菜单模型、提供者和 GPUI 渲染器。
 - `src/context_menu/windows.rs`：Windows Shell 原生菜单桥接。
-- `src/app/devices.rs`：USB 卷、存储设备属性和 WPD 设备枚举。
-- `src/tabs.rs`：窗口页签栏、页签切换和窗口级共享剪贴板。
-- `src/fs.rs`：文件夹读取、搜索、排序、格式化、复制和回收站操作。
-- `src/table.rs`：虚拟文件表格和列定义。
-- `src/main.rs`：应用入口、主题和窗口创建。
+- `src/devices.rs`：Windows USB/WPD 和 macOS 卷枚举。
+- `src/tabs.rs`：Windows 页签栏、页签切换和共享剪贴板。
+- `src/fs.rs`：跨平台文件夹读取、搜索、排序、格式化和文件操作。
+- `src/platform/mod.rs`：跨平台路径和文件名规则。
+- `src/table.rs`：Windows 虚拟文件表格和列定义。
+- `src/main.rs`：Windows GPUI 前端入口。
+- `apps/macos/Sources`：SwiftUI 和 AppKit macOS 前端。
 - `build.rs`：Windows 图标和版本资源。
-- `assets/kite.ico`：应用图标。
+- `assets/kite.ico`：Windows 应用图标。
 
 ## 技术栈
 
 - Rust 2024 Edition
-- GPUI `0.2.2`（由 `gpui-kit 0.8.0` 固定）
-- GPUI Kit `0.8.0`
-- Windows API
+- 共享 Rust Core
+- UniFFI `0.32`
+- Windows：GPUI `0.2.2`、GPUI Kit `0.8.0`、Windows API
+- macOS：SwiftUI、AppKit、Quick Look、UniFFI Swift
 - WalkDir
 - trash
 

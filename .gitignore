@@ -1,6 +1,8 @@
 /target
 /dist
 /.cargo/
+/apps/macos/Generated/
+/apps/macos/build/
 cargo-check.log
 *.png
 !assets/kite-icon-master.png
