@@ -292,13 +292,13 @@ py .\assets\generate_icon.py
 ### Windows 开发运行
 
 ```powershell
-cargo run
+cargo run --features windows-ui
 ```
 
 Kite 接受一个可选的启动文件夹：
 
 ```powershell
-cargo run -- "C:\Work\Project"
+cargo run --features windows-ui -- "C:\Work\Project"
 ```
 
 ### Windows 发布构建
@@ -323,8 +323,9 @@ bash apps/macos/build.sh
 ### 测试
 
 ```powershell
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --lib
+cargo test --features windows-ui
+cargo clippy --all-targets --features windows-ui -- -D warnings
 ```
 
 ## 项目结构

@@ -31,10 +31,10 @@ jobs:
         run: cargo test --locked --lib
 
       - name: Run Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 
       - name: Build release binary
-        run: cargo build --locked --release
+        run: cargo build --locked --release --features windows-ui
 
       - name: Upload Windows binary
         uses: actions/upload-artifact@v4

@@ -17,7 +17,7 @@ try {
         cargo clean
     }
 
-    cargo build --release --locked
+    cargo build --release --locked --features windows-ui
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
     $resolvedDist = [IO.Path]::GetFullPath($dist).TrimEnd('\') + '\'
