@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod devices;
 
 use crate::actions::*;
+use crate::context_menu::{ContextMenuTarget, render_context_menu, show_native_context_menu};
 use crate::fs::{
     FileEntry, SortSpec, create_folder, format_size, load_directory, open_file, recycle_entry,
     rename_entry, search_directory, transfer_entry, validate_name,
@@ -22,7 +23,7 @@ use devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{
@@ -1036,12 +1037,34 @@ impl KiteApp {
         }
     }
 
+    fn entry_for_path(&self, cx: &App, path: &Path) -> Option<FileEntry> {
+        if let Some(entry) = self
+            .column_panes
+            .iter()
+            .flat_map(|pane| pane.entries.iter())
+            .find(|entry| same_path(&entry.path, path))
+            .cloned()
+        {
+            return Some(entry);
+        }
+        self.table
+            .read(cx)
+            .delegate()
+            .entries()
+            .iter()
+            .find(|entry| same_path(&entry.path, path))
+            .cloned()
+    }
+
     fn open_entry(&mut self, entry: FileEntry, window: &mut Window, cx: &mut Context<Self>) {
-        if entry.is_dir() {
-            self.navigate_to(entry.path, NavigationIntent::Push, window, cx);
+        self.open_path(entry.path, window, cx);
+    }
+
+    fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if path.is_dir() {
+            self.navigate_to(path, NavigationIntent::Push, window, cx);
             return;
         }
-        let path = entry.path;
         self.error = None;
         self.notice = Some("正在打开文件…".into());
         cx.notify();
@@ -1081,42 +1104,67 @@ impl KiteApp {
             self.open_entry(entry, window, cx);
         }
     }
-    fn on_row_context_action(
+
+    fn on_context_menu_action(
         &mut self,
-        action: &RowContextAction,
+        action: &ContextMenuAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(entry) = self.table.read(cx).delegate().entry(action.row).cloned() else {
-            self.error = Some("项目已不存在，列表已刷新".into());
-            self.refresh(window, cx);
-            return;
-        };
-
         match action.command {
-            RowContextCommand::Open => self.open_entry(entry, window, cx),
-            RowContextCommand::Copy => self.set_clipboard_entry(entry, ClipboardMode::Copy, cx),
-            RowContextCommand::Cut => self.set_clipboard_entry(entry, ClipboardMode::Cut, cx),
-            RowContextCommand::Rename => self.begin_rename_entry(entry, window, cx),
-            RowContextCommand::Recycle => self.confirm_recycle_entry(entry, window, cx),
-            RowContextCommand::Vcs(command) => {
-                self.run_vcs_command(command, entry.path, window, cx)
+            ContextMenuCommand::Open => self.open_path(action.target.clone(), window, cx),
+            ContextMenuCommand::Copy => {
+                self.set_clipboard_path(action.target.clone(), ClipboardMode::Copy, cx)
+            }
+            ContextMenuCommand::Cut => {
+                self.set_clipboard_path(action.target.clone(), ClipboardMode::Cut, cx)
+            }
+            ContextMenuCommand::Paste => self.paste_clipboard(window, cx),
+            ContextMenuCommand::NewFolder => self.begin_new_folder(window, cx),
+            ContextMenuCommand::Rename => {
+                if let Some(entry) = self.entry_for_path(cx, &action.target) {
+                    self.begin_rename_entry(entry, window, cx);
+                } else {
+                    self.context_target_missing(window, cx);
+                }
+            }
+            ContextMenuCommand::Recycle => {
+                if let Some(entry) = self.entry_for_path(cx, &action.target) {
+                    self.confirm_recycle_entry(entry, window, cx);
+                } else {
+                    self.context_target_missing(window, cx);
+                }
+            }
+            ContextMenuCommand::Vcs(command) => {
+                self.run_vcs_command(command, action.target.clone(), window, cx)
+            }
+            ContextMenuCommand::NativeShell => {
+                self.open_native_shell_menu(action.target.clone(), window, cx)
+            }
+            ContextMenuCommand::Refresh => self.refresh(window, cx),
+        }
+    }
+
+    fn open_native_shell_menu(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match show_native_context_menu(window, &path) {
+            Ok(true) => self.refresh(window, cx),
+            Ok(false) => {}
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+                cx.notify();
             }
         }
     }
 
-    fn on_vcs_menu_action(
-        &mut self,
-        action: &VcsMenuAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(entry) = self.selected_entry(cx) else {
-            self.error = Some("请先选择一个项目".into());
-            cx.notify();
-            return;
-        };
-        self.run_vcs_command(action.command, entry.path, window, cx);
+    fn context_target_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.error = Some("项目已不存在，列表已刷新".into());
+        self.refresh(window, cx);
     }
 
     fn run_vcs_command(
@@ -1456,10 +1504,11 @@ impl KiteApp {
         mode: ClipboardMode,
         cx: &mut Context<Self>,
     ) {
-        *self.clipboard.borrow_mut() = Some(FileClipboard {
-            path: entry.path,
-            mode,
-        });
+        self.set_clipboard_path(entry.path, mode, cx);
+    }
+
+    fn set_clipboard_path(&mut self, path: PathBuf, mode: ClipboardMode, cx: &mut Context<Self>) {
+        *self.clipboard.borrow_mut() = Some(FileClipboard { path, mode });
         self.sync_clipboard_state(cx);
         self.error = None;
         self.notice = Some(if mode == ClipboardMode::Cut {
@@ -2233,6 +2282,7 @@ impl KiteApp {
         };
         let entries = pane.entries.clone();
         let selected_path = pane.selected_path.clone();
+        let loading = pane.loading;
         let can_paste = self.clipboard.borrow().is_some();
         let git_available = pane.git_available;
         let svn_available = pane.svn_available;
@@ -2294,15 +2344,16 @@ impl KiteApp {
                     }),
                 )
                 .context_menu(move |menu, window, cx| {
-                    build_column_context_menu(
-                        menu,
-                        window,
-                        cx,
-                        &menu_entry,
+                    let target = ContextMenuTarget {
+                        path: menu_entry.path.clone(),
+                        title: menu_entry.name.clone(),
+                        is_dir: menu_entry.is_dir(),
+                        loading,
                         can_paste,
-                        row_git_available,
-                        row_svn_available,
-                    )
+                        git_available: row_git_available,
+                        svn_available: row_svn_available,
+                    };
+                    render_context_menu(menu, &target, window, cx)
                 })
                 .into_any_element();
             rows.push(row);
@@ -2593,239 +2644,6 @@ fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, St
     }
 }
 
-fn build_column_context_menu(
-    menu: PopupMenu,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-    entry: &FileEntry,
-    can_paste: bool,
-    git_available: bool,
-    svn_available: bool,
-) -> PopupMenu {
-    let open_label = if entry.is_dir() {
-        "打开文件夹"
-    } else {
-        "打开文件"
-    };
-    let mut menu = menu
-        .label(entry.name.clone())
-        .separator()
-        .menu_with_icon_and_disabled(
-            open_label,
-            IconName::FolderOpen,
-            Box::new(OpenSelection),
-            false,
-        )
-        .separator()
-        .menu_with_icon_and_disabled("复制", IconName::Copy, Box::new(CopySelection), false)
-        .menu_with_icon_and_disabled("剪切", IconName::Scissors, Box::new(CutSelection), false)
-        .menu_with_icon_and_disabled(
-            "粘贴",
-            IconName::ClipboardPaste,
-            Box::new(PasteSelection),
-            !can_paste,
-        )
-        .separator()
-        .menu_with_icon_and_disabled(
-            "新建文件夹",
-            IconName::FolderPlus,
-            Box::new(CreateFolder),
-            false,
-        )
-        .menu_with_icon_and_disabled("重命名", IconName::Pencil, Box::new(RenameSelection), false)
-        .menu_with_icon_and_disabled(
-            "移到回收站",
-            IconName::Trash,
-            Box::new(RecycleSelection),
-            false,
-        );
-
-    let git_disabled = !git_available;
-    menu = menu.separator().submenu_with_icon(
-        Some(IconName::GitBranch.into()),
-        "Git",
-        window,
-        cx,
-        move |menu, _, _| {
-            menu.menu_with_icon_and_disabled(
-                "添加",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitAdd,
-                }),
-                git_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "取消暂存",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitUnstage,
-                }),
-                git_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "提交…",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitCommit,
-                }),
-                git_disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled(
-                "拉取",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitPull,
-                }),
-                git_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "推送",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitPush,
-                }),
-                git_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "获取",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitFetch,
-                }),
-                git_disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled(
-                "显示差异",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitDiff,
-                }),
-                git_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "显示日志",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitLog,
-                }),
-                git_disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled(
-                "还原…",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitRevert,
-                }),
-                git_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "清理工作区…",
-                IconName::GitBranch,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::GitClean,
-                }),
-                git_disabled,
-            )
-        },
-    );
-
-    let svn_disabled = !svn_available;
-    menu = menu.separator().submenu_with_icon(
-        Some(IconName::Boxes.into()),
-        "SVN",
-        window,
-        cx,
-        move |menu, _, _| {
-            menu.menu_with_icon_and_disabled(
-                "更新",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnUpdate,
-                }),
-                svn_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "添加",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnAdd,
-                }),
-                svn_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "提交…",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnCommit,
-                }),
-                svn_disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled(
-                "锁定",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnLock,
-                }),
-                svn_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "解锁",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnUnlock,
-                }),
-                svn_disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled(
-                "显示差异",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnDiff,
-                }),
-                svn_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "显示日志",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnLog,
-                }),
-                svn_disabled,
-            )
-            .separator()
-            .menu_with_icon_and_disabled(
-                "还原…",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnRevert,
-                }),
-                svn_disabled,
-            )
-            .menu_with_icon_and_disabled(
-                "清理工作副本",
-                IconName::Boxes,
-                Box::new(VcsMenuAction {
-                    command: VcsMenuCommand::SvnCleanup,
-                }),
-                svn_disabled,
-            )
-        },
-    );
-
-    menu.separator().menu_with_icon_and_disabled(
-        "刷新",
-        IconName::RotateCw,
-        Box::new(RefreshFolder),
-        false,
-    )
-}
-
 fn column_chain(root: &Path) -> Vec<PathBuf> {
     let mut chain = root.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
     chain.reverse();
@@ -3042,8 +2860,7 @@ impl Render for KiteApp {
             .on_action(
                 cx.listener(|this, _: &OpenSelection, window, cx| this.open_selected(window, cx)),
             )
-            .on_action(cx.listener(Self::on_row_context_action))
-            .on_action(cx.listener(Self::on_vcs_menu_action))
+            .on_action(cx.listener(Self::on_context_menu_action))
             .on_action(cx.listener(Self::show_list_view))
             .on_action(cx.listener(Self::show_columns_view))
             .on_action(cx.listener(Self::toggle_path_bar))
