@@ -19,7 +19,6 @@ actions!(
         RenameSelection,
         RecycleSelection,
         ClearSearchOverlay,
-        GoToFolder,
         ShowListView,
         ShowColumnsView,
         TogglePathBar,
