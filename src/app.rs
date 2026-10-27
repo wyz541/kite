@@ -22,7 +22,7 @@ use crate::vcs::{
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{
@@ -64,7 +64,7 @@ struct SearchState {
 enum ModalKind {
     NewFolder,
     Rename(PathBuf),
-    GoToFolder,
+
     GitCommit(PathBuf),
     SvnCommit(PathBuf),
 }
@@ -387,7 +387,6 @@ impl KiteApp {
             KeyBinding::new("secondary-tab", NextTab, Some("Kite")),
             KeyBinding::new("secondary-shift-tab", PreviousTab, Some("Kite")),
             KeyBinding::new("alt-p", TogglePathBar, Some("Kite")),
-            KeyBinding::new("secondary-shift-g", GoToFolder, Some("Kite")),
             KeyBinding::new("secondary-shift-n", CreateFolder, Some("Kite")),
             KeyBinding::new("secondary-c", CopySelection, Some("Kite")),
             KeyBinding::new("secondary-x", CutSelection, Some("Kite")),
@@ -407,11 +406,7 @@ impl KiteApp {
                 MenuItem::action("下一个页签", NextTab),
                 MenuItem::action("上一个页签", PreviousTab),
             ]),
-            Menu::new("前往").items([
-                MenuItem::action("上层文件夹", NavigateUp),
-                MenuItem::separator(),
-                MenuItem::action("前往文件夹…", GoToFolder),
-            ]),
+            Menu::new("导航").items([MenuItem::action("聚焦路径栏", FocusAddress)]),
             Menu::new("显示").items([
                 MenuItem::action("列表视图", ShowListView),
                 MenuItem::action("分栏视图", ShowColumnsView),
@@ -1679,31 +1674,6 @@ impl KiteApp {
         cx.notify();
     }
 
-    fn begin_go_to_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("文件夹路径")
-                .default_value(path_text(&self.current_dir))
-                .clean_on_escape()
-        });
-        let subscription = cx.subscribe_in(
-            &input,
-            window,
-            |this: &mut Self, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.submit_modal(window, cx);
-                }
-            },
-        );
-        self.modal = Some(ModalState {
-            kind: ModalKind::GoToFolder,
-            input: input.clone(),
-            _subscription: subscription,
-        });
-        input.update(cx, |input, cx| input.focus(window, cx));
-        cx.notify();
-    }
-
     fn close_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.modal = None;
         self.focus_table(window, cx);
@@ -1721,7 +1691,7 @@ impl KiteApp {
             ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) if value.is_empty() => {
                 Err("请输入提交说明".to_string())
             }
-            ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) | ModalKind::GoToFolder => Ok(()),
+            ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) => Ok(()),
         };
         if let Err(error) = validation {
             self.error = Some(error.into());
@@ -1774,13 +1744,6 @@ impl KiteApp {
                 })
                 .detach();
             }
-            ModalKind::GoToFolder => match resolve_location_input(&value, &self.current_dir) {
-                Ok(path) => self.navigate_to(path, NavigationIntent::Push, window, cx),
-                Err(error) => {
-                    self.error = Some(error.into());
-                    cx.notify();
-                }
-            },
             ModalKind::GitCommit(path) => {
                 self.modal = None;
                 self.run_vcs_task(VcsTool::Git, VcsOperation::Commit(value), path, window, cx);
@@ -2418,11 +2381,6 @@ impl KiteApp {
                     "重命名文件"
                 },
             ),
-            ModalKind::GoToFolder => (
-                "前往文件夹",
-                "输入路径。~ 表示个人文件夹。/ 表示当前磁盘根目录。",
-                "前往",
-            ),
             ModalKind::GitCommit(_) => (
                 "Git 提交",
                 "输入提交说明。Git 将提交所选路径的已暂存更改。",
@@ -2895,9 +2853,6 @@ impl Render for KiteApp {
             .on_action(cx.listener(Self::show_list_view))
             .on_action(cx.listener(Self::show_columns_view))
             .on_action(cx.listener(Self::toggle_path_bar))
-            .on_action(
-                cx.listener(|this, _: &GoToFolder, window, cx| this.begin_go_to_folder(window, cx)),
-            )
             .on_action(cx.listener(|this, _: &CopySelection, _window, cx| {
                 this.set_clipboard(ClipboardMode::Copy, cx)
             }))
@@ -2974,28 +2929,6 @@ impl Render for KiteApp {
                             .tooltip("上一级 (Alt+↑)")
                             .disabled(!can_up)
                             .on_click(cx.listener(Self::go_up)),
-                    )
-                    .child(
-                        Button::new("go-menu")
-                            .ghost()
-                            .compact()
-                            .label("前往")
-                            .dropdown_caret(true)
-                            .dropdown_menu(move |menu, _, _| {
-                                menu.menu_with_icon_and_disabled(
-                                    "上层文件夹",
-                                    IconName::ArrowUp,
-                                    Box::new(NavigateUp),
-                                    !can_up,
-                                )
-                                .separator()
-                                .menu_with_icon_and_disabled(
-                                    "前往文件夹…",
-                                    IconName::FolderOpen,
-                                    Box::new(GoToFolder),
-                                    false,
-                                )
-                            }),
                     )
                     .child(
                         Input::new(&self.address_input)

@@ -22,18 +22,12 @@ struct KiteMacApp: App {
         }
         .windowStyle(.titleBar)
         .commands {
-            CommandMenu("前往") {
-                Button("上层文件夹") {
-                    model.navigateUp()
-                }
-                .keyboardShortcut(.upArrow, modifiers: [.command])
-
-                Button("前往文件夹…") {
+            CommandMenu("导航") {
+                Button("聚焦路径栏") {
                     model.focusAddress()
                 }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .keyboardShortcut("l", modifiers: [.command])
             }
-
             CommandMenu("页签") {
                 Button("新建页签") {
                     model.newTab()

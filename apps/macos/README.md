@@ -23,6 +23,7 @@ The script creates `apps/macos/build/Kite.app`.
 - SwiftUI column browser.
 - SwiftUI tab bar with new, close, and switch commands.
 - Tab and directory restoration on app relaunch.
+- One path entry with Command+L focus and Command+Up parent navigation.
 - macOS 26 Liquid Glass toolbar and path controls.
 - macOS 13 through 15 material fallback.
 - AppKit workspace actions.

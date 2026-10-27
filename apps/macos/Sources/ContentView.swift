@@ -123,7 +123,8 @@ struct ContentView: View {
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.borderless)
-            .help("上层文件夹")
+            .keyboardShortcut(.upArrow, modifiers: [.command])
+            .help("上层文件夹 (Command+↑)")
             .accessibilityLabel("上层文件夹")
 
             Button {
@@ -151,11 +152,13 @@ struct ContentView: View {
                 .padding(.horizontal, 8)
                 .frame(minHeight: 28)
 
-            Button("前往") {
+            Button("打开") {
                 model.loadRoot(model.address)
             }
             .buttonStyle(.borderless)
             .controlSize(.small)
+            .help("打开输入的路径")
+            .accessibilityLabel("打开输入的路径")
             .frame(minHeight: 28)
         }
         .padding(.horizontal, 6)
