@@ -37,6 +37,7 @@ Kite 把界面当作一条可牵引的线。
 - 预览属性文本支持选择，并可用 `Ctrl+C` 或 `Command+C` 复制。
 - 预览标题栏提供“复制预览信息”按钮。
 - 使用地址栏打开绝对路径或相对路径。
+- 输入文件路径时，Kite 打开文件所在文件夹，并调用系统默认程序打开文件。
 - 使用返回、前进和上一级按钮导航。
 - 按名称、修改日期、类型和大小排序。
 - 递归搜索当前文件夹。
@@ -241,7 +242,7 @@ Kite 在状态变化和窗口关闭时保存会话。
 会话还包含列表或分栏模式以及路径栏开关。
 应用下次启动时恢复这些页签和目录。
 
-Windows 使用命令行目录启动时，命令行目录优先。
+Windows 使用命令行路径启动时，命令行路径优先。
 macOS 使用 `Command+T` 新建页签。
 macOS 使用 `Command+W` 关闭页签。
 macOS 使用 `Control+Tab` 切换页签。
@@ -360,11 +361,14 @@ py .\assets\generate_icon.py
 cargo run --features windows-ui
 ```
 
-Kite 接受一个可选的启动文件夹：
+Kite 接受一个可选的启动路径：
 
 ```powershell
 cargo run --features windows-ui -- "C:\Work\Project"
 ```
+
+启动路径可以是文件夹或文件。
+文件路径会打开文件所在文件夹，并调用系统默认程序打开文件。
 
 ### Windows 发布构建
 

@@ -138,6 +138,32 @@ struct DirectoryScrollRoute {
     column_delta: f32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AppLaunchTarget {
+    pub directory: PathBuf,
+    pub file: Option<PathBuf>,
+}
+
+impl AppLaunchTarget {
+    fn from_existing_path(path: PathBuf) -> Option<Self> {
+        let path = absolute_path(path);
+        let metadata = std::fs::metadata(&path).ok()?;
+        if metadata.is_dir() {
+            return Some(Self {
+                directory: path,
+                file: None,
+            });
+        }
+        if metadata.is_file() {
+            return Some(Self {
+                directory: path.parent()?.to_path_buf(),
+                file: Some(path),
+            });
+        }
+        None
+    }
+}
+
 pub struct KiteApp {
     current_dir: PathBuf,
     history: Vec<PathBuf>,
@@ -173,6 +199,7 @@ pub struct KiteApp {
     column_vertical_scrolls: Vec<ColumnListScroll>,
     column_scroll_pending: bool,
     column_preview: Option<ColumnPreviewState>,
+    pending_file_selection: Option<PathBuf>,
     preview_generation: u64,
     _preview_task: Task<()>,
     path_bar_scroll: ScrollHandle,
@@ -184,11 +211,15 @@ pub struct KiteApp {
 }
 
 impl KiteApp {
-    pub(crate) fn launch_directory_override() -> Option<PathBuf> {
+    pub(crate) fn launch_target_override() -> Option<AppLaunchTarget> {
         std::env::args_os()
             .nth(1)
             .map(PathBuf::from)
-            .filter(|path| path.is_dir())
+            .and_then(AppLaunchTarget::from_existing_path)
+    }
+
+    pub(crate) fn launch_directory_override() -> Option<PathBuf> {
+        Self::launch_target_override().map(|target| target.directory)
     }
 
     pub(crate) fn default_directory() -> PathBuf {
@@ -204,7 +235,24 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_at_with_state(home, ViewMode::Columns, true, clipboard, window, cx)
+        Self::new_at_with_state(home, None, ViewMode::Columns, true, clipboard, window, cx)
+    }
+
+    pub(crate) fn new_launch_target(
+        target: AppLaunchTarget,
+        clipboard: SharedClipboard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_at_with_state(
+            target.directory,
+            target.file,
+            ViewMode::Columns,
+            true,
+            clipboard,
+            window,
+            cx,
+        )
     }
 
     pub(crate) fn new_restored(
@@ -224,7 +272,15 @@ impl KiteApp {
         } else {
             ViewMode::Columns
         };
-        Self::new_at_with_state(path, view_mode, state.show_path_bar, clipboard, window, cx)
+        Self::new_at_with_state(
+            path,
+            None,
+            view_mode,
+            state.show_path_bar,
+            clipboard,
+            window,
+            cx,
+        )
     }
 
     pub(crate) fn session_tab(&self) -> crate::session::SessionTabDto {
@@ -240,6 +296,7 @@ impl KiteApp {
 
     fn new_at_with_state(
         home: PathBuf,
+        initial_file: Option<PathBuf>,
         view_mode: ViewMode,
         show_path_bar: bool,
         clipboard: SharedClipboard,
@@ -252,7 +309,7 @@ impl KiteApp {
         let portable_devices = snapshot.portable_devices;
         let address_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("输入文件夹路径，按 Enter 打开")
+                .placeholder("输入文件夹或文件路径，按 Enter 打开")
                 .clean_on_escape()
         });
         let search_input = cx.new(|cx| {
@@ -329,6 +386,7 @@ impl KiteApp {
             column_vertical_scrolls: Vec::new(),
             column_scroll_pending: false,
             column_preview: None,
+            pending_file_selection: initial_file.clone(),
             preview_generation: 0,
             _preview_task: Task::ready(()),
             path_bar_scroll: ScrollHandle::new(),
@@ -342,7 +400,13 @@ impl KiteApp {
                 table_subscription,
             ],
         };
-        app.request_load(home, NavigationIntent::Initial, window, cx);
+        app.request_load_with_file_selection(
+            home,
+            NavigationIntent::Initial,
+            initial_file,
+            window,
+            cx,
+        );
         app.start_device_watcher(cx);
         app
     }
@@ -447,6 +511,18 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.request_load_with_file_selection(path, intent, None, window, cx);
+    }
+
+    fn request_load_with_file_selection(
+        &mut self,
+        path: PathBuf,
+        intent: NavigationIntent,
+        pending_file_selection: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_file_selection = pending_file_selection;
         self.clear_column_preview();
         self.cancel_search();
         self.invalidate_vcs();
@@ -477,6 +553,7 @@ impl KiteApp {
                     return;
                 }
                 this.loading = false;
+                let pending_file_selection = this.pending_file_selection.take();
                 this.table.update(cx, |state, cx| {
                     state.delegate_mut().set_loading(false);
                     cx.notify();
@@ -505,19 +582,22 @@ impl KiteApp {
                             state.refresh(cx);
                             cx.notify();
                         });
-                        if this.view_mode == ViewMode::Columns {
-                            if let Some(entries) = column_entries {
-                                this.update_columns_for_loaded_path(
-                                    this.current_dir.clone(),
-                                    entries,
-                                    column_skipped,
-                                    cx,
-                                );
-                            }
-                            this.refresh_vcs_statuses(this.current_dir.clone(), cx);
-                        } else {
-                            this.refresh_vcs_statuses(this.current_dir.clone(), cx);
+                        if this.view_mode == ViewMode::Columns
+                            && let Some(entries) = column_entries
+                        {
+                            this.update_columns_for_loaded_path(
+                                this.current_dir.clone(),
+                                entries,
+                                column_skipped,
+                                cx,
+                            );
                         }
+                        if let Some(path) = pending_file_selection.as_deref()
+                            && this.select_loaded_file(path, cx)
+                        {
+                            this.open_path(path.to_path_buf(), window, cx);
+                        }
+                        this.refresh_vcs_statuses(this.current_dir.clone(), cx);
                         this.path_bar_scroll_pending = true;
                     }
                     Err(error) => {
@@ -573,6 +653,21 @@ impl KiteApp {
         self.request_load(path, intent, window, cx);
     }
 
+    fn navigate_to_location(
+        &mut self,
+        path: PathBuf,
+        intent: NavigationIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = AppLaunchTarget::from_existing_path(path.clone()) else {
+            self.navigate_to(path, intent, window, cx);
+            return;
+        };
+        self.notice = None;
+        self.request_load_with_file_selection(target.directory, intent, target.file, window, cx);
+    }
+
     fn navigate_from_path_bar(
         &mut self,
         path: PathBuf,
@@ -599,6 +694,7 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) {
         self.clear_column_preview();
+        self.pending_file_selection = None;
         let Some((entries, skipped)) = self
             .column_panes
             .get(column)
@@ -653,7 +749,7 @@ impl KiteApp {
 
     fn navigate_from_text(&mut self, value: String, window: &mut Window, cx: &mut Context<Self>) {
         match resolve_location_input(&value, &self.current_dir) {
-            Ok(path) => self.navigate_to(path, NavigationIntent::Push, window, cx),
+            Ok(path) => self.navigate_to_location(path, NavigationIntent::Push, window, cx),
             Err(error) => {
                 self.error = Some(error.into());
                 cx.notify();
@@ -904,9 +1000,6 @@ impl KiteApp {
                     for index in 0..this.column_panes.len().saturating_sub(1) {
                         this.column_panes[index].selected_path =
                             Some(this.column_panes[index + 1].path.clone());
-                    }
-                    if let Some(last) = this.column_panes.last_mut() {
-                        last.selected_path = None;
                     }
                     cx.notify();
                 });
@@ -1599,6 +1692,37 @@ impl KiteApp {
             state.delegate_mut().set_can_paste(can_paste);
             cx.notify();
         });
+    }
+
+    fn select_loaded_file(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        if self.view_mode == ViewMode::Columns && self.active_search.is_none() {
+            let Some(column) = self.column_panes.len().checked_sub(1) else {
+                return false;
+            };
+            let Some(row) = self.column_panes[column]
+                .entries
+                .iter()
+                .position(|entry| !entry.is_dir() && same_path(&entry.path, path))
+            else {
+                return false;
+            };
+            self.select_column_entry(column, row, cx);
+            return true;
+        }
+
+        let Some(row) = self
+            .table
+            .read(cx)
+            .delegate()
+            .entries()
+            .iter()
+            .position(|entry| !entry.is_dir() && same_path(&entry.path, path))
+        else {
+            return false;
+        };
+        self.table
+            .update(cx, |state, cx| state.set_selected_row(row, cx));
+        true
     }
 
     fn select_column_entry(&mut self, column: usize, row: usize, cx: &mut Context<Self>) {
@@ -2980,6 +3104,15 @@ fn path_text(path: &Path) -> String {
     path.display().to_string()
 }
 
+fn absolute_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    std::env::current_dir()
+        .map(|current_dir| current_dir.join(&path))
+        .unwrap_or(path)
+}
+
 fn same_path(left: &Path, right: &Path) -> bool {
     crate::platform::paths_equal(left, right)
 }
@@ -3049,7 +3182,7 @@ fn route_directory_scroll(offset_after_scroll: f32, max_offset: f32) -> Director
 fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, String> {
     let raw = value.trim().trim_matches('"');
     if raw.is_empty() {
-        return Err("请输入文件夹路径".to_string());
+        return Err("请输入路径".to_string());
     }
     if raw == "~" {
         return dirs::home_dir().ok_or_else(|| "无法确定个人文件夹".to_string());
@@ -3780,6 +3913,60 @@ mod clipboard_tests {
         assert!(destination.borrow().is_some());
         *destination.borrow_mut() = None;
         assert!(source.borrow().is_none());
+    }
+}
+
+#[cfg(test)]
+mod launch_target_tests {
+    use super::{AppLaunchTarget, resolve_location_input};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_directory(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("kite-launch-{label}-{unique}"))
+    }
+
+    #[test]
+    fn file_path_uses_the_containing_directory_and_keeps_the_file() {
+        let root = temporary_directory("file");
+        fs::create_dir_all(&root).expect("create test directory");
+        let file = root.join("app_config 工作架构与运行原理.md");
+        fs::write(&file, "notes").expect("write test file");
+
+        let resolved = resolve_location_input(&format!("\"{}\"", file.display()), &root)
+            .expect("resolve quoted file path");
+        let target = AppLaunchTarget::from_existing_path(resolved).expect("classify file path");
+
+        assert_eq!(target.directory, root);
+        assert_eq!(target.file.as_deref(), Some(file.as_path()));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_path_stays_a_directory_target() {
+        let root = temporary_directory("directory");
+        fs::create_dir_all(&root).expect("create test directory");
+
+        let target = AppLaunchTarget::from_existing_path(root.clone()).expect("classify directory");
+
+        assert_eq!(target.directory, root);
+        assert!(target.file.is_none());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_path_is_not_classified_as_a_file() {
+        let root = temporary_directory("missing");
+        let missing = root.join("missing.md");
+
+        assert_eq!(AppLaunchTarget::from_existing_path(missing), None);
     }
 }
 
