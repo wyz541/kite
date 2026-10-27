@@ -194,6 +194,8 @@ SVN 状态使用圆角方形徽标。
 在分栏视图最后一栏选中文件后，Kite 显示预览和属性栏。
 属性包含名称、类型、大小、修改日期、位置和 Git/SVN 状态。
 Windows 支持图片预览和文本摘要。
+Windows 对日志显示末尾预览，不受常规文本文件大小上限影响。
+日志预览读取末尾 64 KiB，并显示最后 6,000 个字符。
 Windows 对没有内置预览的文件显示类型图标。
 macOS 使用 Quick Look 显示原生预览。
 预览中的文本内容支持鼠标选取。
@@ -370,7 +372,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.9-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.10-windows-x64.zip`。
 
 ### macOS 构建
 
