@@ -50,6 +50,7 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 - 分栏导航只加载新增或缺失的层级。
 - 使用可点击路径栏返回任意上级文件夹。
 - 使用路径输入栏跳转，使用上一级按钮返回父目录。
+- 在分栏视图最后一栏选中文件时显示预览和属性。
 - 使用地址栏打开绝对路径或相对路径。
 - 使用返回、前进和上一级按钮导航。
 - 按名称、修改日期、类型和大小排序。
@@ -173,6 +174,15 @@ Windows 使用 `Alt+P` 切换路径栏。
 分栏视图在文件或文件夹图标上显示 Git/SVN 状态码。
 Git 状态使用圆形徽标。
 SVN 状态使用圆角方形徽标。
+
+## 预览与属性
+
+在分栏视图最后一栏选中文件后，Kite 显示预览和属性栏。
+属性包含名称、类型、大小、修改日期、位置和 Git/SVN 状态。
+Windows 支持图片预览和文本摘要。
+Windows 对没有内置预览的文件显示类型图标。
+macOS 使用 Quick Look 显示原生预览。
+切换目录后预览栏自动关闭。
 
 ## 路径导航
 
@@ -341,7 +351,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.4-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.5-windows-x64.zip`。
 
 ### macOS 构建
 
