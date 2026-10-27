@@ -1996,17 +1996,6 @@ impl KiteApp {
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
             .child(div().flex_1().min_h_0().child(content))
-            .child(
-                h_flex()
-                    .h(px(30.))
-                    .px_2()
-                    .items_center()
-                    .gap_2()
-                    .text_xs()
-                    .text_color(section_color)
-                    .child(Icon::new(IconName::ShieldCheck).size_3p5())
-                    .child("本地文件，不上传"),
-            )
             .into_any_element()
     }
     fn render_path_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
