@@ -22,6 +22,7 @@ kite_core
   devices
   platform paths
   command model
+  session store
   UniFFI interface
 
 Windows frontend
@@ -31,6 +32,7 @@ Windows frontend
 
 macOS frontend
   SwiftUI views
+  SwiftUI tabs
   AppKit menu and workspace
   UniFFI Swift bindings
 ```
@@ -52,6 +54,7 @@ Core 负责以下能力：
 - 平台路径规则。
 - 稳定命令标识。
 - 跨语言数据记录。
+- 会话保存和恢复。
 
 Rust Core 输出 `rlib`、`staticlib` 和 `cdylib`。
 Swift 通过 UniFFI 生成绑定。
@@ -65,6 +68,7 @@ Windows 前端负责以下能力：
 
 - GPUI 窗口和表格。
 - 多页签。
+- 页签会话快照。
 - 分栏滚动。
 - Kite 原生右键菜单。
 - `IContextMenu` Shell 扩展菜单。
@@ -81,11 +85,13 @@ macOS 13 到 15 使用标准材质降级。
 SwiftUI 负责以下能力：
 
 - Liquid Glass 工具栏和路径控件。
+- 页签栏。
 - 窗口和工具栏。
 - 分栏视图。
 - 路径输入。
 - 状态栏。
 - App commands。
+- 窗口关闭和退出时的会话保存。
 
 AppKit 负责以下能力：
 
@@ -113,6 +119,7 @@ Swift 使用 UniFFI 记录和对象。
 - 文件条目。
 - Git 和 SVN 状态。
 - 卷和设备快照。
+- 会话读取和保存。
 
 后续接口按功能域增加。
 接口不暴露 GPUI 类型。
@@ -152,6 +159,7 @@ Swift 使用 UniFFI 记录和对象。
 | 项目 | Windows | macOS |
 |---|---|---|
 | 主 UI | GPUI | SwiftUI |
+| 页签 | GPUI 页签 | SwiftUI 页签 |
 | 功能层材质 | GPUI 主题 | Liquid Glass / 标准材质 |
 | 菜单渲染 | GPUI + Win32 | SwiftUI + AppKit |
 | 系统扩展 | Shell 扩展 | Services 和 AppKit |
@@ -186,7 +194,7 @@ macOS CI 执行以下检查：
 
 ## 当前边界
 
-- macOS UI 当前提供分栏浏览基础能力。
+- macOS 和 Windows 均支持页签和会话恢复。
 - macOS 26 使用 Liquid Glass 工具栏。
 - macOS 13 到 15 使用标准材质工具栏。
 - macOS Git/SVN 完整菜单仍待接入共享命令模型。

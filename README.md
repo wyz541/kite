@@ -40,6 +40,8 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 
 - 浏览本机文件夹。
 - 使用多个页签替换多个窗口。
+- 关闭窗口时保存页签和目录。
+- 应用重新启动时恢复页签和目录。
 - 工具栏不重复显示应用图标和应用名。
 - 识别 USB 存储设备、可移动磁盘和 WPD/MTP 便携设备。
 - 使用侧边栏访问主文件夹、桌面、文档、下载、图片和本机驱动器。
@@ -190,6 +192,24 @@ Kite 使用一个窗口承载多个页签。
 
 页签栏右侧的 `+` 按钮新建页签。
 页签的 `×` 按钮关闭页签。
+### 会话恢复
+
+Kite 在状态变化和窗口关闭时保存会话。
+会话包含页签顺序、活动页签和每个页签的当前目录。
+会话还包含列表或分栏模式以及路径栏开关。
+应用下次启动时恢复这些页签和目录。
+
+Windows 使用命令行目录启动时，命令行目录优先。
+macOS 使用 `Command+T` 新建页签。
+macOS 使用 `Command+W` 关闭页签。
+macOS 使用 `Control+Tab` 切换页签。
+
+会话文件位于平台本地数据目录。
+Windows 路径为 `%LOCALAPPDATA%\Kite\session.json`。
+macOS 路径为 `~/Library/Application Support/Kite/session.json`。
+Kite 保留 `.bak` 备份。主文件损坏时，Kite 读取备份。
+Kite 跳过不存在或不可访问的目录。
+搜索词、滚动位置、文件选择和窗口几何尺寸不保存。
 
 ## 设备识别
 
@@ -311,7 +331,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.5.1-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.0-windows-x64.zip`。
 
 ### macOS 构建
 
@@ -345,6 +365,7 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 - `src/tabs.rs`：Windows 页签栏、页签切换和共享剪贴板。
 - `src/fs.rs`：跨平台文件夹读取、搜索、排序、格式化和文件操作。
 - `src/platform/mod.rs`：跨平台路径和文件名规则。
+- `src/session.rs`：跨平台会话保存、恢复和损坏回退。
 - `src/table.rs`：Windows 虚拟文件表格和列定义。
 - `src/main.rs`：Windows GPUI 前端入口。
 - `apps/macos/Sources`：SwiftUI 和 AppKit macOS 前端。
