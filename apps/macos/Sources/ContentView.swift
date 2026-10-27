@@ -5,12 +5,14 @@ struct ContentView: View {
     @FocusState private var addressFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
-            columnBrowser
-            Divider()
-            statusBar
+        ZStack {
+            KiteGlassBackdrop()
+
+            VStack(spacing: 0) {
+                toolbar
+                columnBrowser
+                statusBar
+            }
         }
         .frame(minWidth: 900, minHeight: 620)
         .onChange(of: model.focusedAddressRequest) { _ in
@@ -19,36 +21,70 @@ struct ContentView: View {
     }
 
     private var toolbar: some View {
-        HStack(spacing: 8) {
+        KiteGlassEffectContainer(spacing: 8) {
+            toolbarContent
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+    }
+
+    private var toolbarContent: some View {
+        HStack(spacing: 10) {
+            navigationControls
+                .kiteGlassGroup()
+
+            pathControls
+                .frame(maxWidth: .infinity)
+                .kiteGlassGroup()
+        }
+    }
+
+    private var navigationControls: some View {
+        HStack(spacing: 4) {
             Button {
                 model.navigateUp()
             } label: {
                 Image(systemName: "arrow.up")
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.borderless)
             .help("上层文件夹")
-
-            TextField("路径", text: $model.address)
-                .textFieldStyle(.roundedBorder)
-                .focused($addressFocused)
-                .onSubmit {
-                    model.loadRoot(model.address)
-                }
-
-            Button("前往") {
-                model.loadRoot(model.address)
-            }
+            .accessibilityLabel("上层文件夹")
 
             Button {
                 model.refresh()
             } label: {
                 Image(systemName: "arrow.clockwise")
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.borderless)
             .help("刷新")
+            .accessibilityLabel("刷新")
         }
-        .padding(.horizontal, 12)
-        .frame(height: 44)
+        .padding(.horizontal, 4)
+        .frame(height: 34)
+    }
+
+    private var pathControls: some View {
+        HStack(spacing: 8) {
+            TextField("路径", text: $model.address)
+                .textFieldStyle(.plain)
+                .focused($addressFocused)
+                .onSubmit {
+                    model.loadRoot(model.address)
+                }
+                .padding(.horizontal, 8)
+                .frame(minHeight: 28)
+
+            Button("前往") {
+                model.loadRoot(model.address)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .frame(minHeight: 28)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 34)
     }
 
     private var columnBrowser: some View {
@@ -60,7 +96,7 @@ struct ContentView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.clear)
     }
 
     private func browserColumn(_ column: BrowserColumn, index: Int) -> some View {
@@ -71,7 +107,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.90))
 
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -83,10 +119,10 @@ struct ContentView: View {
         }
         .frame(width: 260)
         .frame(maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.84))
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color(nsColor: .separatorColor))
+                .fill(Color(nsColor: .separatorColor).opacity(0.75))
                 .frame(width: 1)
         }
     }
@@ -145,8 +181,11 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
         }
         .font(.caption)
-        .padding(.horizontal, 10)
-        .frame(height: 26)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .padding(.horizontal, 12)
+        .frame(height: 28)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 }

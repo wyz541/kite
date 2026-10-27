@@ -20,6 +20,7 @@ cargo run --release --locked --features uniffi-bindgen --bin uniffi-bindgen -- \
 
 xcrun swiftc \
     -O \
+    -target arm64-apple-macos13.0 \
     -parse-as-library \
     -I "$GEN_DIR" \
     -Xcc -fmodule-map-file="$GEN_DIR/kite_coreFFI.modulemap" \
