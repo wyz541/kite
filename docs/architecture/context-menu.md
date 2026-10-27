@@ -138,7 +138,7 @@ Windows 模块位于 `src/context_menu/windows.rs`。
 1. 从路径创建 `IShellItem`。
 2. 创建 `IShellItemArray`。
 3. 通过 `BHID_SFUIObject` 获取 `IContextMenu`。
-4. 调用 `QueryContextMenu`。
+4. 调用 `QueryContextMenu`，并请求正常动词和扩展动词。
 5. 安装 `IContextMenu2/3` 消息转发。
 6. 调用 `TrackPopupMenuEx`。
 7. 用 `CMINVOKECOMMANDINFOEX` 调用 `InvokeCommand`。
@@ -163,7 +163,7 @@ Kite 原生项适合高频操作。
 
 ### Windows 原生菜单
 
-`Windows 原生菜单…` 适合低频和扩展功能。
+`显示更多选项 (Show more options)` 适合低频和扩展功能。
 
 - 打开方式。
 - 属性。
@@ -181,6 +181,7 @@ Windows 11 引入 `IExplorerCommand`。
 `IContextMenu` 仍支持传统 Shell 扩展。
 当前桥接目标是 `IContextMenu` 兼容菜单。
 因此，传统扩展功能可用。
+`CMF_EXTENDEDVERBS` 增加扩展动词。
 Windows 11 新式紧凑菜单不保证由 `IContextMenu` 返回。
 后续版本应增加 `IExplorerCommand` 提供者适配层。
 
@@ -239,6 +240,7 @@ Windows 11 新式紧凑菜单不保证由 `IContextMenu` 返回。
 - 模型测试检查加载状态禁用规则。
 - 原生桥接测试创建 Win32 窗口。
 - 原生桥接测试打开 Shell 菜单并自动关闭。
+- 模型测试检查 `显示更多选项 (Show more options)` 入口。
 
 ## 主要来源
 

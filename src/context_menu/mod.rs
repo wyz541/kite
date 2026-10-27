@@ -32,7 +32,7 @@ impl ContextMenuPolicy {
                 platform,
                 compact: false,
                 hide_unavailable: false,
-                system_menu_label: "Windows 原生菜单…",
+                system_menu_label: "显示更多选项 (Show more options)",
             },
             HostPlatform::MacOS => Self {
                 platform,
@@ -566,7 +566,15 @@ mod tests {
 
         assert!(labels.contains(&"Git"));
         assert!(labels.contains(&"SVN"));
-        assert!(labels.contains(&"Windows 原生菜单…"));
+        assert!(model.entries.iter().any(|entry| matches!(
+            entry,
+            ContextMenuNode::Item {
+                label: "显示更多选项 (Show more options)",
+                command: ContextMenuCommand::SystemMenu,
+                enabled: true,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -625,7 +633,7 @@ mod tests {
             matches!(
                 entry,
                 ContextMenuNode::Item {
-                    label: "Windows 原生菜单…",
+                    label: "显示更多选项 (Show more options)",
                     enabled,
                     ..
                 } if !enabled

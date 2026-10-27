@@ -8,10 +8,10 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::Com::IBindCtx;
 use windows::Win32::UI::Shell::{
-    BHID_SFUIObject, CMF_NORMAL, CMIC_MASK_PTINVOKE, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX,
-    DefSubclassProc, IContextMenu, IContextMenu2, IContextMenu3, IShellItem, IShellItemArray,
-    RemoveWindowSubclass, SHCreateItemFromParsingName, SHCreateShellItemArrayFromShellItem,
-    SetWindowSubclass,
+    BHID_SFUIObject, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_PTINVOKE, CMINVOKECOMMANDINFO,
+    CMINVOKECOMMANDINFOEX, DefSubclassProc, IContextMenu, IContextMenu2, IContextMenu3, IShellItem,
+    IShellItemArray, RemoveWindowSubclass, SHCreateItemFromParsingName,
+    SHCreateShellItemArrayFromShellItem, SetWindowSubclass,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, HMENU, SM_MENUDROPALIGNMENT,
@@ -77,9 +77,15 @@ fn show_native_context_menu_for_hwnd(hwnd: HWND, path: &Path) -> Result<bool, St
         let popup = MenuGuard(
             CreatePopupMenu().map_err(|error| format!("无法创建 Windows 菜单：{error}"))?,
         );
-        menu.QueryContextMenu(popup.0, 0, ID_FIRST, ID_LAST, CMF_NORMAL)
-            .ok()
-            .map_err(|error| format!("无法生成 Windows 右键菜单：{error}"))?;
+        menu.QueryContextMenu(
+            popup.0,
+            0,
+            ID_FIRST,
+            ID_LAST,
+            CMF_NORMAL | CMF_EXTENDEDVERBS,
+        )
+        .ok()
+        .map_err(|error| format!("无法生成 Windows 右键菜单：{error}"))?;
 
         let mut point = POINT::default();
         GetCursorPos(&mut point).map_err(|error| format!("无法读取鼠标位置：{error}"))?;

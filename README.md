@@ -96,9 +96,13 @@ macOS 仍将 Finder 作为系统外壳。
 - 重命名
 - 移到回收站
 - 刷新
+- 显示更多选项 (Show more options)
 
 在 Git 工作区中，菜单增加 Git 添加、Git 提交和 Git 还原。
 在 SVN 工作副本中，菜单增加 SVN 更新、SVN 添加、SVN 提交和 SVN 还原。
+
+`显示更多选项 (Show more options)` 打开 Windows Shell 菜单。
+此菜单包含系统操作、第三方 Shell 扩展和扩展动词。
 
 菜单显示对应快捷键。
 
