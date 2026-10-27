@@ -211,30 +211,23 @@ struct ContentView: View {
             model.select(column: columnIndex, entry: entry)
         } label: {
             HStack(spacing: 7) {
-                Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
-                    .foregroundStyle(entry.isDirectory ? Color.orange : Color.secondary)
-                    .frame(width: 18)
+                entryIcon(entry)
                 Text(entry.name)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
-                if let git = entry.gitStatus {
-                    Text(git).font(.caption2).foregroundStyle(.green)
-                } else if let svn = entry.svnStatus {
-                    Text(svn).font(.caption2).foregroundStyle(.blue)
-                }
                 if entry.isDirectory {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-            }
-            .padding(.horizontal, 8)
+            }            .padding(.horizontal, 8)
             .frame(height: 30)
             .background(selected ? Color.accentColor.opacity(0.35) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(entryAccessibilityLabel(entry))
         .contextMenu {
             Button("打开") { KitePlatform.open(entry.path) }
             Button("在 Finder 中显示") { KitePlatform.revealInFinder(entry.path) }
@@ -247,6 +240,106 @@ struct ContentView: View {
         }
     }
 
+    private func entryAccessibilityLabel(_ entry: BrowserEntry) -> String {
+        var parts = [entry.name]
+        if let git = entry.gitStatus {
+            parts.append("Git \(git)")
+        }
+        if let svn = entry.svnStatus {
+            parts.append("SVN \(svn)")
+        }
+        return parts.joined(separator: "，")
+    }
+    private func entryIcon(_ entry: BrowserEntry) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
+                .foregroundStyle(entry.isDirectory ? Color.orange : Color.secondary)
+                .frame(width: 18, height: 18)
+
+            if let badge = vcsBadge(for: entry) {
+                let radius: CGFloat = badge.isSvn ? 3 : 6
+                Text(badge.code)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(badge.color)
+                    .frame(width: 12, height: 12)
+                    .background(
+                        Color(nsColor: .windowBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .strokeBorder(badge.color.opacity(0.9), lineWidth: 0.75)
+                    }
+                    .offset(x: 2, y: 2)
+            }
+        }
+        .frame(width: 20, height: 20)
+        .accessibilityHidden(true)
+    }
+
+    private struct VcsIconBadge {
+        let code: String
+        let color: Color
+        let isSvn: Bool
+        let rank: Int
+    }
+
+    private func vcsBadge(for entry: BrowserEntry) -> VcsIconBadge? {
+        let git = vcsBadge(from: entry.gitStatus, isSvn: false)
+        let svn = vcsBadge(from: entry.svnStatus, isSvn: true)
+        if let git, let svn {
+            return svn.rank > git.rank ? svn : git
+        }
+        return git ?? svn
+    }
+
+    private func vcsBadge(from value: String?, isSvn: Bool) -> VcsIconBadge? {
+        guard let value else { return nil }
+        let code: String
+        if let open = value.lastIndex(of: "("),
+           let close = value.lastIndex(of: ")"),
+           open < close {
+            code = String(value[value.index(after: open)..<close])
+        } else {
+            code = String(value.prefix(1))
+        }
+
+        let color: Color
+        let rank: Int
+        switch code {
+        case "C":
+            color = .red
+            rank = 10
+        case "!":
+            color = .red
+            rank = 9
+        case "D":
+            color = .red
+            rank = 8
+        case "R":
+            color = .green
+            rank = 7
+        case "A":
+            color = .green
+            rank = 6
+        case "P":
+            color = .orange
+            rank = 5
+        case "M":
+            color = .orange
+            rank = 4
+        case "?":
+            color = .cyan
+            rank = 3
+        case "X":
+            color = .gray
+            rank = 2
+        default:
+            color = .gray
+            rank = 1
+        }
+        return VcsIconBadge(code: code, color: color, isSvn: isSvn, rank: rank)
+    }
     private var statusBar: some View {
         HStack {
             if let error = model.errorMessage {

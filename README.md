@@ -90,7 +90,7 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 
 ## 版本控制状态
 
-Kite 在“版本控制”列显示 Git 和 SVN 状态。Git 使用分支图标。SVN 使用堆叠图标。
+列表视图在“版本控制”列显示 Git 和 SVN 状态。Git 使用分支图标。SVN 使用堆叠图标。
 
 | 代码 | 含义 |
 | --- | --- |
@@ -169,7 +169,10 @@ Kite 不设置固定栏数上限。
 Windows 使用 `Alt+P` 切换路径栏。
 该快捷键对应 macOS 的 Option 组合键。
 
-名称列和分栏列表都显示 Git/SVN 状态徽标。
+列表视图在“版本控制”列显示 Git/SVN 状态。
+分栏视图在文件或文件夹图标上显示 Git/SVN 状态码。
+Git 状态使用圆形徽标。
+SVN 状态使用圆角方形徽标。
 
 ## 路径导航
 
@@ -338,7 +341,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.3-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.4-windows-x64.zip`。
 
 ### macOS 构建
 

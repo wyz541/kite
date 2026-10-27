@@ -326,6 +326,29 @@ pub(crate) fn icon_color(entry: &FileEntry, cx: &App) -> Hsla {
     }
 }
 
+pub(crate) fn vcs_icon_badge(status: VcsStatus, is_svn: bool, cx: &App) -> AnyElement {
+    let color = vcs_status_color(status);
+    let base = div()
+        .absolute()
+        .right(px(-2.))
+        .bottom(px(-2.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(12.))
+        .bg(cx.theme().background)
+        .border_1()
+        .border_color(color)
+        .text_size(px(8.))
+        .font_medium()
+        .text_color(color);
+    let badge = if is_svn {
+        base.rounded_sm()
+    } else {
+        base.rounded_full()
+    };
+    badge.child(status.code()).into_any_element()
+}
 pub(crate) fn vcs_badge(icon: IconName, status: VcsStatus) -> AnyElement {
     let color = vcs_status_color(status);
     h_flex()

@@ -11,10 +11,10 @@ use crate::context_menu::{ContextMenuTarget, render_context_menu, show_system_me
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
     FileEntry, SortSpec, create_folder, format_size, load_directory, open_file, recycle_entry,
-    rename_entry, search_directory, transfer_entry, validate_name,
+    rename_entry, search_directory, transfer_entry, validate_name, worse_status,
 };
 use crate::platform::{default_root_path, root_directory};
-use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_badge};
+use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
     run_vcs_operation, run_vcs_query,
@@ -2318,6 +2318,12 @@ impl KiteApp {
             let menu_entry = entry.clone();
             let row_git_available = git_available || entry.git_status.is_some();
             let row_svn_available = svn_available || entry.svn_status.is_some();
+            let icon_status = worse_status(entry.git_status, entry.svn_status);
+            let icon_status_is_svn = match (entry.git_status, entry.svn_status) {
+                (Some(git), Some(svn)) => svn.rank() > git.rank(),
+                (None, Some(_)) => true,
+                _ => false,
+            };
             let row = h_flex()
                 .id(("column-row", column * 100_000 + row_ix))
                 .h(px(30.))
@@ -2332,9 +2338,17 @@ impl KiteApp {
                     this.hover(move |style| style.bg(hover.opacity(0.45)))
                 })
                 .child(
-                    Icon::new(icon_for(&entry))
+                    div()
+                        .relative()
                         .size_4()
-                        .text_color(icon_color(&entry, cx)),
+                        .child(
+                            Icon::new(icon_for(&entry))
+                                .size_4()
+                                .text_color(icon_color(&entry, cx)),
+                        )
+                        .when_some(icon_status, |this, status| {
+                            this.child(vcs_icon_badge(status, icon_status_is_svn, cx))
+                        }),
                 )
                 .child(
                     div()
@@ -2343,12 +2357,6 @@ impl KiteApp {
                         .truncate()
                         .child(entry.name.clone()),
                 )
-                .when_some(entry.git_status, |this, status| {
-                    this.child(vcs_badge(IconName::GitBranch, status))
-                })
-                .when_some(entry.svn_status, |this, status| {
-                    this.child(vcs_badge(IconName::Boxes, status))
-                })
                 .when(entry.is_dir(), |this| {
                     this.child(Icon::new(IconName::ChevronRight).size_3().text_color(muted))
                 })
