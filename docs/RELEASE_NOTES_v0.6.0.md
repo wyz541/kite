@@ -50,7 +50,6 @@ Kite v0.6.0 restores tabs and directories after relaunch.
 
 ## macOS screenshot
 
-![Kite macOS tabs](https://github.com/wyz541/kite/releases/download/v0.6.0/Kite-v0.6.0-macOS-tabs.png)
 
 ## Verification
 

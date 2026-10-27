@@ -34,13 +34,9 @@ Kite is not code-signed. Windows SmartScreen may show a warning.
 | `Ctrl+Tab` | Select the next tab |
 | `Ctrl+Shift+Tab` | Select the previous tab |
 
-## Screenshots
 
-![Tabbed workspace](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/tabbed-view.png)
 
-![Column view](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/column-view.png)
 
-![Context menu](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/context-menu.png)
 
 ## Verification
 

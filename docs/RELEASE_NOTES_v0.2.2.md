@@ -24,11 +24,8 @@ Kite is a native Windows file manager built with Rust and GPUI.
 
 Kite is not code-signed. Windows SmartScreen may show a warning.
 
-## Screenshots
 
-![Horizontal column scrolling](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/column-horizontal-scroll.png)
 
-![Tabbed workspace](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/tabbed-view.png)
 
 ## Verification
 

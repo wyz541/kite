@@ -9,6 +9,7 @@ macOS 13 到 15 使用标准材质降级。
 
 macOS 不使用 GPUI，也不使用 egui。
 macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
+公开截图遵守 [截图隐私规则](docs/SCREENSHOT_POLICY.md)。
 
 ## 设计宣言
 
@@ -17,40 +18,6 @@ Kite 把界面当作一条可牵引的线。
 线连接用户意图和数据流。
 设计围绕中介、约束、视角和可逆性展开。
 完整设计原则见 [docs/design/manifesto.md](docs/design/manifesto.md)。
-
-## Screenshots
-
-### Tabbed workspace
-
-![Kite tabbed workspace](docs/screenshots/tabbed-view.png)
-
-### Column view
-
-![Kite column view](docs/screenshots/column-view.png)
-
-### Wide hierarchy
-
-![Kite wide hierarchy](docs/screenshots/column-view-wide.png)
-
-### Horizontal column scrolling
-
-![Kite horizontal column scrolling](docs/screenshots/column-horizontal-scroll.png)
-
-### Device detection
-
-![Kite device detection](docs/screenshots/device-detection.png)
-
-### Context menu
-
-![Kite context menu](docs/screenshots/context-menu.png)
-
-### Column directory context menu
-
-![Kite column directory context menu](docs/screenshots/column-context-menu.png)
-
-### Default file manager control
-
-![Kite default file manager control](docs/screenshots/default-file-manager.png)
 
 ## 当前能力
 

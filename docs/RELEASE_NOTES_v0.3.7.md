@@ -18,11 +18,8 @@ Kite is a native Windows file manager built with Rust and GPUI.
 - A horizontal trackpad gesture always scrolls the column strip.
 - The horizontal scrollbar continues to work.
 
-## Screenshots
 
-![Wide column view](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/column-view-wide.png)
 
-![Git and SVN context menu](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/vcs-context-menu.png)
 
 ## Requirements
 

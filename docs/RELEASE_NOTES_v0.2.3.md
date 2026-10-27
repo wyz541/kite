@@ -29,9 +29,7 @@ WPD/MTP portable devices are recognized and listed. File browsing for these devi
 
 Kite is not code-signed. Windows SmartScreen may show a warning.
 
-## Screenshots
 
-![Device detection](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/device-detection.png)
 
 ## Verification
 

@@ -17,7 +17,6 @@ MTP file operations inside Kite are not implemented.
 
 ## Windows screenshot
 
-![Kite Windows MTP device](https://github.com/wyz541/kite/releases/download/v0.6.2/Kite-v0.6.2-windows-mtp.png)
 
 ## Verification
 

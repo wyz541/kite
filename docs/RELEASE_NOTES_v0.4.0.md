@@ -34,11 +34,8 @@ Kite is a native Windows file manager built with Rust and GPUI.
 - Windows 11 modern `IExplorerCommand` menus are not merged yet.
 - The architecture document defines the next phases for both areas.
 
-## Screenshots
 
-![Context menu](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/context-menu.png)
 
-![Git and SVN context menu](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/vcs-context-menu.png)
 
 ## Requirements
 
