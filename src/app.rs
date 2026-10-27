@@ -1865,10 +1865,15 @@ impl KiteApp {
             .into_any_element()
     }
 
-    fn portable_device_item(&self, name: SharedString, cx: &mut Context<Self>) -> AnyElement {
+    fn portable_device_item(&self, device: PortableDevice, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
+        let hover_color = muted.opacity(0.12);
+        let clicked = device.clone();
         div()
-            .id(SharedString::from(format!("portable-device-{name}")))
+            .id(SharedString::from(format!(
+                "portable-device-{}",
+                device.shell_path
+            )))
             .h(px(32.))
             .w_full()
             .flex()
@@ -1876,10 +1881,12 @@ impl KiteApp {
             .gap_2()
             .px_2()
             .rounded_md()
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover_color))
             .text_sm()
             .text_color(cx.theme().sidebar_foreground)
             .child(Icon::new(IconName::Usb).size_4().text_color(muted))
-            .child(div().flex_1().min_w_0().truncate().child(name))
+            .child(div().flex_1().min_w_0().truncate().child(device.name))
             .child(
                 div()
                     .flex_shrink_0()
@@ -1887,9 +1894,26 @@ impl KiteApp {
                     .text_color(muted)
                     .child("MTP"),
             )
+            .child(Icon::new(IconName::ChevronRight).size_3())
+            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                this.open_portable_device(clicked.clone(), cx);
+            }))
             .into_any_element()
     }
 
+    fn open_portable_device(&mut self, device: PortableDevice, cx: &mut Context<Self>) {
+        match device.open_in_system() {
+            Ok(()) => {
+                self.error = None;
+                self.notice = Some(format!("已在 Windows 中打开 {}", device.name).into());
+            }
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+            }
+        }
+        cx.notify();
+    }
     fn render_sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let section_color = cx.theme().muted_foreground;
         let mut content = v_flex().gap_0p5();
@@ -1937,7 +1961,7 @@ impl KiteApp {
                 ));
             }
             for device in self.portable_devices.clone() {
-                content = content.child(self.portable_device_item(device.name.into(), cx));
+                content = content.child(self.portable_device_item(device, cx));
             }
         }
         content = content.child(

@@ -44,6 +44,7 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 - 应用重新启动时恢复页签和目录。
 - 工具栏不重复显示应用图标和应用名。
 - 识别 USB 存储设备、可移动磁盘和 WPD/MTP 便携设备。
+- 点击 WPD/MTP 设备可在 Windows 中打开设备根目录。
 - 使用侧边栏访问主文件夹、桌面、文档、下载、图片和本机驱动器。
 - 使用并排分栏浏览多级文件夹。
 - 分栏导航只加载新增或缺失的层级。
@@ -226,8 +227,8 @@ USB 存储设备通过存储总线类型识别。
 设备列表每 2 秒自动刷新。
 
 USB 存储设备可直接浏览。
-WPD/MTP 便携设备当前只支持识别和显示。
-WPD/MTP 文件浏览尚未支持。
+点击 WPD/MTP 便携设备可在 Windows Shell 中打开设备。
+Kite 内置的 WPD/MTP 文件浏览尚未支持。
 
 ## 快捷键
 
@@ -307,7 +308,7 @@ py .\assets\generate_icon.py
 - 表格空白区域尚未提供右键菜单。
 - 当前版本没有自定义列布局。
 - Git/SVN 状态只覆盖当前视图和当前视图的子项目。
-- WPD/MTP 便携设备当前不支持文件浏览。
+- WPD/MTP 便携设备可在 Windows 中打开，但 Kite 内置文件浏览尚未支持。
 - Git 和 SVN 认证使用本机凭据缓存，不显示交互式登录窗口。
 
 ## 构建
@@ -337,7 +338,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.1-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.2-windows-x64.zip`。
 
 ### macOS 构建
 

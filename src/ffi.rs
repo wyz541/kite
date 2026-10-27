@@ -42,6 +42,7 @@ pub struct VolumeDto {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct PortableDeviceDto {
     pub name: String,
+    pub shell_path: String,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -168,9 +169,9 @@ fn volume_dto(volume: &StorageVolume) -> VolumeDto {
 fn device_dto(device: &PortableDevice) -> PortableDeviceDto {
     PortableDeviceDto {
         name: device.name.clone(),
+        shell_path: device.shell_path.clone(),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
