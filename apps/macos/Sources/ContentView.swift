@@ -232,10 +232,22 @@ struct ContentView: View {
 
     private func previewColumn(_ entry: BrowserEntry) -> some View {
         VStack(spacing: 0) {
-            Text("预览")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("预览")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    KitePlatform.copyText(previewInfoText(entry))
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .help("复制预览信息")
+                .accessibilityLabel("复制预览信息")
+            }
                 .padding(.horizontal, 10)
                 .frame(height: 30)
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.90))
@@ -266,6 +278,7 @@ struct ContentView: View {
                     }
                 }
                 .padding(12)
+                .textSelection(.enabled)
             }
         }
         .frame(width: 300)
@@ -283,11 +296,29 @@ struct ContentView: View {
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .textSelection(.enabled)
             Text(value)
                 .font(.caption)
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func previewInfoText(_ entry: BrowserEntry) -> String {
+        var lines = [
+            "名称：\(entry.name)",
+            "类型：\(entry.kindLabel)",
+            "大小：\(formattedSize(entry.size))",
+            "修改日期：\(formattedDate(entry.modifiedUnixMs))",
+            "位置：\(entry.path)",
+        ]
+        if let git = entry.gitStatus {
+            lines.append("Git：\(git)")
+        }
+        if let svn = entry.svnStatus {
+            lines.append("SVN：\(svn)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func formattedSize(_ bytes: UInt64) -> String {
