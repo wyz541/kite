@@ -21,6 +21,8 @@ The script creates `apps/macos/build/Kite.app`.
 ## Current native coverage
 
 - SwiftUI column browser.
+- SwiftUI tab bar with new, close, and switch commands.
+- Tab and directory restoration on app relaunch.
 - macOS 26 Liquid Glass toolbar and path controls.
 - macOS 13 through 15 material fallback.
 - AppKit workspace actions.
