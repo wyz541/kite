@@ -208,6 +208,26 @@ struct ContentView: View {
                 .fill(Color(nsColor: .separatorColor).opacity(0.75))
                 .frame(width: 1)
         }
+        .contextMenu {
+            directoryContextMenu(column)
+        }
+    }
+
+    @ViewBuilder
+    private func directoryContextMenu(_ column: BrowserColumn) -> some View {
+        Button("打开") { KitePlatform.open(column.path) }
+        Button("在 Finder 中显示") { KitePlatform.revealInFinder(column.path) }
+        Button("快速查看") { KitePlatform.quickLook(column.path) }
+        Button("拷贝路径") { KitePlatform.copyPath(column.path) }
+        Divider()
+        Button("新建文件夹…") { model.createFolder(in: column.path) }
+        Button("重命名…") { model.rename(column.path) }
+            .disabled(!KitePlatform.canModify(column.path))
+        Divider()
+        Button("分享…") { KitePlatform.share(column.path) }
+        Divider()
+        Button("移到废纸篓") { model.moveToTrash(path: column.path) }
+            .disabled(!KitePlatform.canModify(column.path))
     }
 
     private func previewColumn(_ entry: BrowserEntry) -> some View {
@@ -310,6 +330,7 @@ struct ContentView: View {
             Divider()
             Button("分享…") { KitePlatform.share(entry.path) }
             Divider()
+            Button("重命名…") { model.rename(entry.path) }
             Button("移到废纸篓") { model.moveToTrash(entry) }
         }
     }

@@ -32,6 +32,53 @@ enum KitePlatform {
     static func moveToTrash(_ path: String) throws {
         try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
     }
+
+    static func promptForName(title: String, message: String, defaultValue: String) -> String? {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = defaultValue
+        field.placeholderString = "名称"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return nil
+        }
+        return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func createFolder(in directory: String, name: String) throws {
+        try validateName(name)
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+    }
+
+    static func rename(_ path: String, to name: String) throws {
+        try validateName(name)
+        let source = URL(fileURLWithPath: path)
+        let destination = source.deletingLastPathComponent().appendingPathComponent(name)
+        try FileManager.default.moveItem(at: source, to: destination)
+    }
+
+    static func canModify(_ path: String) -> Bool {
+        URL(fileURLWithPath: path).standardizedFileURL.path != "/"
+    }
+
+    private static func validateName(_ name: String) throws {
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else {
+            throw NSError(
+                domain: "KitePlatform",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "请输入有效名称。名称不能包含斜杠。"]
+            )
+        }
+    }
 }
 
 private final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {

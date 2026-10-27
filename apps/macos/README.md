@@ -27,6 +27,7 @@ The script creates `apps/macos/build/Kite.app`.
 - macOS 26 Liquid Glass toolbar and path controls.
 - macOS 13 through 15 material fallback.
 - AppKit workspace actions.
+- File-row and column-directory context menus.
 - AppKit sharing service picker.
 - Quick Look panel.
 - macOS pasteboard.
