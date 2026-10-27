@@ -1,13 +1,20 @@
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+    CoUninitialize, IPersistFile,
+};
+use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
+use windows::core::{HSTRING, Interface};
 use winreg::RegKey;
 use winreg::enums::HKEY_CURRENT_USER;
 
 const FOLDER_OPEN_KEY: &str = r"Software\Classes\Folder\shell\open";
 const FOLDER_OPEN_COMMAND_KEY: &str = r"Software\Classes\Folder\shell\open\command";
 const BACKUP_KEY: &str = r"Software\Kite\ExplorerIntegration";
+const APP_PATH_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\App Paths\Kite.exe";
 const BACKUP_VERSION: u32 = 1;
 
 const VALUE_VERSION: &str = "Version";
@@ -179,7 +186,10 @@ impl ExplorerRegistry for WindowsExplorerRegistry {
 pub(crate) fn set_as_default_file_manager() -> Result<String, String> {
     let command = kite_folder_open_command(&current_executable()?);
     let mut registry = WindowsExplorerRegistry;
-    let message = enable_default_file_manager(&mut registry, &command)?;
+    let mut message = enable_default_file_manager(&mut registry, &command)?;
+    if let Err(error) = register_start_menu_shortcut() {
+        message.push_str(&format!("；开始菜单注册失败：{error}"));
+    }
     notify_shell_association_change();
     Ok(message)
 }
@@ -191,8 +201,81 @@ pub(crate) fn restore_previous_file_manager() -> Result<String, String> {
     Ok(message)
 }
 
+pub(crate) fn register_start_menu_shortcut() -> Result<String, String> {
+    let executable = current_executable()?;
+    register_app_path(&executable)?;
+    let shortcut = start_menu_shortcut_path()?;
+    create_shell_link(&executable, &shortcut)?;
+    notify_shell_association_change();
+    Ok(format!(
+        "已创建开始菜单快捷方式。重启 PowerToys Run 后可搜索 Kite：{}",
+        shortcut.display()
+    ))
+}
+
 fn current_executable() -> Result<std::path::PathBuf, String> {
     std::env::current_exe().map_err(|error| format!("无法定位 Kite.exe：{error}"))
+}
+
+fn register_app_path(executable: &Path) -> Result<(), String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu
+        .create_subkey(APP_PATH_KEY)
+        .map_err(|error| format!("无法注册 App Paths：{error}"))?;
+    let executable = dunce::simplified(executable);
+    key.set_value("", &executable.to_string_lossy().to_string())
+        .map_err(|error| format!("无法保存 App Paths 路径：{error}"))?;
+    if let Some(directory) = executable.parent() {
+        key.set_value("Path", &directory.to_string_lossy().to_string())
+            .map_err(|error| format!("无法保存 App Paths 目录：{error}"))?;
+    }
+    Ok(())
+}
+
+fn start_menu_shortcut_path() -> Result<PathBuf, String> {
+    let appdata = dirs::data_dir()
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .ok_or_else(|| "无法定位当前用户的 AppData 目录".to_string())?;
+    let programs = appdata
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs");
+    std::fs::create_dir_all(&programs).map_err(|error| format!("无法创建开始菜单目录：{error}"))?;
+    Ok(programs.join("Kite.lnk"))
+}
+
+fn create_shell_link(executable: &Path, shortcut: &Path) -> Result<(), String> {
+    unsafe {
+        let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let result = (|| -> Result<(), String> {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|error| format!("无法创建开始菜单链接：{error}"))?;
+            let executable_path = dunce::simplified(executable);
+            let executable = HSTRING::from(executable_path.as_os_str());
+            link.SetPath(&executable)
+                .map_err(|error| format!("无法设置快捷方式目标：{error}"))?;
+            if let Some(directory) = executable_path.parent() {
+                link.SetWorkingDirectory(&HSTRING::from(directory.as_os_str()))
+                    .map_err(|error| format!("无法设置快捷方式目录：{error}"))?;
+            }
+            link.SetDescription(&HSTRING::from("Kite 文件管理器"))
+                .map_err(|error| format!("无法设置快捷方式说明：{error}"))?;
+            link.SetIconLocation(&executable, 0)
+                .map_err(|error| format!("无法设置快捷方式图标：{error}"))?;
+            let persist: IPersistFile = link
+                .cast()
+                .map_err(|error| format!("无法保存快捷方式：{error}"))?;
+            persist
+                .Save(&HSTRING::from(shortcut.as_os_str()), true)
+                .map_err(|error| format!("无法写入开始菜单快捷方式：{error}"))?;
+            Ok(())
+        })();
+        if initialized {
+            CoUninitialize();
+        }
+        result
+    }
 }
 
 fn kite_folder_open_command(executable: &Path) -> String {
@@ -278,10 +361,11 @@ fn notify_shell_association_change() {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExplorerIntegrationBackup, ExplorerRegistry, FolderOpenCommand,
+        ExplorerIntegrationBackup, ExplorerRegistry, FolderOpenCommand, create_shell_link,
         enable_default_file_manager, kite_folder_open_command, restore_default_file_manager,
     };
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Default)]
     struct MemoryRegistry {
@@ -323,6 +407,28 @@ mod tests {
             kite_folder_open_command(Path::new(r"C:\Program Files\Kite\Kite.exe")),
             r#""C:\Program Files\Kite\Kite.exe" "%1""#
         );
+    }
+
+    #[test]
+    fn creates_a_windows_shell_link() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("kite-shell-link-{unique}"));
+        std::fs::create_dir_all(&directory).expect("create shell link directory");
+        let executable = std::env::var_os("WINDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+            .join("System32")
+            .join("notepad.exe");
+        let shortcut = directory.join("Kite.lnk");
+
+        create_shell_link(&executable, &shortcut).expect("create shell link");
+        assert!(shortcut.is_file());
+
+        std::fs::remove_file(shortcut).expect("remove shell link");
+        std::fs::remove_dir(directory).expect("remove shell link directory");
     }
 
     #[test]

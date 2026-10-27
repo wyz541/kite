@@ -64,6 +64,13 @@ Kite 保存设置前的命令。
 `Kite > 恢复之前的文件夹打开方式…` 恢复保存的命令。
 Windows 桌面、任务栏、`Win+E` 和系统文件对话框仍由 Windows 管理。
 
+ZIP 便携版默认不进入 Windows Search 或 PowerToys Run。
+这两个工具搜索已安装应用、开始菜单快捷方式和 App Paths。
+打开 `Kite > 创建开始菜单快捷方式…` 可注册当前用户入口。
+“设为默认资源管理器”也会自动创建该入口。
+Kite 写入当前用户 `App Paths\Kite.exe`，并创建 `Kite.lnk`。
+重启 PowerToys Run 或重新加载应用列表后即可搜索 Kite。
+
 macOS 用户打开 `文件夹 > 设为默认文件夹打开方式…`。
 Kite 使用 LaunchServices 设置 `public.folder` 的默认应用。
 `文件夹 > 恢复 Finder 为默认…` 恢复 Finder。
@@ -356,7 +363,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.7-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.8-windows-x64.zip`。
 
 ### macOS 构建
 
