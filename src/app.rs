@@ -1614,7 +1614,12 @@ impl KiteApp {
             pane.selected_path = Some(entry.path.clone());
         }
         self.column_selected_path = Some(entry.path.clone());
-        if column + 1 == self.column_panes.len() && !entry.is_dir() {
+        if !entry.is_dir() {
+            self.column_panes
+                .truncate(column_count_after_file_selection(
+                    column,
+                    self.column_panes.len(),
+                ));
             self.start_column_preview(entry, cx);
             self.column_scroll_pending = true;
         } else {
@@ -3299,6 +3304,10 @@ fn loaded_column_index(panes: &[ColumnPane], path: &Path) -> Option<usize> {
         .position(|pane| !pane.loading && same_path(&pane.path, path))
 }
 
+fn column_count_after_file_selection(column: usize, current_count: usize) -> usize {
+    (column + 1).min(current_count)
+}
+
 impl Focusable for KiteApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -3777,8 +3786,8 @@ mod clipboard_tests {
 #[cfg(test)]
 mod path_bar_tests {
     use super::{
-        ColumnPane, column_context_menu_target, common_column_prefix, loaded_column_index,
-        path_after_recycle, path_after_rename,
+        ColumnPane, column_context_menu_target, column_count_after_file_selection,
+        common_column_prefix, loaded_column_index, path_after_recycle, path_after_rename,
     };
     use std::path::{Path, PathBuf};
 
@@ -3825,6 +3834,13 @@ mod path_bar_tests {
         ];
 
         assert_eq!(common_column_prefix(&panes, &chain), 2);
+    }
+
+    #[test]
+    fn file_selection_removes_deeper_columns() {
+        assert_eq!(column_count_after_file_selection(0, 3), 1);
+        assert_eq!(column_count_after_file_selection(1, 3), 2);
+        assert_eq!(column_count_after_file_selection(2, 3), 3);
     }
 
     #[test]
