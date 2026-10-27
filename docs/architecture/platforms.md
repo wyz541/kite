@@ -167,7 +167,8 @@ Kite 支持将自身设为默认文件夹打开应用。
 Windows 使用当前用户 `Folder\shell\open\command`。
 macOS 使用 LaunchServices `public.folder`。
 
-两端都保存或恢复系统默认值。
+Windows 保存并恢复旧命令。
+macOS 将文件夹默认应用恢复为 Finder。
 两端都不替换桌面、任务栏、Dock 或系统外壳。
 
 详细设计见 `docs/architecture/default-file-manager.md`。
