@@ -175,6 +175,7 @@ Kite 只保留一个路径跳转入口。
 | 文件打开 | Shell 默认程序 | NSWorkspace |
 | 快速查看 | 无统一 API | Quick Look |
 | 回收站 | Windows Recycle Bin | macOS Trash |
+| 移动设备 | WPD 枚举 + Windows Shell 打开 | macOS 卷枚举 |
 | 快捷键 | Ctrl 映射 | Command 映射 |
 | 不可用菜单项 | 按现有要求显示禁用项 | 按 HIG 隐藏 |
 

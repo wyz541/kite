@@ -34,6 +34,13 @@ pub struct StorageVolume {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortableDevice {
     pub name: String,
+    pub shell_path: String,
+}
+
+impl PortableDevice {
+    pub fn open_in_system(&self) -> Result<(), String> {
+        open::that_detached(&self.shell_path).map_err(|error| format!("无法打开移动设备：{error}"))
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -44,9 +51,9 @@ mod platform {
     use std::path::PathBuf;
     use std::ptr;
     use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-        DIGCF_PRESENT, GUID_DEVCLASS_WPD, SP_DEVINFO_DATA, SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME,
-        SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
-        SetupDiGetDeviceRegistryPropertyW,
+        CM_Get_Device_IDW, DIGCF_PRESENT, GUID_DEVCLASS_WPD, SP_DEVINFO_DATA, SPDRP_DEVICEDESC,
+        SPDRP_FRIENDLYNAME, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
+        SetupDiGetClassDevsW, SetupDiGetDeviceRegistryPropertyW,
     };
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
@@ -282,12 +289,17 @@ mod platform {
 
             let name = device_registry_string(devices, &info, SPDRP_FRIENDLYNAME)
                 .or_else(|| device_registry_string(devices, &info, SPDRP_DEVICEDESC));
-            if let Some(name) = name.filter(|name| !name.is_empty())
-                && !result
-                    .iter()
-                    .any(|device: &PortableDevice| device.name == name)
+            let instance_id = device_instance_id(&info);
+            if let (Some(name), Some(instance_id)) = (name, instance_id)
+                && !name.is_empty()
             {
-                result.push(PortableDevice { name });
+                let shell_path = portable_shell_path(&instance_id);
+                if !result
+                    .iter()
+                    .any(|device: &PortableDevice| device.shell_path == shell_path)
+                {
+                    result.push(PortableDevice { name, shell_path });
+                }
             }
             index += 1;
         }
@@ -297,6 +309,22 @@ mod platform {
         }
         result.sort_by(|left, right| left.name.cmp(&right.name));
         result
+    }
+
+    fn device_instance_id(info: &SP_DEVINFO_DATA) -> Option<String> {
+        let mut buffer = [0u16; 512];
+        let result =
+            unsafe { CM_Get_Device_IDW(info.DevInst, buffer.as_mut_ptr(), buffer.len() as u32, 0) };
+        (result == 0)
+            .then(|| utf16_string(&buffer))
+            .filter(|value| !value.is_empty())
+    }
+
+    fn portable_shell_path(instance_id: &str) -> String {
+        const COMPUTER_CLSID: &str = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\";
+        const WPD_DEVICE_INTERFACE: &str = "{6ac27878-a6fa-4155-ba85-f98f491d4f33}";
+        let escaped = instance_id.to_ascii_lowercase().replace('\\', "#");
+        format!("{COMPUTER_CLSID}\\\\?\\{escaped}#{WPD_DEVICE_INTERFACE}")
     }
 
     fn device_registry_string(
@@ -340,7 +368,9 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::super::VolumeKind;
-        use super::{DRIVE_FIXED, DRIVE_REMOVABLE, classify_volume, read_ascii};
+        use super::{
+            DRIVE_FIXED, DRIVE_REMOVABLE, classify_volume, portable_shell_path, read_ascii,
+        };
         use windows_sys::Win32::Storage::FileSystem::BusTypeUsb;
 
         #[test]
@@ -365,6 +395,14 @@ mod platform {
             let bytes = b"\0\0Kingston\0DataTraveler\0";
             assert_eq!(read_ascii(bytes, 2), Some("Kingston".to_string()));
             assert_eq!(read_ascii(bytes, 11), Some("DataTraveler".to_string()));
+        }
+
+        #[test]
+        fn builds_the_wpd_shell_namespace_path() {
+            assert_eq!(
+                portable_shell_path(r"USB\VID_05AC&PID_12A8&MI_00\6&2E02EB0C&0&0000"),
+                r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\\?\usb#vid_05ac&pid_12a8&mi_00#6&2e02eb0c&0&0000#{6ac27878-a6fa-4155-ba85-f98f491d4f33}"
+            );
         }
     }
 }
