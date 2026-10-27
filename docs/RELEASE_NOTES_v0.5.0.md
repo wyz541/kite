@@ -2,15 +2,10 @@
 
 Kite is a cross-platform file manager with native frontends.
 
-## Core screenshots
 
-Windows native shell screenshots:
 
-![Kite wide column view](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/column-view-wide.png)
 
-![Kite Git and SVN context menu](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/vcs-context-menu.png)
 
-![Kite device detection](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/device-detection.png)
 
 ## Architecture
 

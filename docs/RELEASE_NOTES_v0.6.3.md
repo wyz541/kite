@@ -12,7 +12,6 @@ Kite v0.6.3 removes the sidebar privacy footer.
 
 ## Windows screenshot
 
-![Kite Windows sidebar](https://github.com/wyz541/kite/releases/download/v0.6.3/Kite-v0.6.3-windows-sidebar.png)
 
 ## Verification
 

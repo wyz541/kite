@@ -30,14 +30,12 @@ try {
     }
 
     New-Item -ItemType Directory -Force -Path $resolvedStaging | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $resolvedStaging 'screenshots') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $resolvedStaging 'icons') | Out-Null
 
     Copy-Item -LiteralPath $binary -Destination (Join-Path $resolvedStaging 'Kite.exe') -Force
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $resolvedStaging -Force
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $resolvedStaging -Force
     Copy-Item -LiteralPath (Join-Path $root 'assets\kite-icon-master.png') -Destination (Join-Path $resolvedStaging 'icons') -Force
-    Copy-Item -Path (Join-Path $root 'docs\screenshots\*.png') -Destination (Join-Path $resolvedStaging 'screenshots') -Force
 
     if (Test-Path -LiteralPath $archive) {
         [IO.File]::Delete($archive)

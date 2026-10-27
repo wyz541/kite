@@ -16,7 +16,6 @@ Kite v0.6.4 moves version-control status onto file and folder icons in column vi
 
 ## Windows screenshot
 
-![Kite Windows version-control icons](https://github.com/wyz541/kite/releases/download/v0.6.4/Kite-v0.6.4-windows-vcs-icons.png)
 
 ## Verification
 

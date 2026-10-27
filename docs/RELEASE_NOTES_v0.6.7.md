@@ -2,7 +2,6 @@
 
 Kite v0.6.7 adds default folder-opener integration on Windows and macOS.
 
-![Kite default file manager control](https://github.com/wyz541/kite/blob/main/docs/screenshots/default-file-manager.png?raw=true)
 
 ## Windows default file manager
 
@@ -31,6 +30,13 @@ Kite v0.6.7 adds default folder-opener integration on Windows and macOS.
 - Windows desktop, taskbar, `Win+E`, and system file dialogs remain system-managed.
 - Finder remains the macOS system shell.
 - Finder windows, Dock, desktop, and system file panels remain system-managed.
+
+## Privacy
+
+- Remove local-path screenshots from the repository.
+- Exclude screenshots from Windows release packages.
+- Stop CI screenshot capture and artifact upload.
+- Remove historical screenshot release assets.
 
 ## Verification
 

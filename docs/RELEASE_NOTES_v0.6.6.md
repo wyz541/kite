@@ -34,7 +34,6 @@ Kite v0.6.6 adds a directory context menu to every column.
 - Keep the Liquid Glass toolbar and path controls.
 - Keep the SwiftUI and AppKit native UI boundary.
 
-![Kite column directory context menu](https://github.com/wyz541/kite/blob/main/docs/screenshots/column-context-menu.png?raw=true)
 
 ## Verification
 

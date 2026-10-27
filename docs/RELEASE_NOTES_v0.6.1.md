@@ -21,7 +21,6 @@ Kite v0.6.1 removes duplicate path navigation entries.
 
 ## macOS screenshot
 
-![Kite macOS navigation](https://github.com/wyz541/kite/releases/download/v0.6.1/Kite-v0.6.1-macOS-navigation.png)
 
 ## Verification
 

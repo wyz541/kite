@@ -19,9 +19,7 @@ Kite is a native Windows file manager built with Rust and GPUI.
 - Select `显示日志` to open the working-copy log window.
 - GUI startup does not block the Kite window.
 
-## Screenshots
 
-![Git and SVN context menu](https://raw.githubusercontent.com/wyz541/kite/main/docs/screenshots/vcs-context-menu.png)
 
 ## Requirements
 
