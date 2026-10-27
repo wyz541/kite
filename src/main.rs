@@ -8,6 +8,8 @@ mod app;
 #[cfg(windows)]
 mod context_menu;
 #[cfg(windows)]
+mod explorer_integration;
+#[cfg(windows)]
 mod table;
 #[cfg(windows)]
 mod tabs;

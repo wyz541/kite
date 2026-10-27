@@ -48,6 +48,10 @@ Kite 把界面当作一条可牵引的线。
 
 ![Kite column directory context menu](docs/screenshots/column-context-menu.png)
 
+### Default file manager control
+
+![Kite default file manager control](docs/screenshots/default-file-manager.png)
+
 ## 当前能力
 
 - 浏览本机文件夹。
@@ -70,6 +74,9 @@ Kite 把界面当作一条可牵引的线。
 - 双击文件夹进入下级文件夹。
 - Windows 双击文件调用 Shell 默认程序。
 - macOS 双击文件调用 `NSWorkspace`。
+- 在 Windows 中将 Kite 设为默认文件夹打开方式。
+- 在 macOS 中将 Kite 设为默认文件夹打开应用。
+- 恢复设置前的文件夹打开方式。
 - 新建文件夹、重命名和移到回收站。
 - 复制、剪切和粘贴文件或文件夹。
 - 右键文件行或分栏目录区域打开操作菜单。
@@ -80,6 +87,22 @@ Kite 把界面当作一条可牵引的线。
 - macOS 使用平台文件名规则和卷枚举。
 - macOS 26 工具栏使用 Liquid Glass。
 - macOS 13 到 15 工具栏使用标准材质。
+
+## 默认资源管理器
+
+Windows 用户打开 `Kite > 设为默认资源管理器…`。
+工具栏的文件夹设置按钮提供同一入口。
+Kite 将写入当前用户的 `Folder\shell\open\command`。
+Kite 保存设置前的命令。
+`Kite > 恢复之前的文件夹打开方式…` 恢复保存的命令。
+Windows 桌面、任务栏、`Win+E` 和系统文件对话框仍由 Windows 管理。
+
+macOS 用户打开 `文件夹 > 设为默认文件夹打开方式…`。
+Kite 使用 LaunchServices 设置 `public.folder` 的默认应用。
+`文件夹 > 恢复 Finder 为默认…` 恢复 Finder。
+macOS 仍将 Finder 作为系统外壳。
+
+详细设计见 `docs/architecture/default-file-manager.md`。
 
 ## 右键菜单
 
@@ -366,7 +389,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.6-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.7-windows-x64.zip`。
 
 ### macOS 构建
 

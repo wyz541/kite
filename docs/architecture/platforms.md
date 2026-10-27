@@ -161,6 +161,17 @@ Kite 只保留一个路径跳转入口。
 工具栏禁止增加重复的“前往”下拉菜单。
 菜单栏禁止增加重复的路径输入或父目录命令。
 
+## 默认文件夹打开方式
+
+Kite 支持将自身设为默认文件夹打开应用。
+Windows 使用当前用户 `Folder\shell\open\command`。
+macOS 使用 LaunchServices `public.folder`。
+
+两端都保存或恢复系统默认值。
+两端都不替换桌面、任务栏、Dock 或系统外壳。
+
+详细设计见 `docs/architecture/default-file-manager.md`。
+
 ## 平台策略
 
 不同平台使用不同 UI 策略。

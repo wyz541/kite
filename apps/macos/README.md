@@ -28,6 +28,8 @@ The script creates `apps/macos/build/Kite.app`.
 - macOS 13 through 15 material fallback.
 - AppKit workspace actions.
 - File-row and column-directory context menus.
+- LaunchServices folder-opener selection.
+- Folder open requests from Finder or other apps.
 - AppKit sharing service picker.
 - Quick Look panel.
 - macOS pasteboard.
