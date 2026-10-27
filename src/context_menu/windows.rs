@@ -1,8 +1,10 @@
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
+use futures_channel::oneshot;
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -14,15 +16,26 @@ use windows::Win32::UI::Shell::{
     SHCreateShellItemArrayFromShellItem, SetWindowSubclass,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, HMENU, SM_MENUDROPALIGNMENT,
-    SW_SHOWNORMAL, SetForegroundWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTALIGN,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_DRAWITEM, WM_INITMENUPOPUP, WM_MEASUREITEM, WM_MENUCHAR,
+    CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, HMENU, PostMessageW,
+    SM_MENUDROPALIGNMENT, SW_SHOWNORMAL, SetForegroundWindow, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_DRAWITEM, WM_INITMENUPOPUP,
+    WM_MEASUREITEM, WM_MENUCHAR, WM_NCDESTROY,
 };
 use windows::core::{Interface, PCSTR, PCWSTR};
 
 const ID_FIRST: u32 = 1;
 const ID_LAST: u32 = 0x7FFF;
 const MENU_SUBCLASS_ID: usize = 0x4B49_5445;
+const DEFERRED_MENU_SUBCLASS_ID: usize = 0x4B49_5446;
+const WM_KITE_SYSTEM_MENU: u32 = WM_APP + 0x4B;
+
+struct PendingSystemMenu {
+    hwnd: isize,
+    path: PathBuf,
+    sender: oneshot::Sender<Result<bool, String>>,
+}
+
+static PENDING_SYSTEM_MENU: Mutex<Option<PendingSystemMenu>> = Mutex::new(None);
 
 struct ShellMenuHook {
     menu2: Option<IContextMenu2>,
@@ -53,9 +66,65 @@ impl Drop for MenuGuard {
     }
 }
 
-pub(crate) fn show_system_menu(window: &Window, path: &Path) -> Result<bool, String> {
+pub(crate) fn request_system_menu(
+    window: &Window,
+    path: &Path,
+) -> Result<oneshot::Receiver<Result<bool, String>>, String> {
     let hwnd = window_hwnd(window)?;
-    show_native_context_menu_for_hwnd(hwnd, path)
+    let (sender, receiver) = oneshot::channel();
+    {
+        let mut pending = PENDING_SYSTEM_MENU
+            .lock()
+            .map_err(|_| "无法锁定 Windows 菜单状态".to_string())?;
+        if pending.is_some() {
+            return Err("Windows 原生菜单正在打开".to_string());
+        }
+        *pending = Some(PendingSystemMenu {
+            hwnd: hwnd.0 as isize,
+            path: path.to_path_buf(),
+            sender,
+        });
+    }
+
+    if !unsafe {
+        SetWindowSubclass(
+            hwnd,
+            Some(deferred_menu_subclass_proc),
+            DEFERRED_MENU_SUBCLASS_ID,
+            0,
+        )
+    }
+    .as_bool()
+    {
+        clear_pending_system_menu(hwnd);
+        return Err("无法安装 Windows 菜单调度钩子".to_string());
+    }
+
+    if let Err(error) =
+        unsafe { PostMessageW(Some(hwnd), WM_KITE_SYSTEM_MENU, WPARAM(0), LPARAM(0)) }
+    {
+        unsafe {
+            let _ = RemoveWindowSubclass(
+                hwnd,
+                Some(deferred_menu_subclass_proc),
+                DEFERRED_MENU_SUBCLASS_ID,
+            );
+        }
+        clear_pending_system_menu(hwnd);
+        return Err(format!("无法调度 Windows 原生菜单：{error}"));
+    }
+
+    Ok(receiver)
+}
+
+fn clear_pending_system_menu(hwnd: HWND) {
+    if let Ok(mut pending) = PENDING_SYSTEM_MENU.lock()
+        && pending
+            .as_ref()
+            .is_some_and(|request| request.hwnd == hwnd.0 as isize)
+    {
+        pending.take();
+    }
 }
 
 fn show_native_context_menu_for_hwnd(hwnd: HWND, path: &Path) -> Result<bool, String> {
@@ -151,6 +220,49 @@ fn window_hwnd(window: &Window) -> Result<HWND, String> {
         RawWindowHandle::Win32(handle) => Ok(HWND(handle.hwnd.get() as *mut c_void)),
         _ => Err("Kite 窗口不是 Win32 窗口".to_string()),
     }
+}
+
+unsafe extern "system" fn deferred_menu_subclass_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _: usize,
+    _: usize,
+) -> LRESULT {
+    if message == WM_KITE_SYSTEM_MENU {
+        let pending = PENDING_SYSTEM_MENU
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.take());
+        unsafe {
+            let _ = RemoveWindowSubclass(
+                hwnd,
+                Some(deferred_menu_subclass_proc),
+                DEFERRED_MENU_SUBCLASS_ID,
+            );
+        }
+        if let Some(pending) = pending
+            && pending.hwnd == hwnd.0 as isize
+        {
+            let result = show_native_context_menu_for_hwnd(hwnd, &pending.path);
+            let _ = pending.sender.send(result);
+        }
+        return LRESULT(0);
+    }
+
+    if message == WM_NCDESTROY {
+        clear_pending_system_menu(hwnd);
+        unsafe {
+            let _ = RemoveWindowSubclass(
+                hwnd,
+                Some(deferred_menu_subclass_proc),
+                DEFERRED_MENU_SUBCLASS_ID,
+            );
+        }
+    }
+
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 unsafe extern "system" fn menu_subclass_proc(

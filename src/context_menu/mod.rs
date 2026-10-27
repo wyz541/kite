@@ -11,7 +11,7 @@ use crate::platform::HostPlatform;
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::show_system_menu;
+pub(crate) use windows::request_system_menu;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ContextMenuPolicy {

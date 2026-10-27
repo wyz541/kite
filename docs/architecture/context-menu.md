@@ -144,6 +144,20 @@ Windows 模块位于 `src/context_menu/windows.rs`。
 7. 用 `CMINVOKECOMMANDINFOEX` 调用 `InvokeCommand`。
 8. 销毁菜单并移除窗口子类。
 
+### 延迟调度
+
+GPUI 动作在 `App::update` 调用栈中执行。
+`TrackPopupMenuEx` 会启动嵌套 Windows 消息循环。
+因此，动作处理中不能同步打开原生菜单。
+同步打开会导致窗口消息重入 GPUI 更新。
+进程随后以 `FAST_FAIL_FATAL_APP_EXIT` 中止。
+
+Kite 用 `PostMessageW` 投递私有窗口消息。
+GPUI 更新返回后，窗口子类处理该消息。
+窗口子类随后打开原生菜单。
+菜单关闭后，一次性结果通道唤醒 GPUI 任务。
+GPUI 任务再刷新文件和版本控制状态。
+
 ## 功能边界
 
 ### Kite 原生项
@@ -227,8 +241,10 @@ Windows 11 新式紧凑菜单不保证由 `IContextMenu` 返回。
 - Shell 菜单操作不写入文件内容。
 - Shell 命令由 Windows 或扩展执行。
 - Kite 只验证目标路径和调用结果。
-- 子类化只在菜单生命周期内存在。
+- 调度子类在消息处理完成或窗口销毁时移除。
 - 菜单句柄和子类数据使用 RAII 清理。
+- 原生菜单不在 GPUI 更新调用栈中打开。
+- 同一时间只允许一个待处理的原生菜单请求。
 - 后台 VCS 操作继续使用 `CREATE_NO_WINDOW`。
 
 ## 验证
@@ -240,6 +256,7 @@ Windows 11 新式紧凑菜单不保证由 `IContextMenu` 返回。
 - 模型测试检查加载状态禁用规则。
 - 原生桥接测试创建 Win32 窗口。
 - 原生桥接测试打开 Shell 菜单并自动关闭。
+- 调试器回归测试选择原生 Shell 命令，确认进程继续运行。
 - 模型测试检查 `显示更多选项 (Show more options)` 入口。
 
 ## 主要来源

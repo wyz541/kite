@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::actions::*;
 use crate::context_menu::{
-    ContextMenuCapabilities, ContextMenuTarget, render_context_menu, show_system_menu,
+    ContextMenuCapabilities, ContextMenuTarget, render_context_menu, request_system_menu,
 };
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
@@ -1287,15 +1287,35 @@ impl KiteApp {
     }
 
     fn open_system_menu(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        match show_system_menu(window, &path) {
-            Ok(true) => self.refresh(window, cx),
-            Ok(false) => {}
+        let receiver = match request_system_menu(window, &path) {
+            Ok(receiver) => receiver,
             Err(error) => {
                 self.notice = None;
                 self.error = Some(error.into());
                 cx.notify();
+                return;
             }
-        }
+        };
+        self.notice = None;
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = receiver.await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(Ok(true)) => this.refresh(window, cx),
+                Ok(Ok(false)) => {}
+                Ok(Err(error)) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(format!("无法读取 Windows 原生菜单结果：{error}").into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn context_target_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
