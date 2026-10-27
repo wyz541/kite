@@ -432,6 +432,8 @@ impl KiteApp {
             Menu::new("Kite").items([
                 MenuItem::action("设为默认资源管理器…", SetDefaultExplorer),
                 MenuItem::action("恢复之前的文件夹打开方式…", RestoreDefaultExplorer),
+                MenuItem::separator(),
+                MenuItem::action("创建开始菜单快捷方式…", CreateStartMenuShortcut),
             ]),
         ]);
     }
@@ -1213,8 +1215,7 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) {
         let message = "将 Kite 设为默认资源管理器？";
-        let detail =
-            "Kite 将接管文件夹打开命令。\nWindows 桌面、任务栏和系统文件对话框仍由 Windows 管理。";
+        let detail = "Kite 将接管文件夹打开命令。\nKite 将创建开始菜单入口。\nWindows 桌面、任务栏和系统文件对话框仍由 Windows 管理。";
         let answers = [PromptButton::ok("设为默认"), PromptButton::cancel("取消")];
         let answer = window.prompt(PromptLevel::Warning, message, Some(detail), &answers, cx);
         cx.spawn_in(window, async move |this, cx| {
@@ -1266,6 +1267,38 @@ impl KiteApp {
             let result = cx
                 .background_spawn(async {
                     crate::explorer_integration::restore_previous_file_manager()
+                })
+                .await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                match result {
+                    Ok(message) => {
+                        this.error = None;
+                        this.notice = Some(message.into());
+                    }
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn create_start_menu_shortcut(
+        &mut self,
+        _: &CreateStartMenuShortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.error = None;
+        self.notice = Some("正在创建开始菜单快捷方式…".into());
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async {
+                    crate::explorer_integration::register_start_menu_shortcut()
                 })
                 .await;
             let _ = this.update_in(cx, |this, _, cx| {
@@ -3372,6 +3405,7 @@ impl Render for KiteApp {
             }))
             .on_action(cx.listener(Self::set_default_explorer))
             .on_action(cx.listener(Self::restore_default_explorer))
+            .on_action(cx.listener(Self::create_start_menu_shortcut))
             .child(
                 h_flex()
                     .h(px(54.))
@@ -3538,6 +3572,11 @@ impl Render for KiteApp {
                                     .menu(
                                         "恢复之前的文件夹打开方式…",
                                         Box::new(RestoreDefaultExplorer),
+                                    )
+                                    .separator()
+                                    .menu(
+                                        "创建开始菜单快捷方式…",
+                                        Box::new(CreateStartMenuShortcut),
                                     )
                             }),
                     )

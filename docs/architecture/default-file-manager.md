@@ -75,6 +75,24 @@ HKEY_CURRENT_USER\Software\Kite\ExplorerIntegration
 
 备份写入失败时，Kite 恢复原命令。
 
+### Windows Search 和 PowerToys Run
+
+ZIP 便携版没有安装步骤。
+Windows Search 和 PowerToys Run 默认不扫描任意文件夹中的 `.exe`。
+
+Kite 提供当前用户注册入口。
+入口包含以下内容：
+
+- `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\Kite.exe`
+- `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Kite.lnk`
+
+设置默认资源管理器时，Kite 自动创建该入口。
+用户也可以执行 `Kite > 创建开始菜单快捷方式…`。
+快捷方式指向当前运行的 `Kite.exe`。
+
+PowerToys Run 缓存应用列表。
+注册后需要重启 PowerToys Run 或重新加载应用列表。
+
 ### 恢复流程
 
 1. 读取 Kite 备份。

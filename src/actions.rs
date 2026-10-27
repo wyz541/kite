@@ -28,6 +28,7 @@ actions!(
         PreviousTab,
         SetDefaultExplorer,
         RestoreDefaultExplorer,
+        CreateStartMenuShortcut,
     ]
 );
 
