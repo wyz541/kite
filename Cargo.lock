@@ -3478,6 +3478,7 @@ dependencies = [
  "chrono",
  "dirs 6.0.0",
  "dunce",
+ "futures-channel",
  "gpui-kit",
  "open",
  "raw-window-handle",
