@@ -45,7 +45,7 @@ jobs:
 
   macos:
     name: macOS SwiftUI + AppKit
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -78,6 +78,20 @@ jobs:
             echo "::error::macOS Swift sources contain gpui or egui"
             exit 1
           fi
+
+      - name: Verify Liquid Glass SDK
+        run: |
+          xcodebuild -version
+          SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+          echo "macOS SDK: $SDK_VERSION"
+          case "$SDK_VERSION" in
+            26.*|27.*) ;;
+            *)
+              echo "::error::Liquid Glass requires the macOS 26 SDK or newer"
+              exit 1
+              ;;
+          esac
+          grep -q "glassEffect" apps/macos/Sources/GlassSurface.swift
 
       - name: Build SwiftUI application
         run: bash apps/macos/build.sh
