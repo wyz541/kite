@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::actions::{CloseTab, NewTab, NextTab, PreviousTab};
-use crate::app::{KiteApp, SharedClipboard, TabRequest};
+use crate::app::{AppLaunchTarget, KiteApp, SharedClipboard, TabRequest};
 use crate::session::{self, SessionStateDto, SessionTabDto};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
@@ -37,14 +37,18 @@ impl KiteWindow {
             last_persisted_session: None,
         };
 
-        if KiteApp::launch_directory_override().is_none()
+        let launch_target = KiteApp::launch_target_override();
+        if launch_target.is_none()
             && let Some(state) = session::load_session()
         {
             this.restore_session(&state, window, cx);
         }
 
         if this.tabs.is_empty() {
-            let view = Self::create_tab(KiteApp::default_directory(), clipboard, window, cx);
+            let view = match launch_target {
+                Some(target) => Self::create_launch_tab(target, clipboard, window, cx),
+                None => Self::create_tab(KiteApp::default_directory(), clipboard, window, cx),
+            };
             this.attach_tab(view, window, cx);
         }
 
@@ -130,6 +134,15 @@ impl KiteWindow {
     ) -> Entity<KiteApp> {
         cx.new(|cx| KiteApp::new_restored(state, clipboard, window, cx))
     }
+    fn create_launch_tab(
+        target: AppLaunchTarget,
+        clipboard: SharedClipboard,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<KiteApp> {
+        cx.new(|cx| KiteApp::new_launch_target(target, clipboard, window, cx))
+    }
+
     fn create_tab(
         path: PathBuf,
         clipboard: SharedClipboard,
