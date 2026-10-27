@@ -75,9 +75,12 @@ Windows 专属代码只在 `cfg(target_os = "windows")` 下编译。
 ## macOS 前端
 
 macOS 前端使用 SwiftUI 和 AppKit。
+macOS 26 或更新系统在功能层使用 Liquid Glass。
+macOS 13 到 15 使用标准材质降级。
 
 SwiftUI 负责以下能力：
 
+- Liquid Glass 工具栏和路径控件。
 - 窗口和工具栏。
 - 分栏视图。
 - 路径输入。
@@ -149,6 +152,7 @@ Swift 使用 UniFFI 记录和对象。
 | 项目 | Windows | macOS |
 |---|---|---|
 | 主 UI | GPUI | SwiftUI |
+| 功能层材质 | GPUI 主题 | Liquid Glass / 标准材质 |
 | 菜单渲染 | GPUI + Win32 | SwiftUI + AppKit |
 | 系统扩展 | Shell 扩展 | Services 和 AppKit |
 | 文件打开 | Shell 默认程序 | NSWorkspace |
@@ -174,6 +178,7 @@ macOS CI 执行以下检查：
 - Clippy。
 - Rust dylib build。
 - UniFFI Swift binding generation。
+- macOS 26 Liquid Glass SDK check。
 - SwiftUI + AppKit application build。
 - macOS app packaging。
 
@@ -182,6 +187,8 @@ macOS CI 执行以下检查：
 ## 当前边界
 
 - macOS UI 当前提供分栏浏览基础能力。
+- macOS 26 使用 Liquid Glass 工具栏。
+- macOS 13 到 15 使用标准材质工具栏。
 - macOS Git/SVN 完整菜单仍待接入共享命令模型。
 - macOS Finder Sync 扩展未实现。
 - macOS Universal Binary 未实现。

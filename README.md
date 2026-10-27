@@ -3,6 +3,8 @@
 Kite 是一个跨平台文件管理器。
 Windows 使用 Rust 和 GPUI。
 macOS 使用 SwiftUI 和 AppKit。
+macOS 26 使用 Liquid Glass。
+macOS 13 到 15 使用标准材质降级。
 两端共享 Rust Core。
 
 macOS 不使用 GPUI，也不使用 egui。
@@ -60,6 +62,8 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 - 在浅色主题和深色主题之间切换。
 - 过滤 Windows 隐藏属性和系统属性的项目。
 - macOS 使用平台文件名规则和卷枚举。
+- macOS 26 工具栏使用 Liquid Glass。
+- macOS 13 到 15 工具栏使用标准材质。
 
 ## 右键菜单
 
@@ -307,11 +311,13 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.5.0-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.5.1-windows-x64.zip`。
 
 ### macOS 构建
 
-macOS 需要稳定版 Rust、Xcode 和 Xcode Command Line Tools。
+macOS 需要稳定版 Rust、Xcode 26 或更新版本和 Xcode Command Line Tools。
+部署目标为 macOS 13。
+Liquid Glass 在 macOS 26 或更新系统显示。
 
 ```bash
 bash apps/macos/build.sh
@@ -351,7 +357,7 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 - 共享 Rust Core
 - UniFFI `0.32`
 - Windows：GPUI `0.2.2`、GPUI Kit `0.8.0`、Windows API
-- macOS：SwiftUI、AppKit、Quick Look、UniFFI Swift
+- macOS：SwiftUI、AppKit、Liquid Glass、Quick Look、UniFFI Swift
 - WalkDir
 - trash
 
