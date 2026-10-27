@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use crate::actions::{CloseTab, NewTab, NextTab, PreviousTab};
 use crate::app::{KiteApp, SharedClipboard, TabRequest};
+use crate::session::{self, SessionStateDto, SessionTabDto};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -21,27 +22,35 @@ pub struct KiteWindow {
     clipboard: SharedClipboard,
     tab_scroll: ScrollHandle,
     focus_handle: FocusHandle,
+    last_persisted_session: Option<SessionStateDto>,
 }
 
 impl KiteWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let clipboard = Rc::new(RefCell::new(None));
-        let initial_path = KiteApp::default_directory();
-        let view = Self::create_tab(initial_path, clipboard.clone(), window, cx);
         let mut this = Self {
             tabs: Vec::new(),
             active_index: 0,
-            clipboard,
+            clipboard: clipboard.clone(),
             tab_scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
+            last_persisted_session: None,
         };
-        let subscription = this.subscribe_tab(&view, window, cx);
-        let tab_subscription = this.subscribe_tab_requests(&view, window, cx);
-        this.tabs.push(TabEntry {
-            view,
-            _subscription: subscription,
-            _tab_subscription: tab_subscription,
-        });
+
+        if KiteApp::launch_directory_override().is_none()
+            && let Some(state) = session::load_session()
+        {
+            this.restore_session(&state, window, cx);
+        }
+
+        if this.tabs.is_empty() {
+            let view = Self::create_tab(KiteApp::default_directory(), clipboard, window, cx);
+            this.attach_tab(view, window, cx);
+        }
+
+        this.active_index = this.active_index.min(this.tabs.len().saturating_sub(1));
+        this.persist_session(cx);
+        this.register_close_persistence(window, cx);
         this.update_window_title(window, cx);
         cx.defer_in(window, |this, window, cx| {
             this.focus_active(window, cx);
@@ -49,6 +58,78 @@ impl KiteWindow {
         this
     }
 
+    fn restore_session(
+        &mut self,
+        state: &SessionStateDto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let requested_active = usize::try_from(state.active_tab).unwrap_or(0);
+        let mut restored_active = None;
+        for (index, tab) in state.tabs.iter().enumerate() {
+            let path = PathBuf::from(&tab.current_directory);
+            if !path.is_dir() {
+                continue;
+            }
+            if index == requested_active {
+                restored_active = Some(self.tabs.len());
+            }
+            let view = Self::create_restored_tab(tab, self.clipboard.clone(), window, cx);
+            self.attach_tab(view, window, cx);
+        }
+        self.active_index = restored_active
+            .unwrap_or_else(|| requested_active.min(self.tabs.len().saturating_sub(1)));
+    }
+
+    fn attach_tab(&mut self, view: Entity<KiteApp>, window: &mut Window, cx: &mut Context<Self>) {
+        let subscription = self.subscribe_tab(&view, window, cx);
+        let tab_subscription = self.subscribe_tab_requests(&view, window, cx);
+        self.tabs.push(TabEntry {
+            view,
+            _subscription: subscription,
+            _tab_subscription: tab_subscription,
+        });
+    }
+
+    fn register_close_persistence(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let weak_entity = cx.weak_entity();
+        window.on_window_should_close(cx, move |_window, app| {
+            if let Some(entity) = weak_entity.upgrade() {
+                entity.update(app, |this, cx| this.persist_session(cx));
+            }
+            true
+        });
+    }
+
+    fn persist_session(&mut self, cx: &App) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        let state = SessionStateDto {
+            schema_version: session::SESSION_SCHEMA_VERSION,
+            active_tab: self.active_index.min(self.tabs.len() - 1) as u32,
+            tabs: self
+                .tabs
+                .iter()
+                .map(|entry| entry.view.read(cx).session_tab())
+                .collect(),
+        };
+        if self.last_persisted_session.as_ref() == Some(&state) {
+            return;
+        }
+        if session::save_session(&state).is_ok() {
+            self.last_persisted_session = Some(state);
+        }
+    }
+
+    fn create_restored_tab(
+        state: &SessionTabDto,
+        clipboard: SharedClipboard,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<KiteApp> {
+        cx.new(|cx| KiteApp::new_restored(state, clipboard, window, cx))
+    }
     fn create_tab(
         path: PathBuf,
         clipboard: SharedClipboard,
@@ -68,6 +149,7 @@ impl KiteWindow {
             if this.active_view_id() == Some(observed.entity_id()) {
                 this.update_window_title(window, cx);
             }
+            this.persist_session(cx);
             cx.notify();
         })
     }
@@ -141,6 +223,7 @@ impl KiteWindow {
         self.sync_active_clipboard(cx);
         self.update_window_title(window, cx);
         self.focus_active(window, cx);
+        self.persist_session(cx);
         cx.notify();
     }
 
@@ -166,6 +249,7 @@ impl KiteWindow {
         self.sync_active_clipboard(cx);
         self.update_window_title(window, cx);
         self.focus_active(window, cx);
+        self.persist_session(cx);
         cx.notify();
     }
 

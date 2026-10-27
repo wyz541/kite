@@ -9,6 +9,7 @@ struct ContentView: View {
             KiteGlassBackdrop()
 
             VStack(spacing: 0) {
+                tabBar
                 toolbar
                 columnBrowser
                 statusBar
@@ -17,6 +18,80 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 620)
         .onChange(of: model.focusedAddressRequest) { _ in
             addressFocused = true
+        }
+    }
+
+    private var tabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(model.tabs) { tab in
+                    tabItem(tab)
+                }
+
+                Button {
+                    model.newTab()
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .help("新建页签")
+                .accessibilityLabel("新建页签")
+            }
+            .padding(.horizontal, 12)
+        }
+        .frame(height: 36)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private func tabItem(_ tab: BrowserTab) -> some View {
+        let active = model.activeTabID == tab.id
+        return HStack(spacing: 3) {
+            Button {
+                model.activateTab(id: tab.id)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(active ? Color.accentColor : Color.orange)
+                    Text(tab.title)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("切换到 \(tab.title)")
+
+            if model.canCloseTab {
+                Button {
+                    model.closeTab(id: tab.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .help("关闭页签")
+                .accessibilityLabel("关闭页签")
+            }
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 5)
+        .frame(width: 176, height: 28)
+        .background(
+            active ? Color.accentColor.opacity(0.18) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(
+                    active ? Color.accentColor.opacity(0.30) : Color.clear,
+                    lineWidth: 0.5
+                )
         }
     }
 

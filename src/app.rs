@@ -169,11 +169,15 @@ pub struct KiteApp {
 }
 
 impl KiteApp {
-    pub(crate) fn default_directory() -> PathBuf {
+    pub(crate) fn launch_directory_override() -> Option<PathBuf> {
         std::env::args_os()
             .nth(1)
             .map(PathBuf::from)
             .filter(|path| path.is_dir())
+    }
+
+    pub(crate) fn default_directory() -> PathBuf {
+        Self::launch_directory_override()
             .or_else(dirs::home_dir)
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(default_root_path)
@@ -181,6 +185,48 @@ impl KiteApp {
 
     pub(crate) fn new_at(
         home: PathBuf,
+        clipboard: SharedClipboard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_at_with_state(home, ViewMode::Columns, true, clipboard, window, cx)
+    }
+
+    pub(crate) fn new_restored(
+        state: &crate::session::SessionTabDto,
+        clipboard: SharedClipboard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let restored_path = PathBuf::from(&state.current_directory);
+        let path = if restored_path.is_dir() {
+            restored_path
+        } else {
+            Self::default_directory()
+        };
+        let view_mode = if state.view_mode == "list" {
+            ViewMode::List
+        } else {
+            ViewMode::Columns
+        };
+        Self::new_at_with_state(path, view_mode, state.show_path_bar, clipboard, window, cx)
+    }
+
+    pub(crate) fn session_tab(&self) -> crate::session::SessionTabDto {
+        crate::session::SessionTabDto {
+            current_directory: self.current_dir.to_string_lossy().into_owned(),
+            view_mode: match self.view_mode {
+                ViewMode::Columns => "columns".to_string(),
+                ViewMode::List => "list".to_string(),
+            },
+            show_path_bar: self.show_path_bar,
+        }
+    }
+
+    fn new_at_with_state(
+        home: PathBuf,
+        view_mode: ViewMode,
+        show_path_bar: bool,
         clipboard: SharedClipboard,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -260,8 +306,8 @@ impl KiteApp {
             _load_task: Task::ready(()),
             _search_task: Task::ready(()),
             _vcs_task: Task::ready(()),
-            view_mode: ViewMode::Columns,
-            show_path_bar: true,
+            view_mode,
+            show_path_bar,
             column_panes: Vec::new(),
             column_selected_path: None,
             column_scroll: ScrollHandle::new(),

@@ -3481,6 +3481,8 @@ dependencies = [
  "gpui-kit",
  "open",
  "raw-window-handle",
+ "serde",
+ "serde_json",
  "sysinfo 0.39.6",
  "thiserror 2.0.21",
  "trash",

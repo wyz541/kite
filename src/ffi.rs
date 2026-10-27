@@ -5,6 +5,7 @@ use std::time::UNIX_EPOCH;
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory};
 use crate::platform::{HostPlatform, default_root_path, host_platform};
+use crate::session::{self as session_store, SessionStateDto};
 use crate::vcs::{apply_statuses, load_vcs_snapshot};
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -114,6 +115,14 @@ impl KiteCore {
             volumes: snapshot.volumes.iter().map(volume_dto).collect(),
             portable_devices: snapshot.portable_devices.iter().map(device_dto).collect(),
         }
+    }
+
+    pub fn load_session(&self) -> Option<SessionStateDto> {
+        session_store::load_session()
+    }
+
+    pub fn save_session(&self, state: SessionStateDto) -> Result<(), KiteError> {
+        session_store::save_session(&state).map_err(KiteError::operation)
     }
 }
 
