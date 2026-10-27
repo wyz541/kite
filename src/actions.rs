@@ -29,6 +29,7 @@ actions!(
         SetDefaultExplorer,
         RestoreDefaultExplorer,
         CreateStartMenuShortcut,
+        CheckForUpdates,
     ]
 );
 

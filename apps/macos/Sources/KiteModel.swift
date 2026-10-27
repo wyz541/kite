@@ -59,6 +59,8 @@ final class KiteModel: ObservableObject {
     @Published private(set) var activeTabID: UUID?
     @Published var errorMessage: String?
     @Published var focusedAddressRequest = 0
+    @Published private(set) var updateInProgress = false
+    @Published private(set) var updateStatusMessage: String?
 
     init(core: KiteCore = KiteCore()) {
         self.core = core
@@ -285,6 +287,95 @@ final class KiteModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    func checkForUpdates() {
+        guard !updateInProgress else { return }
+        updateInProgress = true
+        updateStatusMessage = "正在检查 Kite 更新…"
+        errorMessage = nil
+
+        Task {
+            defer { updateInProgress = false }
+            do {
+                let update = try await Self.fetchUpdateInfo()
+                guard update.updateAvailable else {
+                    updateStatusMessage = nil
+                    showUpdateAlert(
+                        title: "Kite 已是最新版本",
+                        message: "当前版本：\(update.currentVersion)\n最新版本：\(update.latestVersion)",
+                        style: .informational
+                    )
+                    return
+                }
+                guard confirmUpdate(update) else {
+                    updateStatusMessage = nil
+                    return
+                }
+
+                updateStatusMessage = "正在下载 Kite \(update.latestVersion)…"
+                let archive = try await Self.downloadUpdate(update)
+                updateStatusMessage = "正在安装 Kite \(update.latestVersion)…"
+                try KitePlatform.installUpdate(
+                    archivePath: archive,
+                    version: update.latestVersion
+                )
+                NSApp.terminate(nil)
+            } catch {
+                updateStatusMessage = nil
+                errorMessage = error.localizedDescription
+                showUpdateAlert(
+                    title: "Kite 更新失败",
+                    message: error.localizedDescription,
+                    style: .warning
+                )
+            }
+        }
+    }
+
+    nonisolated private static func fetchUpdateInfo() async throws -> UpdateInfoDto {
+        try KiteCore().checkForUpdate()
+    }
+
+    nonisolated private static func downloadUpdate(_ update: UpdateInfoDto) async throws -> String {
+        try KiteCore().downloadUpdate(update: update)
+    }
+
+    private func confirmUpdate(_ update: UpdateInfoDto) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "发现 Kite \(update.latestVersion)"
+        alert.informativeText = "当前版本：\(update.currentVersion)\n\n\(summarizedReleaseNotes(update.releaseNotes))"
+        alert.addButton(withTitle: "下载并更新")
+        alert.addButton(withTitle: "稍后")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func showUpdateAlert(
+        title: String,
+        message: String,
+        style: NSAlert.Style
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = style
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "确定")
+        alert.runModal()
+    }
+
+    private func summarizedReleaseNotes(_ notes: String) -> String {
+        let normalized = notes
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        if normalized.isEmpty {
+            return "GitHub Release 未提供更新说明。"
+        }
+        let limit = 1600
+        guard normalized.count > limit else { return normalized }
+        return String(normalized.prefix(limit)) + "\n…"
     }
 
     func openExternalFolders(_ paths: [String]) {

@@ -53,10 +53,34 @@ Kite 把界面当作一条可牵引的线。
 - 在右键菜单中执行 Git 和 SVN 操作。
 - 显示 Git 和 SVN 状态徽标。
 - 在浅色主题和深色主题之间切换。
+- 检查 GitHub Release，并更新本机 Kite。
 - 过滤 Windows 隐藏属性和系统属性的项目。
 - macOS 使用平台文件名规则和卷枚举。
 - macOS 26 工具栏使用 Liquid Glass。
 - macOS 13 到 15 工具栏使用标准材质。
+
+## 软件更新
+
+打开 `Kite > 检查更新…`。
+工具栏设置菜单提供同一入口。
+Kite 在后台读取 GitHub 最新稳定 Release。
+Kite 使用语义化版本比较当前版本和最新版本。
+如果 GitHub API 限流，Kite 使用 Release 页面跳转和 `SHA256SUMS.txt`。
+更新包必须匹配当前平台。
+Windows 更新包为 `Kite.exe`。
+macOS 更新包为 `Kite-vX.Y.Z-macOS-arm64.zip`。
+Kite 下载后校验 SHA-256。
+校验失败时，Kite 不安装更新包。
+Windows 安装器等待当前进程退出。
+Windows 安装器备份当前 EXE，替换 EXE，然后重启 Kite。
+macOS 安装器等待当前进程退出。
+macOS 安装器使用 `ditto` 解压更新包，替换应用包，然后重启 Kite。
+更新失败时，安装器恢复旧版本。
+Windows 日志位于 `%LOCALAPPDATA%\Kite\updates\update.log`。
+macOS 日志位于 `~/Library/Application Support/Kite/updates/update.log`。
+检查和下载只在用户选择“检查更新…”后发生。
+
+详细设计见 `docs/architecture/updater.md`。
 
 ## 默认资源管理器
 
@@ -407,6 +431,7 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 
 - `src/app.rs`：Windows GPUI 页签内容、导航状态、剪贴板、文件操作和界面。
 - `src/lib.rs`：跨平台 Rust Core 入口和 UniFFI 基础。
+- `src/updater.rs`：GitHub Release 检查、版本比较、资产下载和 SHA-256 校验。
 - `src/ffi.rs`：Swift 可调用的类型化 Core 接口。
 - `src/context_menu/mod.rs`：Windows 菜单模型、提供者和 GPUI 渲染器。
 - `src/context_menu/windows.rs`：Windows Shell 原生菜单桥接。

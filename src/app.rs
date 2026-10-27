@@ -182,6 +182,7 @@ pub struct KiteApp {
     skipped: usize,
     error: Option<SharedString>,
     notice: Option<SharedString>,
+    update_in_progress: bool,
     modal: Option<ModalState>,
     clipboard: SharedClipboard,
     load_generation: u64,
@@ -369,6 +370,7 @@ impl KiteApp {
             skipped: 0,
             error: None,
             notice: None,
+            update_in_progress: false,
             modal: None,
             clipboard,
             load_generation: 0,
@@ -496,6 +498,8 @@ impl KiteApp {
                 MenuItem::action("显示或隐藏路径栏", TogglePathBar),
             ]),
             Menu::new("Kite").items([
+                MenuItem::action("检查更新…", CheckForUpdates),
+                MenuItem::separator(),
                 MenuItem::action("设为默认资源管理器…", SetDefaultExplorer),
                 MenuItem::action("恢复之前的文件夹打开方式…", RestoreDefaultExplorer),
                 MenuItem::separator(),
@@ -1321,6 +1325,121 @@ impl KiteApp {
     fn context_target_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.error = Some("项目已不存在，列表已刷新".into());
         self.refresh(window, cx);
+    }
+
+    fn check_for_updates(
+        &mut self,
+        _: &CheckForUpdates,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.update_in_progress {
+            self.notice = Some("正在检查或下载 Kite 更新…".into());
+            cx.notify();
+            return;
+        }
+        self.update_in_progress = true;
+        self.error = None;
+        self.notice = Some("正在检查 Kite 更新…".into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async { crate::updater::check_for_update() })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.update_in_progress = false;
+                match result {
+                    Ok(update) => this.offer_update(update, window, cx),
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn offer_update(
+        &mut self,
+        update: crate::updater::UpdateInfo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !update.update_available {
+            self.error = None;
+            self.notice = Some(format!("Kite {} 已是最新版本", update.current_version).into());
+            cx.notify();
+            let message = "Kite 已是最新版本";
+            let detail = format!(
+                "当前版本：{}
+最新版本：{}",
+                update.current_version, update.latest_version
+            );
+            let answers = [PromptButton::ok("确定")];
+            let answer = window.prompt(PromptLevel::Info, message, Some(&detail), &answers, cx);
+            cx.spawn_in(window, async move |_, _| {
+                let _ = answer.await;
+            })
+            .detach();
+            return;
+        }
+
+        let message = format!("发现 Kite {}", update.latest_version);
+        let notes = update_notes_summary(&update.release_notes);
+        let detail = format!(
+            "当前版本：{}
+
+{notes}",
+            update.current_version
+        );
+        let answers = [PromptButton::ok("下载并更新"), PromptButton::cancel("稍后")];
+        let answer = window.prompt(PromptLevel::Info, &message, Some(&detail), &answers, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(choice) = answer.await else {
+                return;
+            };
+            if choice != 0 {
+                return;
+            }
+            let _ = this.update_in(cx, |this, _, cx| {
+                this.update_in_progress = true;
+                this.error = None;
+                this.notice = Some("正在下载 Kite 更新…".into());
+                cx.notify();
+            });
+            let result = cx
+                .background_spawn(async move {
+                    let downloaded = update.download()?;
+                    crate::updater::install_windows_update(
+                        &downloaded,
+                        &update.asset_sha256,
+                        &update.latest_version,
+                    )?;
+                    Ok::<String, String>(update.latest_version)
+                })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.update_in_progress = false;
+                match result {
+                    Ok(version) => {
+                        this.error = None;
+                        this.notice =
+                            Some(format!("Kite {version} 已准备好，正在重启安装…").into());
+                        cx.notify();
+                        window.defer(cx, |_, cx| cx.quit());
+                    }
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     fn set_default_explorer(
@@ -3120,6 +3239,29 @@ fn same_quick_links(left: &[QuickLink], right: &[QuickLink]) -> bool {
         })
 }
 
+fn update_notes_summary(notes: &str) -> String {
+    let normalized = notes
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    if normalized.is_empty() {
+        return "GitHub Release 未提供更新说明。".to_string();
+    }
+    const LIMIT: usize = 1800;
+    let mut chars = normalized.chars();
+    let summary = chars.by_ref().take(LIMIT).collect::<String>();
+    if chars.next().is_some() {
+        format!("{summary}\n…")
+    } else {
+        summary
+    }
+}
+
 fn path_text(path: &Path) -> String {
     path.display().to_string()
 }
@@ -3661,6 +3803,7 @@ impl Render for KiteApp {
             .on_action(cx.listener(|this, _: &PreviousTab, _, cx| {
                 this.request_tab(TabRequest::Previous, cx)
             }))
+            .on_action(cx.listener(Self::check_for_updates))
             .on_action(cx.listener(Self::set_default_explorer))
             .on_action(cx.listener(Self::restore_default_explorer))
             .on_action(cx.listener(Self::create_start_menu_shortcut))
@@ -3813,7 +3956,7 @@ impl Render for KiteApp {
                     .child(
                         DropdownButton::new("default-explorer-menu")
                             .with_size(Size::Small)
-                            .menu_accessibility_label("默认资源管理器设置")
+                            .menu_accessibility_label("Kite 设置")
                             .button(
                                 Button::new("default-explorer-action")
                                     .ghost()
@@ -3825,7 +3968,9 @@ impl Render for KiteApp {
                                     })),
                             )
                             .dropdown_menu(|menu, _, _| {
-                                menu.menu("设为默认资源管理器…", Box::new(SetDefaultExplorer))
+                                menu.menu("检查更新…", Box::new(CheckForUpdates))
+                                    .separator()
+                                    .menu("设为默认资源管理器…", Box::new(SetDefaultExplorer))
                                     .separator()
                                     .menu(
                                         "恢复之前的文件夹打开方式…",
@@ -3933,6 +4078,25 @@ mod clipboard_tests {
         assert!(destination.borrow().is_some());
         *destination.borrow_mut() = None;
         assert!(source.borrow().is_none());
+    }
+}
+
+#[cfg(test)]
+mod update_ui_tests {
+    use super::update_notes_summary;
+
+    #[test]
+    fn empty_release_notes_have_a_fallback() {
+        assert!(update_notes_summary(" \n ").contains("未提供更新说明"));
+    }
+
+    #[test]
+    fn long_release_notes_are_bounded() {
+        let notes = "a".repeat(2_000);
+        let summary = update_notes_summary(&notes);
+
+        assert!(summary.ends_with('…'));
+        assert!(summary.chars().count() < 1_810);
     }
 }
 

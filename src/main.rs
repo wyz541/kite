@@ -21,7 +21,7 @@ use gpui_kit::component::{Theme, ThemeMode};
 #[cfg(windows)]
 use gpui_kit::*;
 #[cfg(windows)]
-pub use kite_core::{devices, fs, platform, session, vcs};
+pub use kite_core::{devices, fs, platform, session, updater, vcs};
 #[cfg(windows)]
 use tabs::KiteWindow;
 

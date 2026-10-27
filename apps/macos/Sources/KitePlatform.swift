@@ -90,6 +90,123 @@ enum KitePlatform {
         try await NSWorkspace.shared.setDefaultApplication(at: finder, toOpen: .folder)
     }
 
+    static func installUpdate(archivePath: String, version: String) throws {
+        let fileManager = FileManager.default
+        let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
+        guard appURL.pathExtension == "app" else {
+            throw updateError("Kite 当前不是应用包，无法自动更新。")
+        }
+        let parentURL = appURL.deletingLastPathComponent()
+        guard fileManager.isWritableFile(atPath: parentURL.path) else {
+            throw updateError("应用目录不可写。请将 Kite 移到可写目录后重试。")
+        }
+
+        let supportURL = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        .appendingPathComponent("Kite", isDirectory: true)
+        .appendingPathComponent("updates", isDirectory: true)
+        try fileManager.createDirectory(at: supportURL, withIntermediateDirectories: true)
+
+        let processID = ProcessInfo.processInfo.processIdentifier
+        let scriptURL = supportURL.appendingPathComponent("apply-\(version)-\(processID).sh")
+        let logURL = supportURL.appendingPathComponent("update.log")
+        let script = """
+        #!/bin/bash
+        set -u
+
+        PID="$1"
+        ARCHIVE="$2"
+        APP="$3"
+        LOG="$4"
+        SCRIPT="$5"
+
+        exec >>"$LOG" 2>&1
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Installing Kite update"
+
+        WORK="${APP}.update-${PID}"
+        BACKUP="${APP}.old-${PID}"
+        NEW_APP="$WORK/Kite.app"
+
+        cleanup() {
+            rm -rf "$WORK"
+        }
+
+        restore_and_open() {
+            if [ -d "$BACKUP" ]; then
+                rm -rf "$APP"
+                mv "$BACKUP" "$APP"
+                open "$APP"
+            fi
+        }
+
+        while kill -0 "$PID" 2>/dev/null; do
+            sleep 0.2
+        done
+
+        rm -rf "$WORK" "$BACKUP"
+        mkdir -p "$WORK" || exit 1
+        if ! /usr/bin/ditto -x -k "$ARCHIVE" "$WORK"; then
+            echo "Cannot extract update archive"
+            cleanup
+            open "$APP"
+            exit 1
+        fi
+        if [ ! -d "$NEW_APP" ]; then
+            echo "Updated Kite.app is missing"
+            cleanup
+            open "$APP"
+            exit 1
+        fi
+        if ! mv "$APP" "$BACKUP"; then
+            echo "Cannot move current Kite.app"
+            cleanup
+            open "$APP"
+            exit 1
+        fi
+        if ! mv "$NEW_APP" "$APP"; then
+            echo "Cannot install updated Kite.app"
+            restore_and_open
+            cleanup
+            exit 1
+        fi
+        if ! open "$APP"; then
+            echo "Updated Kite.app cannot start"
+            restore_and_open
+            cleanup
+            exit 1
+        fi
+
+        sleep 2
+        rm -rf "$WORK" "$BACKUP" "$ARCHIVE"
+        rm -f "$SCRIPT"
+        """
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [
+            scriptURL.path,
+            String(processID),
+            archivePath,
+            appURL.path,
+            logURL.path,
+            scriptURL.path
+        ]
+        try process.run()
+    }
+
+    private static func updateError(_ message: String) -> NSError {
+        NSError(
+            domain: "KitePlatform",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
     private static func validateName(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else {
             throw NSError(
