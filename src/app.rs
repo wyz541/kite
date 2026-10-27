@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::actions::*;
-use crate::context_menu::{ContextMenuTarget, render_context_menu, show_system_menu};
+use crate::context_menu::{
+    ContextMenuCapabilities, ContextMenuTarget, render_context_menu, show_system_menu,
+};
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
     FileEntry, SortSpec, create_folder, format_size, load_directory, open_file, recycle_entry,
@@ -63,7 +65,7 @@ struct SearchState {
 
 #[derive(Clone)]
 enum ModalKind {
-    NewFolder,
+    NewFolder(PathBuf),
     Rename(PathBuf),
 
     GitCommit(PathBuf),
@@ -258,7 +260,7 @@ impl KiteApp {
         });
         let table = cx.new(|cx| {
             TableState::new(
-                FileTableDelegate::new(Vec::new(), SortSpec::default()),
+                FileTableDelegate::new(Vec::new(), SortSpec::default(), home.clone()),
                 window,
                 cx,
             )
@@ -487,7 +489,9 @@ impl KiteApp {
                         this.search_input.update(cx, |input, cx| {
                             input.set_value("", window, cx);
                         });
+                        let table_directory = snapshot.path.clone();
                         this.table.update(cx, |state, cx| {
+                            state.delegate_mut().set_working_directory(table_directory);
                             state.delegate_mut().replace_entries(snapshot.entries, None);
                             state.clear_selection(cx);
                             state.refresh(cx);
@@ -607,6 +611,7 @@ impl KiteApp {
         self.search_truncated = false;
         self.skipped = skipped;
         self.apply_history(path.clone(), NavigationIntent::Push);
+        let table_directory = path.clone();
         self.current_dir = path;
 
         self.address_input.update(cx, |input, cx| {
@@ -617,6 +622,7 @@ impl KiteApp {
         });
         self.table.update(cx, |state, cx| {
             state.delegate_mut().set_loading(false);
+            state.delegate_mut().set_working_directory(table_directory);
             state.delegate_mut().replace_entries(entries, None);
             state.clear_selection(cx);
             state.refresh(cx);
@@ -1096,25 +1102,6 @@ impl KiteApp {
         }
     }
 
-    fn entry_for_path(&self, cx: &App, path: &Path) -> Option<FileEntry> {
-        if let Some(entry) = self
-            .column_panes
-            .iter()
-            .flat_map(|pane| pane.entries.iter())
-            .find(|entry| same_path(&entry.path, path))
-            .cloned()
-        {
-            return Some(entry);
-        }
-        self.table
-            .read(cx)
-            .delegate()
-            .entries()
-            .iter()
-            .find(|entry| same_path(&entry.path, path))
-            .cloned()
-    }
-
     fn open_entry(&mut self, entry: FileEntry, window: &mut Window, cx: &mut Context<Self>) {
         self.open_path(entry.path, window, cx);
     }
@@ -1178,21 +1165,15 @@ impl KiteApp {
             ContextMenuCommand::Cut => {
                 self.set_clipboard_path(action.target.clone(), ClipboardMode::Cut, cx)
             }
-            ContextMenuCommand::Paste => self.paste_clipboard(window, cx),
-            ContextMenuCommand::NewFolder => self.begin_new_folder(window, cx),
-            ContextMenuCommand::Rename => {
-                if let Some(entry) = self.entry_for_path(cx, &action.target) {
-                    self.begin_rename_entry(entry, window, cx);
-                } else {
-                    self.context_target_missing(window, cx);
-                }
+            ContextMenuCommand::Paste => {
+                self.paste_clipboard_into(action.working_directory.clone(), window, cx)
             }
+            ContextMenuCommand::NewFolder => {
+                self.begin_new_folder_in(action.working_directory.clone(), window, cx)
+            }
+            ContextMenuCommand::Rename => self.begin_rename_path(action.target.clone(), window, cx),
             ContextMenuCommand::Recycle => {
-                if let Some(entry) = self.entry_for_path(cx, &action.target) {
-                    self.confirm_recycle_entry(entry, window, cx);
-                } else {
-                    self.context_target_missing(window, cx);
-                }
+                self.confirm_recycle_path(action.target.clone(), window, cx)
             }
             ContextMenuCommand::Vcs(command) => {
                 self.run_vcs_command(command, action.target.clone(), window, cx)
@@ -1633,11 +1614,19 @@ impl KiteApp {
     }
 
     fn paste_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.paste_clipboard_into(self.current_dir.clone(), window, cx);
+    }
+
+    fn paste_clipboard_into(
+        &mut self,
+        destination_dir: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(clipboard) = self.clipboard.borrow().clone() else {
             return;
         };
         let source = clipboard.path;
-        let destination_dir = self.current_dir.clone();
         let move_source = clipboard.mode == ClipboardMode::Cut;
         self.error = None;
         self.notice = Some(if move_source {
@@ -1675,6 +1664,15 @@ impl KiteApp {
     }
 
     fn begin_new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.begin_new_folder_in(self.current_dir.clone(), window, cx);
+    }
+
+    fn begin_new_folder_in(
+        &mut self,
+        directory: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.loading {
             return;
         }
@@ -1694,7 +1692,7 @@ impl KiteApp {
             },
         );
         self.modal = Some(ModalState {
-            kind: ModalKind::NewFolder,
+            kind: ModalKind::NewFolder(directory),
             input: input.clone(),
             _subscription: subscription,
         });
@@ -1704,20 +1702,27 @@ impl KiteApp {
 
     fn begin_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.selected_entry(cx) {
-            self.begin_rename_entry(entry, window, cx);
+            self.begin_rename_path(entry.path, window, cx);
         }
     }
 
-    fn begin_rename_entry(
-        &mut self,
-        entry: FileEntry,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn begin_rename_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(name) = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+        else {
+            self.error = Some("无法重命名驱动器根目录".into());
+            cx.notify();
+            return;
+        };
+        if !path.exists() {
+            self.context_target_missing(window, cx);
+            return;
+        }
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("新名称")
-                .default_value(entry.name.clone())
+                .default_value(name)
                 .clean_on_escape()
         });
         let subscription = cx.subscribe_in(
@@ -1730,7 +1735,7 @@ impl KiteApp {
             },
         );
         self.modal = Some(ModalState {
-            kind: ModalKind::Rename(entry.path),
+            kind: ModalKind::Rename(path),
             input: input.clone(),
             _subscription: subscription,
         });
@@ -1751,7 +1756,7 @@ impl KiteApp {
         let value = modal.input.read(cx).value().trim().to_string();
         let kind = modal.kind.clone();
         let validation = match &kind {
-            ModalKind::NewFolder | ModalKind::Rename(_) => validate_name(&value),
+            ModalKind::NewFolder(_) | ModalKind::Rename(_) => validate_name(&value),
             ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) if value.is_empty() => {
                 Err("请输入提交说明".to_string())
             }
@@ -1765,8 +1770,7 @@ impl KiteApp {
         self.error = None;
 
         match kind {
-            ModalKind::NewFolder => {
-                let parent = self.current_dir.clone();
+            ModalKind::NewFolder(parent) => {
                 let name = value;
                 self.notice = Some("正在新建文件夹…".into());
                 cx.spawn_in(window, async move |this, cx| {
@@ -1789,15 +1793,22 @@ impl KiteApp {
             }
             ModalKind::Rename(path) => {
                 let name = value;
+                let rename_source = path.clone();
+                let renamed_path = path
+                    .parent()
+                    .map(|parent| parent.join(&name))
+                    .unwrap_or_else(|| path.clone());
                 self.notice = Some("正在重命名…".into());
                 cx.spawn_in(window, async move |this, cx| {
                     let result = cx
-                        .background_spawn(async move { rename_entry(&path, &name) })
+                        .background_spawn(async move { rename_entry(&rename_source, &name) })
                         .await;
                     let _ = this.update_in(cx, |this, window, cx| match result {
                         Ok(_) => {
                             this.notice = Some("名称已更新".into());
-                            this.refresh(window, cx);
+                            let destination =
+                                path_after_rename(&this.current_dir, &path, &renamed_path);
+                            this.navigate_to(destination, NavigationIntent::Refresh, window, cx);
                         }
                         Err(error) => {
                             this.notice = None;
@@ -1821,21 +1832,24 @@ impl KiteApp {
 
     fn confirm_recycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.selected_entry(cx) {
-            self.confirm_recycle_entry(entry, window, cx);
+            self.confirm_recycle_path(entry.path, window, cx);
         }
     }
 
-    fn confirm_recycle_entry(
-        &mut self,
-        entry: FileEntry,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let message = format!("将“{}”移到回收站？", entry.name);
-        let detail = path_text(&entry.path);
+    fn confirm_recycle_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path_text(&path));
+        if !path.exists() {
+            self.context_target_missing(window, cx);
+            return;
+        }
+        let message = format!("将“{name}”移到回收站？");
+        let recycle_source = path.clone();
+        let detail = path_text(&path);
         let answers = [PromptButton::ok("移到回收站"), PromptButton::cancel("取消")];
         let answer = window.prompt(PromptLevel::Warning, &message, Some(&detail), &answers, cx);
-        let path = entry.path;
         cx.spawn_in(window, async move |this, cx| {
             let Ok(choice) = answer.await else {
                 return;
@@ -1844,12 +1858,13 @@ impl KiteApp {
                 return;
             }
             let result = cx
-                .background_spawn(async move { recycle_entry(&path) })
+                .background_spawn(async move { recycle_entry(&recycle_source) })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => {
                     this.notice = Some("已移到回收站".into());
-                    this.refresh(window, cx);
+                    let destination = path_after_recycle(&this.current_dir, &path);
+                    this.navigate_to(destination, NavigationIntent::Refresh, window, cx);
                 }
                 Err(error) => {
                     this.notice = None;
@@ -2377,6 +2392,8 @@ impl KiteApp {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
+        let can_paste = self.clipboard.borrow().is_some();
+        let column_menu_target = column_context_menu_target(pane, can_paste);
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let accent = cx.theme().accent;
@@ -2454,6 +2471,9 @@ impl KiteApp {
                     })
                     .child(body),
             )
+            .context_menu(move |menu, window, cx| {
+                render_context_menu(menu, &column_menu_target, window, cx)
+            })
             .into_any_element()
     }
 
@@ -2532,6 +2552,7 @@ impl KiteApp {
             return Vec::new();
         };
         let entries = pane.entries.clone();
+        let column_path = pane.path.clone();
         let selected_path = pane.selected_path.clone();
         let loading = pane.loading;
         let can_paste = self.clipboard.borrow().is_some();
@@ -2548,6 +2569,7 @@ impl KiteApp {
             let selected = selected_path
                 .as_ref()
                 .is_some_and(|path| same_path(path, &entry.path));
+            let row_column_path = column_path.clone();
             let menu_entry = entry.clone();
             let row_git_available = git_available || entry.git_status.is_some();
             let row_svn_available = svn_available || entry.svn_status.is_some();
@@ -2603,15 +2625,18 @@ impl KiteApp {
                     }),
                 )
                 .context_menu(move |menu, window, cx| {
-                    let target = ContextMenuTarget {
-                        path: menu_entry.path.clone(),
-                        title: menu_entry.name.clone(),
-                        is_dir: menu_entry.is_dir(),
-                        loading,
-                        can_paste,
-                        git_available: row_git_available,
-                        svn_available: row_svn_available,
-                    };
+                    let target = ContextMenuTarget::entry(
+                        menu_entry.path.clone(),
+                        menu_entry.name.clone(),
+                        menu_entry.is_dir(),
+                        row_column_path.clone(),
+                        ContextMenuCapabilities {
+                            loading,
+                            can_paste,
+                            git_available: row_git_available,
+                            svn_available: row_svn_available,
+                        },
+                    );
                     render_context_menu(menu, &target, window, cx)
                 })
                 .into_any_element();
@@ -2625,7 +2650,7 @@ impl KiteApp {
             return div().into_any_element();
         };
         let (title, description, action_label) = match &modal.kind {
-            ModalKind::NewFolder => ("新建文件夹", "输入文件夹名称。按 Enter 创建。", "创建"),
+            ModalKind::NewFolder(_) => ("新建文件夹", "输入文件夹名称。按 Enter 创建。", "创建"),
             ModalKind::Rename(path) => (
                 "重命名",
                 "输入新名称。文件内容不会改变。",
@@ -2815,6 +2840,26 @@ fn same_path(left: &Path, right: &Path) -> bool {
     crate::platform::paths_equal(left, right)
 }
 
+fn path_after_rename(current_dir: &Path, original: &Path, renamed: &Path) -> PathBuf {
+    if current_dir == original {
+        return renamed.to_path_buf();
+    }
+    match current_dir.strip_prefix(original) {
+        Ok(relative) => renamed.join(relative),
+        Err(_) => current_dir.to_path_buf(),
+    }
+}
+
+fn path_after_recycle(current_dir: &Path, removed: &Path) -> PathBuf {
+    if current_dir == removed || current_dir.starts_with(removed) {
+        return removed
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_root_path);
+    }
+    current_dir.to_path_buf()
+}
+
 fn open_vcs_query_text(tool: VcsTool, query: VcsQuery, path: &Path) -> Result<String, String> {
     let title = format!("{} {}", tool.label(), query.label());
     let content = run_vcs_query(tool, query, path)?;
@@ -2994,6 +3039,24 @@ fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
         git_available: snapshot.git_available(),
         svn_available: snapshot.svn_available(),
     }
+}
+
+fn column_context_menu_target(pane: &ColumnPane, can_paste: bool) -> ContextMenuTarget {
+    let title = pane
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| pane.path.display().to_string());
+    ContextMenuTarget::directory(
+        pane.path.clone(),
+        title,
+        ContextMenuCapabilities {
+            loading: pane.loading,
+            can_paste,
+            git_available: pane.git_available,
+            svn_available: pane.svn_available,
+        },
+    )
 }
 
 fn path_segments(path: &Path, final_is_file: bool) -> Vec<PathSegment> {
@@ -3470,7 +3533,10 @@ mod clipboard_tests {
 
 #[cfg(test)]
 mod path_bar_tests {
-    use super::{ColumnPane, common_column_prefix, loaded_column_index};
+    use super::{
+        ColumnPane, column_context_menu_target, common_column_prefix, loaded_column_index,
+        path_after_recycle, path_after_rename,
+    };
     use std::path::{Path, PathBuf};
 
     fn pane(path: &str, loading: bool) -> ColumnPane {
@@ -3516,6 +3582,52 @@ mod path_bar_tests {
         ];
 
         assert_eq!(common_column_prefix(&panes, &chain), 2);
+    }
+
+    #[test]
+    fn column_context_menu_targets_that_directory() {
+        let mut column = pane(r"C:\Users\fengqy\Documents", false);
+        column.git_available = true;
+
+        let target = column_context_menu_target(&column, true);
+
+        assert_eq!(target.path, column.path);
+        assert_eq!(target.working_directory, column.path);
+        assert_eq!(target.title, "Documents");
+        assert!(target.is_dir);
+        assert!(target.git_available);
+    }
+
+    #[test]
+    fn renaming_an_ancestor_rewrites_the_current_path() {
+        assert_eq!(
+            path_after_rename(
+                Path::new(r"C:\repo\src\ui"),
+                Path::new(r"C:\repo\src"),
+                Path::new(r"C:\repo\source"),
+            ),
+            PathBuf::from(r"C:\repo\source\ui")
+        );
+        assert_eq!(
+            path_after_rename(
+                Path::new(r"C:\repo\docs"),
+                Path::new(r"C:\repo\src"),
+                Path::new(r"C:\repo\source"),
+            ),
+            PathBuf::from(r"C:\repo\docs")
+        );
+    }
+
+    #[test]
+    fn recycling_an_ancestor_moves_the_current_path_to_its_parent() {
+        assert_eq!(
+            path_after_recycle(Path::new(r"C:\repo\src\ui"), Path::new(r"C:\repo\src"),),
+            PathBuf::from(r"C:\repo")
+        );
+        assert_eq!(
+            path_after_recycle(Path::new(r"C:\repo\src"), Path::new(r"C:\repo\src\ui"),),
+            PathBuf::from(r"C:\repo\src")
+        );
     }
 }
 

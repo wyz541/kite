@@ -47,6 +47,7 @@ pub enum ContextMenuCommand {
 #[action(namespace = kite, no_json)]
 pub struct ContextMenuAction {
     pub target: PathBuf,
+    pub working_directory: PathBuf,
     pub command: ContextMenuCommand,
 }
 

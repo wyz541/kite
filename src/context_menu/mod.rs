@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -50,15 +50,74 @@ impl ContextMenuPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ContextMenuCapabilities {
+    pub loading: bool,
+    pub can_paste: bool,
+    pub git_available: bool,
+    pub svn_available: bool,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ContextMenuTarget {
     pub path: PathBuf,
+    pub working_directory: PathBuf,
     pub title: String,
     pub is_dir: bool,
     pub loading: bool,
     pub can_paste: bool,
     pub git_available: bool,
     pub svn_available: bool,
+}
+
+impl ContextMenuTarget {
+    pub(crate) fn directory(
+        path: PathBuf,
+        title: String,
+        capabilities: ContextMenuCapabilities,
+    ) -> Self {
+        Self {
+            working_directory: path.clone(),
+            path,
+            title,
+            is_dir: true,
+            loading: capabilities.loading,
+            can_paste: capabilities.can_paste,
+            git_available: capabilities.git_available,
+            svn_available: capabilities.svn_available,
+        }
+    }
+
+    pub(crate) fn entry(
+        path: PathBuf,
+        title: String,
+        is_dir: bool,
+        working_directory: PathBuf,
+        capabilities: ContextMenuCapabilities,
+    ) -> Self {
+        Self {
+            path,
+            working_directory,
+            title,
+            is_dir,
+            loading: capabilities.loading,
+            can_paste: capabilities.can_paste,
+            git_available: capabilities.git_available,
+            svn_available: capabilities.svn_available,
+        }
+    }
+
+    fn action(&self, command: ContextMenuCommand) -> ContextMenuAction {
+        ContextMenuAction {
+            target: self.path.clone(),
+            working_directory: self.working_directory.clone(),
+            command,
+        }
+    }
+
+    fn target_can_change(&self) -> bool {
+        self.path.parent().is_some()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -203,13 +262,13 @@ impl ContextMenuProvider for CoreMenuProvider {
             "重命名",
             IconName::Pencil,
             ContextMenuCommand::Rename,
-            !disabled,
+            !disabled && target.target_can_change(),
         );
         model.item(
             "移到回收站",
             IconName::Trash,
             ContextMenuCommand::Recycle,
-            !disabled,
+            !disabled && target.target_can_change(),
         );
     }
 }
@@ -396,7 +455,7 @@ fn build_model(target: &ContextMenuTarget, policy: ContextMenuPolicy) -> Context
 fn append_nodes(
     mut menu: PopupMenu,
     nodes: &[ContextMenuNode],
-    target: &Path,
+    target: &ContextMenuTarget,
     window: &mut Window,
     cx: &mut App,
 ) -> PopupMenu {
@@ -412,10 +471,7 @@ fn append_nodes(
                 menu = menu.menu_with_icon_and_disabled(
                     *label,
                     *icon,
-                    Box::new(ContextMenuAction {
-                        target: target.to_path_buf(),
-                        command: *command,
-                    }),
+                    Box::new(target.action(*command)),
                     !enabled,
                 );
             }
@@ -426,7 +482,7 @@ fn append_nodes(
                 entries,
             } => {
                 let entries = entries.clone();
-                let target = target.to_path_buf();
+                let target = target.clone();
                 let submenu = PopupMenu::build(window, cx, move |menu, window, cx| {
                     append_nodes(menu, &entries, &target, window, cx)
                 });
@@ -450,28 +506,29 @@ pub(crate) fn render_context_menu(
     let policy = ContextMenuPolicy::current();
     let model = build_model(target, policy);
     let menu = menu.label(target.title.clone()).separator();
-    append_nodes(menu, &model.entries, &target.path, window, cx)
+    append_nodes(menu, &model.entries, target, window, cx)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ContextMenuCommand, ContextMenuModel, ContextMenuNode, ContextMenuPolicy,
-        ContextMenuTarget, VcsMenuCommand, build_model,
+        ContextMenuCapabilities, ContextMenuCommand, ContextMenuModel, ContextMenuNode,
+        ContextMenuPolicy, ContextMenuTarget, VcsMenuCommand, build_model,
     };
     use crate::platform::HostPlatform;
     use std::path::PathBuf;
 
     fn target() -> ContextMenuTarget {
-        ContextMenuTarget {
-            path: PathBuf::from(r"C:\repo\src"),
-            title: "src".to_string(),
-            is_dir: true,
-            loading: false,
-            can_paste: true,
-            git_available: true,
-            svn_available: true,
-        }
+        ContextMenuTarget::directory(
+            PathBuf::from(r"C:\repo\src"),
+            "src".to_string(),
+            ContextMenuCapabilities {
+                loading: false,
+                can_paste: true,
+                git_available: true,
+                svn_available: true,
+            },
+        )
     }
 
     fn windows_policy() -> ContextMenuPolicy {
@@ -608,5 +665,44 @@ mod tests {
         assert!(!labels.contains(&"Git"));
         assert!(!labels.contains(&"SVN"));
         assert!(labels.contains(&"macOS 系统菜单…"));
+    }
+
+    #[test]
+    fn entry_action_keeps_its_own_working_directory() {
+        let target = ContextMenuTarget::entry(
+            PathBuf::from(r"C:\repo\src\main.rs"),
+            "main.rs".to_string(),
+            false,
+            PathBuf::from(r"C:\repo\src"),
+            ContextMenuCapabilities {
+                loading: false,
+                can_paste: true,
+                git_available: true,
+                svn_available: false,
+            },
+        );
+        let action = target.action(ContextMenuCommand::Paste);
+
+        assert_eq!(action.target, PathBuf::from(r"C:\repo\src\main.rs"));
+        assert_eq!(action.working_directory, PathBuf::from(r"C:\repo\src"));
+        assert_eq!(action.command, ContextMenuCommand::Paste);
+    }
+
+    #[test]
+    fn directory_action_targets_the_column_directory() {
+        let target = ContextMenuTarget::directory(
+            PathBuf::from(r"C:\repo\src\ui"),
+            "ui".to_string(),
+            ContextMenuCapabilities {
+                loading: false,
+                can_paste: true,
+                git_available: true,
+                svn_available: false,
+            },
+        );
+        let action = target.action(ContextMenuCommand::NewFolder);
+
+        assert_eq!(action.target, PathBuf::from(r"C:\repo\src\ui"));
+        assert_eq!(action.working_directory, action.target);
     }
 }

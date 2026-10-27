@@ -3,7 +3,7 @@ use gpui_kit::component::table::{Column, ColumnSort, TableDelegate, TableState};
 use gpui_kit::component::{ActiveTheme as _, Icon, StyledExt as _, h_flex, v_flex};
 use gpui_kit::*;
 
-use crate::context_menu::{ContextMenuTarget, render_context_menu};
+use crate::context_menu::{ContextMenuCapabilities, ContextMenuTarget, render_context_menu};
 use crate::fs::{FileEntry, SortKey, SortSpec, VcsStatus, sort_entries};
 use crate::vcs::{VcsSnapshot, apply_statuses};
 use gpui_kit::assets::IconName;
@@ -11,6 +11,7 @@ use gpui_kit::assets::IconName;
 pub struct FileTableDelegate {
     entries: Vec<FileEntry>,
     sort: SortSpec,
+    working_directory: std::path::PathBuf,
     loading: bool,
     can_paste: bool,
     git_available: bool,
@@ -19,10 +20,15 @@ pub struct FileTableDelegate {
 }
 
 impl FileTableDelegate {
-    pub fn new(entries: Vec<FileEntry>, sort: SortSpec) -> Self {
+    pub fn new(
+        entries: Vec<FileEntry>,
+        sort: SortSpec,
+        working_directory: std::path::PathBuf,
+    ) -> Self {
         Self {
             entries,
             sort,
+            working_directory,
             loading: false,
             can_paste: false,
             git_available: false,
@@ -54,6 +60,10 @@ impl FileTableDelegate {
 
     pub fn set_can_paste(&mut self, can_paste: bool) {
         self.can_paste = can_paste;
+    }
+
+    pub fn set_working_directory(&mut self, working_directory: std::path::PathBuf) {
+        self.working_directory = working_directory;
     }
 
     pub fn apply_vcs_statuses(&mut self, view_root: &std::path::Path, snapshot: &VcsSnapshot) {
@@ -148,15 +158,18 @@ impl TableDelegate for FileTableDelegate {
         let Some(entry) = self.entries.get(row_ix) else {
             return menu;
         };
-        let target = ContextMenuTarget {
-            path: entry.path.clone(),
-            title: entry.name.clone(),
-            is_dir: entry.is_dir(),
-            loading: self.loading,
-            can_paste: self.can_paste,
-            git_available: self.git_available,
-            svn_available: self.svn_available,
-        };
+        let target = ContextMenuTarget::entry(
+            entry.path.clone(),
+            entry.name.clone(),
+            entry.is_dir(),
+            self.working_directory.clone(),
+            ContextMenuCapabilities {
+                loading: self.loading,
+                can_paste: self.can_paste,
+                git_available: self.git_available,
+                svn_available: self.svn_available,
+            },
+        );
         render_context_menu(menu, &target, window, cx)
     }
 

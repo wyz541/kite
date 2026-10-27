@@ -36,6 +36,10 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 
 ![Kite context menu](docs/screenshots/context-menu.png)
 
+### Column directory context menu
+
+![Kite column directory context menu](docs/screenshots/column-context-menu.png)
+
 ## 当前能力
 
 - 浏览本机文件夹。
@@ -60,7 +64,7 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 - macOS 双击文件调用 `NSWorkspace`。
 - 新建文件夹、重命名和移到回收站。
 - 复制、剪切和粘贴文件或文件夹。
-- 右键文件行打开操作菜单。
+- 右键文件行或分栏目录区域打开操作菜单。
 - 在右键菜单中执行 Git 和 SVN 操作。
 - 显示 Git 和 SVN 状态徽标。
 - 在浅色主题和深色主题之间切换。
@@ -72,6 +76,7 @@ macOS 的系统菜单、Quick Look、Finder 和分享操作由 AppKit 提供。
 ## 右键菜单
 
 右键文件行后，Kite 先选中该行，再显示操作菜单。
+右键分栏的列标题或空白区域后，Kite 对该列目录显示操作菜单。
 
 菜单支持以下操作：
 
@@ -135,7 +140,9 @@ SVN 提交提交所选路径的本地更改。
 
 Kite 使用统一的右键菜单模型。
 列表视图和分栏视图使用同一套命令。
-菜单动作携带目标路径。
+菜单动作携带目标路径和工作目录。
+新建和粘贴作用于工作目录。
+重命名、删除和版本控制操作作用于目标路径。
 因此，旧选择不会误用在新菜单动作上。
 
 “Windows 原生菜单…”调用 Windows Shell 菜单。
@@ -351,7 +358,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.5-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.6-windows-x64.zip`。
 
 ### macOS 构建
 

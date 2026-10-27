@@ -197,9 +197,53 @@ final class KiteModel: ObservableObject {
     }
 
     func moveToTrash(_ entry: BrowserEntry) {
+        moveToTrash(path: entry.path)
+    }
+
+    func moveToTrash(path: String) {
         do {
-            try KitePlatform.moveToTrash(entry.path)
+            try KitePlatform.moveToTrash(path)
+            loadRoot(pathAfterRecycle(currentPath, removed: path))
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func createFolder(in directory: String) {
+        guard let name = KitePlatform.promptForName(
+            title: "新建文件夹",
+            message: "在“\(columnTitle(for: directory))”中创建文件夹。",
+            defaultValue: "新建文件夹"
+        ) else {
+            return
+        }
+        do {
+            try KitePlatform.createFolder(in: directory, name: name)
             refresh()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func rename(_ path: String) {
+        let source = URL(fileURLWithPath: path).standardizedFileURL
+        guard KitePlatform.canModify(path) else {
+            errorMessage = "无法重命名此位置。"
+            return
+        }
+        guard let name = KitePlatform.promptForName(
+            title: "重命名",
+            message: "输入新名称。",
+            defaultValue: source.lastPathComponent
+        ) else {
+            return
+        }
+        do {
+            try KitePlatform.rename(path, to: name)
+            let renamed = source.deletingLastPathComponent().appendingPathComponent(name)
+            loadRoot(pathAfterRename(currentPath, original: source.path, renamed: renamed.path))
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -303,5 +347,32 @@ final class KiteModel: ObservableObject {
             entries: listing.entries.map(BrowserEntry.init(dto:)),
             selectedPath: nil
         )
+    }
+
+    private func columnTitle(for path: String) -> String {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+
+    private func pathAfterRename(_ current: String, original: String, renamed: String) -> String {
+        let currentURL = URL(fileURLWithPath: current).standardizedFileURL
+        let originalURL = URL(fileURLWithPath: original).standardizedFileURL
+        let renamedURL = URL(fileURLWithPath: renamed).standardizedFileURL
+        let currentParts = currentURL.pathComponents
+        let originalParts = originalURL.pathComponents
+        guard currentParts.starts(with: originalParts) else {
+            return current
+        }
+        let suffix = currentParts.dropFirst(originalParts.count)
+        return suffix.reduce(renamedURL) { $0.appendingPathComponent($1) }.path
+    }
+
+    private func pathAfterRecycle(_ current: String, removed: String) -> String {
+        let currentURL = URL(fileURLWithPath: current).standardizedFileURL
+        let removedURL = URL(fileURLWithPath: removed).standardizedFileURL
+        guard currentURL.pathComponents.starts(with: removedURL.pathComponents) else {
+            return current
+        }
+        return removedURL.deletingLastPathComponent().path
     }
 }
