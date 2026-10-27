@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import QuickLookUI
+import UniformTypeIdentifiers
 
 enum KitePlatform {
     private static let quickLookController = QuickLookController()
@@ -68,6 +69,21 @@ enum KitePlatform {
 
     static func canModify(_ path: String) -> Bool {
         URL(fileURLWithPath: path).standardizedFileURL.path != "/"
+    }
+
+    static func setKiteAsDefaultFolderOpener() async throws {
+        try await NSWorkspace.shared.setDefaultApplication(
+            at: Bundle.main.bundleURL,
+            toOpen: .folder
+        )
+    }
+
+    static func restoreFinderAsDefaultFolderOpener() async throws {
+        let finder = URL(
+            fileURLWithPath: "/System/Library/CoreServices/Finder.app",
+            isDirectory: true
+        )
+        try await NSWorkspace.shared.setDefaultApplication(at: finder, toOpen: .folder)
     }
 
     private static func validateName(_ name: String) throws {

@@ -23,7 +23,7 @@ use crate::vcs::{
     run_vcs_operation, run_vcs_query,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
@@ -428,6 +428,10 @@ impl KiteApp {
                 MenuItem::action("分栏视图", ShowColumnsView),
                 MenuItem::separator(),
                 MenuItem::action("显示或隐藏路径栏", TogglePathBar),
+            ]),
+            Menu::new("Kite").items([
+                MenuItem::action("设为默认资源管理器…", SetDefaultExplorer),
+                MenuItem::action("恢复之前的文件夹打开方式…", RestoreDefaultExplorer),
             ]),
         ]);
     }
@@ -1200,6 +1204,85 @@ impl KiteApp {
     fn context_target_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.error = Some("项目已不存在，列表已刷新".into());
         self.refresh(window, cx);
+    }
+
+    fn set_default_explorer(
+        &mut self,
+        _: &SetDefaultExplorer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let message = "将 Kite 设为默认资源管理器？";
+        let detail =
+            "Kite 将接管文件夹打开命令。\nWindows 桌面、任务栏和系统文件对话框仍由 Windows 管理。";
+        let answers = [PromptButton::ok("设为默认"), PromptButton::cancel("取消")];
+        let answer = window.prompt(PromptLevel::Warning, message, Some(detail), &answers, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(choice) = answer.await else {
+                return;
+            };
+            if choice != 0 {
+                return;
+            }
+            let result = cx
+                .background_spawn(async {
+                    crate::explorer_integration::set_as_default_file_manager()
+                })
+                .await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                match result {
+                    Ok(message) => {
+                        this.error = None;
+                        this.notice = Some(message.into());
+                    }
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn restore_default_explorer(
+        &mut self,
+        _: &RestoreDefaultExplorer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let message = "恢复之前的文件夹打开方式？";
+        let detail = "Kite 将恢复最近保存的文件夹打开命令。";
+        let answers = [PromptButton::ok("恢复"), PromptButton::cancel("取消")];
+        let answer = window.prompt(PromptLevel::Warning, message, Some(detail), &answers, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(choice) = answer.await else {
+                return;
+            };
+            if choice != 0 {
+                return;
+            }
+            let result = cx
+                .background_spawn(async {
+                    crate::explorer_integration::restore_previous_file_manager()
+                })
+                .await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                match result {
+                    Ok(message) => {
+                        this.error = None;
+                        this.notice = Some(message.into());
+                    }
+                    Err(error) => {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn run_vcs_command(
@@ -3287,6 +3370,8 @@ impl Render for KiteApp {
             .on_action(cx.listener(|this, _: &PreviousTab, _, cx| {
                 this.request_tab(TabRequest::Previous, cx)
             }))
+            .on_action(cx.listener(Self::set_default_explorer))
+            .on_action(cx.listener(Self::restore_default_explorer))
             .child(
                 h_flex()
                     .h(px(54.))
@@ -3432,6 +3517,29 @@ impl Render for KiteApp {
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.toggle_path_bar(&TogglePathBar, window, cx);
                             })),
+                    )
+                    .child(
+                        DropdownButton::new("default-explorer-menu")
+                            .with_size(Size::Small)
+                            .menu_accessibility_label("默认资源管理器设置")
+                            .button(
+                                Button::new("default-explorer-action")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::FolderCog)
+                                    .tooltip("设为默认资源管理器")
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.set_default_explorer(&SetDefaultExplorer, window, cx);
+                                    })),
+                            )
+                            .dropdown_menu(|menu, _, _| {
+                                menu.menu("设为默认资源管理器…", Box::new(SetDefaultExplorer))
+                                    .separator()
+                                    .menu(
+                                        "恢复之前的文件夹打开方式…",
+                                        Box::new(RestoreDefaultExplorer),
+                                    )
+                            }),
                     )
                     .child(
                         Button::new("theme")

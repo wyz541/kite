@@ -26,6 +26,8 @@ actions!(
         CloseTab,
         NextTab,
         PreviousTab,
+        SetDefaultExplorer,
+        RestoreDefaultExplorer,
     ]
 );
 

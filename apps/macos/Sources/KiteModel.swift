@@ -249,6 +249,55 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    func setAsDefaultFolderOpener() {
+        guard confirmFolderOpenerChange(
+            title: "设为默认文件夹打开方式？",
+            message: "Kite 将成为文件夹的默认应用。",
+            detail: "macOS 仍将 Finder 作为系统外壳。",
+            action: "继续"
+        ) else {
+            return
+        }
+        Task {
+            do {
+                try await KitePlatform.setKiteAsDefaultFolderOpener()
+                errorMessage = nil
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func restoreFinderAsDefaultFolderOpener() {
+        guard confirmFolderOpenerChange(
+            title: "恢复 Finder？",
+            message: "Finder 将重新成为文件夹的默认应用。",
+            detail: "Kite 的其他文件和目录保持不变。",
+            action: "恢复"
+        ) else {
+            return
+        }
+        Task {
+            do {
+                try await KitePlatform.restoreFinderAsDefaultFolderOpener()
+                errorMessage = nil
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func openExternalFolders(_ paths: [String]) {
+        for path in paths {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                continue
+            }
+            newTab(path: path)
+        }
+    }
+
     func saveSession() {
         guard !tabs.isEmpty else { return }
         let savedTabs = tabs.map { tab in
@@ -374,5 +423,20 @@ final class KiteModel: ObservableObject {
             return current
         }
         return removedURL.deletingLastPathComponent().path
+    }
+
+    private func confirmFolderOpenerChange(
+        title: String,
+        message: String,
+        detail: String,
+        action: String
+    ) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = "\(message)\n\(detail)"
+        alert.addButton(withTitle: action)
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
