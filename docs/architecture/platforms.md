@@ -55,10 +55,14 @@ Core 负责以下能力：
 - 稳定命令标识。
 - 跨语言数据记录。
 - 会话保存和恢复。
+- GitHub Release 检查和版本比较。
+- 平台更新资产选择和 SHA-256 校验。
 
 Rust Core 输出 `rlib`、`staticlib` 和 `cdylib`。
 Swift 通过 UniFFI 生成绑定。
 Windows UI 直接使用 Rust crate。
+更新安装由平台轻量助手执行。
+详细设计见 `docs/architecture/updater.md`。
 
 ## Windows 前端
 

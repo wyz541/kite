@@ -63,6 +63,12 @@ struct KiteMacApp: App {
         }
         .windowStyle(.titleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") {
+                    model.checkForUpdates()
+                }
+                .disabled(model.updateInProgress)
+            }
             CommandMenu("导航") {
                 Button("聚焦路径栏") {
                     model.focusAddress()

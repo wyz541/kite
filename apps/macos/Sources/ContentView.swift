@@ -470,6 +470,8 @@ struct ContentView: View {
         HStack {
             if let error = model.errorMessage {
                 Text(error).foregroundStyle(.red)
+            } else if let update = model.updateStatusMessage {
+                Text(update).foregroundStyle(.secondary)
             } else {
                 Text(model.currentPath).lineLimit(1).truncationMode(.middle)
             }

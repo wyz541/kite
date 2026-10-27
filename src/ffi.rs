@@ -6,6 +6,7 @@ use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory};
 use crate::platform::{HostPlatform, default_root_path, host_platform};
 use crate::session::{self as session_store, SessionStateDto};
+use crate::updater::{self, UpdateInfo};
 use crate::vcs::{apply_statuses, load_vcs_snapshot};
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -51,6 +52,21 @@ pub struct DeviceSnapshotDto {
     pub portable_devices: Vec<PortableDeviceDto>,
 }
 
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct UpdateInfoDto {
+    pub current_version: String,
+    pub latest_version: String,
+    pub update_available: bool,
+    pub release_name: String,
+    pub release_url: String,
+    pub release_notes: String,
+    pub published_at: Option<String>,
+    pub asset_name: String,
+    pub asset_url: String,
+    pub asset_sha256: String,
+    pub asset_size: u64,
+}
+
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
 pub enum KiteError {
     #[error("{message}")]
@@ -77,6 +93,21 @@ impl KiteCore {
 
     pub fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
+    }
+
+    pub fn check_for_update(&self) -> Result<UpdateInfoDto, KiteError> {
+        updater::check_for_update()
+            .map(update_info_dto)
+            .map_err(KiteError::operation)
+    }
+
+    pub fn download_update(&self, update: UpdateInfoDto) -> Result<String, KiteError> {
+        if !update.update_available {
+            return Err(KiteError::operation("当前版本已是最新版本"));
+        }
+        updater::download_update(&update_info_from_dto(update))
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(KiteError::operation)
     }
 
     pub fn platform(&self) -> String {
@@ -124,6 +155,38 @@ impl KiteCore {
 
     pub fn save_session(&self, state: SessionStateDto) -> Result<(), KiteError> {
         session_store::save_session(&state).map_err(KiteError::operation)
+    }
+}
+
+fn update_info_dto(info: UpdateInfo) -> UpdateInfoDto {
+    UpdateInfoDto {
+        current_version: info.current_version,
+        latest_version: info.latest_version,
+        update_available: info.update_available,
+        release_name: info.release_name,
+        release_url: info.release_url,
+        release_notes: info.release_notes,
+        published_at: info.published_at,
+        asset_name: info.asset_name,
+        asset_url: info.asset_url,
+        asset_sha256: info.asset_sha256,
+        asset_size: info.asset_size,
+    }
+}
+
+fn update_info_from_dto(info: UpdateInfoDto) -> UpdateInfo {
+    UpdateInfo {
+        current_version: info.current_version,
+        latest_version: info.latest_version,
+        update_available: info.update_available,
+        release_name: info.release_name,
+        release_url: info.release_url,
+        release_notes: info.release_notes,
+        published_at: info.published_at,
+        asset_name: info.asset_name,
+        asset_url: info.asset_url,
+        asset_sha256: info.asset_sha256,
+        asset_size: info.asset_size,
     }
 }
 
@@ -175,6 +238,29 @@ fn device_dto(device: &PortableDevice) -> PortableDeviceDto {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_record_round_trips_asset_fields() {
+        let update = UpdateInfo {
+            current_version: "0.6.12".to_string(),
+            latest_version: "0.6.13".to_string(),
+            update_available: true,
+            release_name: "Kite v0.6.13".to_string(),
+            release_url: "https://github.com/wyz541/kite/releases/tag/v0.6.13".to_string(),
+            release_notes: "notes".to_string(),
+            published_at: Some("2026-10-27T10:00:00Z".to_string()),
+            asset_name: "Kite.exe".to_string(),
+            asset_url: "https://github.com/wyz541/kite/releases/download/v0.6.13/Kite.exe"
+                .to_string(),
+            asset_sha256: "a".repeat(64),
+            asset_size: 1024,
+        };
+
+        let dto = update_info_dto(update.clone());
+        let restored = update_info_from_dto(dto);
+
+        assert_eq!(restored, update);
+    }
 
     #[test]
     fn core_exposes_platform_and_version() {

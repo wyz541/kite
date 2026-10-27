@@ -5,4 +5,5 @@ pub mod ffi;
 pub mod fs;
 pub mod platform;
 pub mod session;
+pub mod updater;
 pub mod vcs;
