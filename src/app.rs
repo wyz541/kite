@@ -23,7 +23,9 @@ use crate::vcs::{
     run_vcs_operation, run_vcs_query,
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
+use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
@@ -2311,6 +2313,7 @@ impl KiteApp {
     fn render_column_preview(&mut self, entry: &FileEntry, cx: &mut Context<Self>) -> AnyElement {
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
+        let copy_text = preview_info_text(entry);
         let preview = self
             .column_preview
             .as_ref()
@@ -2360,13 +2363,19 @@ impl KiteApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().danger)
-                        .child(error)
+                        .child(SelectableText::new(
+                            format!("column-preview-error-{}", entry.path.display()),
+                            error,
+                        ))
                         .into_any_element()
                 } else if let Some(text) = preview.text.clone() {
                     div()
                         .text_xs()
                         .text_color(cx.theme().foreground)
-                        .child(text)
+                        .child(SelectableText::new(
+                            format!("column-preview-content-{}", entry.path.display()),
+                            text,
+                        ))
                         .into_any_element()
                 } else {
                     div()
@@ -2448,6 +2457,13 @@ impl KiteApp {
                             .font_medium()
                             .text_color(muted)
                             .child("预览"),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Clipboard::new(format!("copy-preview-info-{}", entry.path.display()))
+                            .value(copy_text)
+                            .tooltip("复制预览信息")
+                            .accessibility_label("复制预览信息"),
                     ),
             )
             .child(
@@ -3058,9 +3074,30 @@ fn preview_property(label: &str, value: String, cx: &App) -> AnyElement {
                 .text_color(cx.theme().muted_foreground)
                 .child(label.to_string()),
         )
-        .child(div().text_sm().child(value))
+        .child(div().text_sm().child(SelectableText::new(
+            format!("preview-property-{label}"),
+            value,
+        )))
         .into_any_element()
 }
+
+fn preview_info_text(entry: &FileEntry) -> String {
+    let mut lines = vec![
+        format!("名称：{}", entry.name),
+        format!("类型：{}", entry.type_label()),
+        format!("大小：{}", entry.size_label()),
+        format!("修改日期：{}", entry.modified_label()),
+        format!("位置：{}", path_text(&entry.path)),
+    ];
+    if let Some(status) = entry.git_status {
+        lines.push(format!("Git：{} ({})", status.label(), status.code()));
+    }
+    if let Some(status) = entry.svn_status {
+        lines.push(format!("SVN：{} ({})", status.label(), status.code()));
+    }
+    lines.join("\n")
+}
+
 fn is_image_preview_entry(entry: &FileEntry) -> bool {
     matches!(
         entry.extension.as_str(),
@@ -3780,8 +3817,10 @@ mod path_bar_tests {
 
 #[cfg(test)]
 mod preview_tests {
-    use super::read_text_preview;
+    use super::{preview_info_text, read_text_preview};
+    use crate::fs::{EntryKind, FileEntry, VcsStatus};
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -3802,6 +3841,26 @@ mod preview_tests {
         assert!(read_text_preview(&binary_path).is_err());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn preview_copy_text_includes_properties_and_vcs() {
+        let entry = FileEntry {
+            path: PathBuf::from(r"C:\demo\notes.txt"),
+            name: "notes.txt".to_string(),
+            kind: EntryKind::File,
+            size: 1_536,
+            modified: None,
+            extension: "txt".to_string(),
+            git_status: Some(VcsStatus::Modified),
+            svn_status: None,
+        };
+
+        let text = preview_info_text(&entry);
+
+        assert!(text.contains("名称：notes.txt"));
+        assert!(text.contains("位置：C:\\demo\\notes.txt"));
+        assert!(text.contains("Git：已修改 (M)"));
     }
 }
 #[cfg(test)]

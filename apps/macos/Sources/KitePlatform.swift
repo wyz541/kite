@@ -19,9 +19,13 @@ enum KitePlatform {
     }
 
     static func copyPath(_ path: String) {
+        copyText(path)
+    }
+
+    static func copyText(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(path, forType: .string)
+        pasteboard.setString(text, forType: .string)
     }
 
     static func share(_ path: String) {
