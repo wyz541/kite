@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::io::Read as _;
+use std::io::{Read as _, Seek as _, SeekFrom};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -1635,6 +1635,7 @@ impl KiteApp {
         let generation = self.preview_generation;
         let path = entry.path.clone();
         let load_text = !is_image_preview_entry(&entry) && is_text_preview_entry(&entry);
+        let log_preview = is_log_preview_entry(&entry);
         self._preview_task = Task::ready(());
         self.column_preview = Some(ColumnPreviewState {
             path: path.clone(),
@@ -1648,7 +1649,13 @@ impl KiteApp {
 
         self._preview_task = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { read_text_preview(&path) })
+                .background_spawn(async move {
+                    if log_preview {
+                        read_log_preview(&path)
+                    } else {
+                        read_text_preview(&path)
+                    }
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.preview_generation != generation {
@@ -3105,11 +3112,16 @@ fn is_image_preview_entry(entry: &FileEntry) -> bool {
     )
 }
 
+fn is_log_preview_entry(entry: &FileEntry) -> bool {
+    entry.extension.eq_ignore_ascii_case("log")
+}
+
 fn is_text_preview_entry(entry: &FileEntry) -> bool {
-    if entry.size > 512 * 1024 {
+    if entry.size > 512 * 1024 && !is_log_preview_entry(entry) {
         return false;
     }
     entry.extension.is_empty()
+        || is_log_preview_entry(entry)
         || matches!(
             entry.extension.as_str(),
             "txt"
@@ -3163,6 +3175,53 @@ fn read_text_preview(path: &Path) -> Result<String, String> {
         Ok(excerpt)
     }
 }
+
+fn read_log_preview(path: &Path) -> Result<String, String> {
+    const READ_LIMIT: u64 = 64 * 1024;
+    const CHAR_LIMIT: usize = 6_000;
+
+    let mut file =
+        std::fs::File::open(path).map_err(|error| format!("无法读取日志预览：{error}"))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("无法读取日志信息：{error}"))?
+        .len();
+    let truncated = length > READ_LIMIT;
+    if truncated {
+        file.seek(SeekFrom::Start(length - READ_LIMIT))
+            .map_err(|error| format!("无法定位日志末尾：{error}"))?;
+    }
+
+    let mut bytes = Vec::with_capacity(READ_LIMIT as usize);
+    std::io::BufReader::new(file)
+        .take(READ_LIMIT)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("无法读取日志预览：{error}"))?;
+    if bytes.contains(&0) {
+        return Err("此日志包含二进制内容，无法显示文本预览".to_string());
+    }
+
+    let text = String::from_utf8_lossy(&bytes);
+    let text = if truncated {
+        text.split_once('\n')
+            .map_or_else(|| text.as_ref(), |(_, rest)| rest)
+    } else {
+        text.as_ref()
+    };
+    let chars = text.chars().collect::<Vec<_>>();
+    let tail_start = chars.len().saturating_sub(CHAR_LIMIT);
+    let excerpt = chars[tail_start..].iter().collect::<String>();
+    if excerpt.trim().is_empty() {
+        return Ok("日志没有可显示的文本内容。".to_string());
+    }
+
+    if truncated || tail_start > 0 {
+        Ok(format!("日志末尾预览：\n{excerpt}"))
+    } else {
+        Ok(excerpt)
+    }
+}
+
 fn column_chain(root: &Path) -> Vec<PathBuf> {
     let mut chain = root.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
     chain.reverse();
@@ -3817,7 +3876,7 @@ mod path_bar_tests {
 
 #[cfg(test)]
 mod preview_tests {
-    use super::{preview_info_text, read_text_preview};
+    use super::{is_text_preview_entry, preview_info_text, read_log_preview, read_text_preview};
     use crate::fs::{EntryKind, FileEntry, VcsStatus};
     use std::fs;
     use std::path::PathBuf;
@@ -3861,6 +3920,48 @@ mod preview_tests {
         assert!(text.contains("名称：notes.txt"));
         assert!(text.contains("位置：C:\\demo\\notes.txt"));
         assert!(text.contains("Git：已修改 (M)"));
+    }
+
+    #[test]
+    fn large_log_preview_reads_only_the_tail() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("kite-log-preview-{unique}"));
+        fs::create_dir_all(&root).expect("create log preview directory");
+        let path = root.join("application.log");
+        let mut content = String::from("oldest-entry\n");
+        content.push_str(&"a".repeat(128 * 1024));
+        content.push_str("\nnewest-entry\n");
+        fs::write(&path, content).expect("write log preview");
+
+        let preview = read_log_preview(&path).expect("read log preview");
+
+        assert!(preview.starts_with("日志末尾预览："));
+        assert!(preview.contains("newest-entry"));
+        assert!(!preview.contains("oldest-entry"));
+        assert!(preview.chars().count() < 7_000);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn log_files_ignore_the_regular_text_size_limit() {
+        let make_entry = |extension: &str| FileEntry {
+            path: PathBuf::from(format!(r"C:\demo\application.{extension}")),
+            name: format!("application.{extension}"),
+            kind: EntryKind::File,
+            size: 2 * 1024 * 1024,
+            modified: None,
+            extension: extension.to_string(),
+            git_status: None,
+            svn_status: None,
+        };
+
+        assert!(is_text_preview_entry(&make_entry("log")));
+        assert!(is_text_preview_entry(&make_entry("LOG")));
+        assert!(!is_text_preview_entry(&make_entry("txt")));
     }
 }
 #[cfg(test)]
