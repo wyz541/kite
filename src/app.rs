@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::io::Read as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -120,6 +121,13 @@ struct ColumnListScroll {
     handle: UniformListScrollHandle,
 }
 
+#[derive(Clone)]
+struct ColumnPreviewState {
+    path: PathBuf,
+    text: Option<SharedString>,
+    error: Option<SharedString>,
+    loading: bool,
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DirectoryScrollRoute {
     directory_offset: f32,
@@ -160,6 +168,9 @@ pub struct KiteApp {
     column_scroll: ScrollHandle,
     column_vertical_scrolls: Vec<ColumnListScroll>,
     column_scroll_pending: bool,
+    column_preview: Option<ColumnPreviewState>,
+    preview_generation: u64,
+    _preview_task: Task<()>,
     path_bar_scroll: ScrollHandle,
     path_bar_scroll_pending: bool,
     column_generation: u64,
@@ -313,6 +324,9 @@ impl KiteApp {
             column_scroll: ScrollHandle::new(),
             column_vertical_scrolls: Vec::new(),
             column_scroll_pending: false,
+            column_preview: None,
+            preview_generation: 0,
+            _preview_task: Task::ready(()),
             path_bar_scroll: ScrollHandle::new(),
             path_bar_scroll_pending: false,
             column_generation: 0,
@@ -423,6 +437,7 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_column_preview();
         self.cancel_search();
         self.invalidate_vcs();
         self.invalidate_columns();
@@ -571,6 +586,7 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.clear_column_preview();
         let Some((entries, skipped)) = self
             .column_panes
             .get(column)
@@ -886,6 +902,7 @@ impl KiteApp {
     }
 
     fn show_list_view(&mut self, _: &ShowListView, _: &mut Window, cx: &mut Context<Self>) {
+        self.clear_column_preview();
         if self.view_mode == ViewMode::List {
             return;
         }
@@ -1497,11 +1514,58 @@ impl KiteApp {
         if let Some(pane) = self.column_panes.get_mut(column) {
             pane.selected_path = Some(entry.path.clone());
         }
-        self.column_selected_path = Some(entry.path);
+        self.column_selected_path = Some(entry.path.clone());
+        if column + 1 == self.column_panes.len() && !entry.is_dir() {
+            self.start_column_preview(entry, cx);
+            self.column_scroll_pending = true;
+        } else {
+            self.clear_column_preview();
+        }
         self.path_bar_scroll_pending = true;
         cx.notify();
     }
 
+    fn clear_column_preview(&mut self) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        self._preview_task = Task::ready(());
+        self.column_preview = None;
+    }
+
+    fn start_column_preview(&mut self, entry: FileEntry, cx: &mut Context<Self>) {
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let generation = self.preview_generation;
+        let path = entry.path.clone();
+        let load_text = !is_image_preview_entry(&entry) && is_text_preview_entry(&entry);
+        self._preview_task = Task::ready(());
+        self.column_preview = Some(ColumnPreviewState {
+            path: path.clone(),
+            text: None,
+            error: None,
+            loading: load_text,
+        });
+        if !load_text {
+            return;
+        }
+
+        self._preview_task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { read_text_preview(&path) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.preview_generation != generation {
+                    return;
+                }
+                if let Some(preview) = this.column_preview.as_mut() {
+                    preview.loading = false;
+                    match result {
+                        Ok(text) => preview.text = Some(text.into()),
+                        Err(error) => preview.error = Some(error.into()),
+                    }
+                }
+                cx.notify();
+            });
+        });
+    }
     fn activate_column_entry(
         &mut self,
         column: usize,
@@ -2085,6 +2149,9 @@ impl KiteApp {
         for index in 0..self.column_panes.len() {
             strip = strip.child(self.render_column(index, window, cx));
         }
+        if let Some(entry) = self.selected_last_column_file() {
+            strip = strip.child(self.render_column_preview(&entry, cx));
+        }
         div()
             .relative()
             .size_full()
@@ -2100,6 +2167,172 @@ impl KiteApp {
             .into_any_element()
     }
 
+    fn selected_last_column_file(&self) -> Option<FileEntry> {
+        let pane = self.column_panes.last()?;
+        let selected = pane.selected_path.as_ref()?;
+        pane.entries
+            .iter()
+            .find(|entry| same_path(&entry.path, selected))
+            .filter(|entry| !entry.is_dir())
+            .cloned()
+    }
+
+    fn render_column_preview(&mut self, entry: &FileEntry, cx: &mut Context<Self>) -> AnyElement {
+        let border = cx.theme().border;
+        let muted = cx.theme().muted_foreground;
+        let preview = self
+            .column_preview
+            .as_ref()
+            .filter(|preview| same_path(&preview.path, &entry.path))
+            .cloned();
+
+        let preview_area = if is_image_preview_entry(entry) {
+            let fallback_entry = entry.clone();
+            h_flex()
+                .h(px(180.))
+                .w_full()
+                .items_center()
+                .justify_center()
+                .overflow_hidden()
+                .rounded_md()
+                .bg(cx.theme().muted.opacity(0.25))
+                .child(
+                    img(entry.path.clone())
+                        .max_w_full()
+                        .max_h(px(170.))
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(move || {
+                            v_flex()
+                                .size_full()
+                                .items_center()
+                                .justify_center()
+                                .gap_2()
+                                .child(
+                                    Icon::new(icon_for(&fallback_entry))
+                                        .size(px(48.))
+                                        .text_color(muted),
+                                )
+                                .child(div().text_xs().text_color(muted).child("无法加载图片预览"))
+                                .into_any_element()
+                        }),
+                )
+                .into_any_element()
+        } else if is_text_preview_entry(entry) {
+            let preview_text = if let Some(preview) = preview.as_ref() {
+                if preview.loading {
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("正在加载预览…")
+                        .into_any_element()
+                } else if let Some(error) = preview.error.clone() {
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(error)
+                        .into_any_element()
+                } else if let Some(text) = preview.text.clone() {
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(text)
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("无文本预览")
+                        .into_any_element()
+                }
+            } else {
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("选择文件后加载预览")
+                    .into_any_element()
+            };
+            div()
+                .id("column-preview-text")
+                .h(px(180.))
+                .w_full()
+                .overflow_y_scroll()
+                .rounded_md()
+                .bg(cx.theme().muted.opacity(0.25))
+                .p_2()
+                .child(preview_text)
+                .into_any_element()
+        } else {
+            v_flex()
+                .h(px(180.))
+                .w_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .rounded_md()
+                .bg(cx.theme().muted.opacity(0.25))
+                .child(
+                    Icon::new(icon_for(entry))
+                        .size(px(56.))
+                        .text_color(icon_color(entry, cx)),
+                )
+                .child(div().text_xs().text_color(muted).child("无内置预览"))
+                .into_any_element()
+        };
+
+        let mut properties = v_flex().w_full().gap_3();
+        properties = properties
+            .child(preview_property("名称", entry.name.clone(), cx))
+            .child(preview_property("类型", entry.type_label(), cx))
+            .child(preview_property("大小", entry.size_label(), cx))
+            .child(preview_property("修改日期", entry.modified_label(), cx))
+            .child(preview_property("位置", path_text(&entry.path), cx));
+        let mut vcs = Vec::new();
+        if let Some(status) = entry.git_status {
+            vcs.push(format!("Git {} ({})", status.label(), status.code()));
+        }
+        if let Some(status) = entry.svn_status {
+            vcs.push(format!("SVN {} ({})", status.label(), status.code()));
+        }
+        if !vcs.is_empty() {
+            properties = properties.child(preview_property("版本控制", vcs.join("\n"), cx));
+        }
+
+        v_flex()
+            .w(px(300.))
+            .h_full()
+            .flex_shrink_0()
+            .border_r_1()
+            .border_color(border)
+            .child(
+                h_flex()
+                    .h(px(34.))
+                    .w_full()
+                    .px_2()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(muted)
+                            .child("预览"),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .id("column-preview")
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_y_scroll()
+                    .p_3()
+                    .gap_4()
+                    .child(preview_area)
+                    .child(properties),
+            )
+            .into_any_element()
+    }
     fn sync_column_list_scrolls(&mut self) {
         self.column_vertical_scrolls
             .truncate(self.column_panes.len());
@@ -2654,6 +2887,84 @@ fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, St
     }
 }
 
+fn preview_property(label: &str, value: String, cx: &App) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap_0p5()
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.to_string()),
+        )
+        .child(div().text_sm().child(value))
+        .into_any_element()
+}
+fn is_image_preview_entry(entry: &FileEntry) -> bool {
+    matches!(
+        entry.extension.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg"
+    )
+}
+
+fn is_text_preview_entry(entry: &FileEntry) -> bool {
+    if entry.size > 512 * 1024 {
+        return false;
+    }
+    entry.extension.is_empty()
+        || matches!(
+            entry.extension.as_str(),
+            "txt"
+                | "md"
+                | "log"
+                | "json"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "xml"
+                | "ini"
+                | "rs"
+                | "py"
+                | "js"
+                | "ts"
+                | "tsx"
+                | "jsx"
+                | "html"
+                | "css"
+                | "c"
+                | "cpp"
+                | "h"
+                | "cs"
+                | "java"
+                | "go"
+                | "kt"
+                | "sh"
+                | "ps1"
+                | "bat"
+        )
+}
+
+fn read_text_preview(path: &Path) -> Result<String, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("无法读取预览：{error}"))?;
+    let mut reader = std::io::BufReader::new(file).take(64 * 1024);
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("无法读取预览：{error}"))?;
+    if bytes.contains(&0) {
+        return Err("此文件不是文本文件".to_string());
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut excerpt = text.chars().take(6_000).collect::<String>();
+    if text.chars().count() > 6_000 {
+        excerpt.push('…');
+    }
+    if excerpt.trim().is_empty() {
+        Ok("文件没有可显示的文本内容。".to_string())
+    } else {
+        Ok(excerpt)
+    }
+}
 fn column_chain(root: &Path) -> Vec<PathBuf> {
     let mut chain = root.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
     chain.reverse();
@@ -3208,6 +3519,32 @@ mod path_bar_tests {
     }
 }
 
+#[cfg(test)]
+mod preview_tests {
+    use super::read_text_preview;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn reads_text_preview_and_rejects_binary_content() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("kite-preview-{unique}"));
+        fs::create_dir_all(&root).expect("create preview directory");
+        let text_path = root.join("notes.txt");
+        let binary_path = root.join("binary.txt");
+        fs::write(&text_path, "first line\nsecond line\n").expect("write text preview");
+        fs::write(&binary_path, b"text\0binary").expect("write binary preview");
+
+        let preview = read_text_preview(&text_path).expect("read text preview");
+        assert!(preview.contains("first line"));
+        assert!(read_text_preview(&binary_path).is_err());
+
+        let _ = fs::remove_dir_all(root);
+    }
+}
 #[cfg(test)]
 mod scroll_routing_tests {
     use super::{DirectoryScrollRoute, route_directory_scroll, wheel_scrolls_columns};

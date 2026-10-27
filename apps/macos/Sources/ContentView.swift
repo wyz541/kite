@@ -1,3 +1,5 @@
+import AppKit
+import QuickLookUI
 import SwiftUI
 
 struct ContentView: View {
@@ -171,6 +173,9 @@ struct ContentView: View {
                 ForEach(Array(model.columns.enumerated()), id: \.element.id) { index, column in
                     browserColumn(column, index: index)
                 }
+                if let selectedFile = model.selectedColumnFile {
+                    previewColumn(selectedFile)
+                }
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
@@ -205,6 +210,75 @@ struct ContentView: View {
         }
     }
 
+    private func previewColumn(_ entry: BrowserEntry) -> some View {
+        VStack(spacing: 0) {
+            Text("预览")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.90))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    QuickLookPreviewView(url: URL(fileURLWithPath: entry.path))
+                        .frame(height: 220)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    Text(entry.name)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        previewProperty("类型", entry.kindLabel)
+                        previewProperty("大小", formattedSize(entry.size))
+                        previewProperty("修改日期", formattedDate(entry.modifiedUnixMs))
+                        previewProperty("位置", entry.path)
+                        if let git = entry.gitStatus {
+                            previewProperty("Git", git)
+                        }
+                        if let svn = entry.svnStatus {
+                            previewProperty("SVN", svn)
+                        }
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .frame(width: 300)
+        .frame(maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.84))
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.75))
+                .frame(width: 1)
+        }
+    }
+
+    private func previewProperty(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func formattedSize(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func formattedDate(_ unixMs: Int64?) -> String {
+        guard let unixMs else { return "未知" }
+        let date = Date(timeIntervalSince1970: TimeInterval(unixMs) / 1_000)
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
     private func entryRow(_ entry: BrowserEntry, columnIndex: Int) -> some View {
         let selected = model.columns[columnIndex].selectedPath == entry.path
         return Button {
@@ -358,5 +432,19 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             Divider()
         }
+    }
+}
+
+private struct QuickLookPreviewView: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> QLPreviewView {
+        let view = QLPreviewView(frame: .zero, style: .normal)!
+        view.previewItem = url as NSURL
+        return view
+    }
+
+    func updateNSView(_ view: QLPreviewView, context: Context) {
+        view.previewItem = url as NSURL
     }
 }

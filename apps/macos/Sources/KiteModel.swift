@@ -85,6 +85,16 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    var selectedColumnFile: BrowserEntry? {
+        guard let column = columns.last,
+              let selectedPath = column.selectedPath,
+              let entry = column.entries.first(where: { $0.path == selectedPath }),
+              !entry.isDirectory else {
+            return nil
+        }
+        return entry
+    }
+
     var currentPath: String {
         activeTab?.currentPath ?? core.defaultDirectory()
     }
