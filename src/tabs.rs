@@ -428,6 +428,11 @@ impl KiteWindow {
 }
 
 fn tab_label(path: &Path) -> String {
+    if crate::shell_fs::is_shell_namespace_path(path)
+        && let Some(name) = crate::shell_fs::display_name(path)
+    {
+        return name;
+    }
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())

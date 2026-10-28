@@ -27,7 +27,7 @@ Kite 把界面当作一条可牵引的线。
 - 应用重新启动时恢复页签和目录。
 - 工具栏不重复显示应用图标和应用名。
 - 识别 USB 存储设备、可移动磁盘和 WPD/MTP 便携设备。
-- 点击 WPD/MTP 设备可在 Windows 中打开设备根目录。
+- 点击 WPD/MTP 设备可在 Kite 内浏览设备根目录。
 - 使用侧边栏访问主文件夹、桌面、文档、下载、图片和本机驱动器。
 - 使用并排分栏浏览多级文件夹。
 - 分栏导航只加载新增或缺失的层级。
@@ -291,8 +291,10 @@ USB 存储设备通过存储总线类型识别。
 设备列表每 2 秒自动刷新。
 
 USB 存储设备可直接浏览。
-点击 WPD/MTP 便携设备可在 Windows Shell 中打开设备。
-Kite 内置的 WPD/MTP 文件浏览尚未支持。
+点击 WPD/MTP 便携设备可在 Kite 内浏览设备内容。
+Kite 使用 Windows Shell 命名空间枚举设备目录。
+设备目录支持进入文件夹、返回上级和打开文件。
+设备内的新建、重命名、删除、复制和粘贴暂不支持。
 
 ## 快捷键
 
@@ -372,7 +374,7 @@ py .\assets\generate_icon.py
 - 表格空白区域尚未提供右键菜单。
 - 当前版本没有自定义列布局。
 - Git/SVN 状态只覆盖当前视图和当前视图的子项目。
-- WPD/MTP 便携设备可在 Windows 中打开，但 Kite 内置文件浏览尚未支持。
+- WPD/MTP 便携设备可在 Kite 内浏览。设备内的文件修改操作尚未支持。
 - Git 和 SVN 认证使用本机凭据缓存，不显示交互式登录窗口。
 
 ## 构建
@@ -405,7 +407,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.17-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.18-windows-x64.zip`。
 
 ### macOS 构建
 
@@ -437,6 +439,7 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 - `src/context_menu/mod.rs`：Windows 菜单模型、提供者和 GPUI 渲染器。
 - `src/context_menu/windows.rs`：Windows Shell 原生菜单桥接。
 - `src/devices.rs`：Windows USB/WPD 和 macOS 卷枚举。
+- `src/shell_fs.rs`：Windows Shell 命名空间目录枚举和设备项目打开。
 - `src/tabs.rs`：Windows 页签栏、页签切换和共享剪贴板。
 - `src/fs.rs`：跨平台文件夹读取、搜索、排序、格式化和文件操作。
 - `src/platform/mod.rs`：跨平台路径和文件名规则。

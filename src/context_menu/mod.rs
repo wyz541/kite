@@ -60,6 +60,7 @@ pub(crate) struct ContextMenuCapabilities {
     pub can_paste: bool,
     pub git_available: bool,
     pub svn_available: bool,
+    pub supports_local_ops: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +73,7 @@ pub(crate) struct ContextMenuTarget {
     pub can_paste: bool,
     pub git_available: bool,
     pub svn_available: bool,
+    pub supports_local_ops: bool,
 }
 
 impl ContextMenuTarget {
@@ -89,6 +91,7 @@ impl ContextMenuTarget {
             can_paste: capabilities.can_paste,
             git_available: capabilities.git_available,
             svn_available: capabilities.svn_available,
+            supports_local_ops: capabilities.supports_local_ops,
         }
     }
 
@@ -108,6 +111,7 @@ impl ContextMenuTarget {
             can_paste: capabilities.can_paste,
             git_available: capabilities.git_available,
             svn_available: capabilities.svn_available,
+            supports_local_ops: capabilities.supports_local_ops,
         }
     }
 
@@ -120,7 +124,7 @@ impl ContextMenuTarget {
     }
 
     fn target_can_change(&self) -> bool {
-        self.path.parent().is_some()
+        self.supports_local_ops && self.path.parent().is_some()
     }
 }
 
@@ -240,7 +244,12 @@ impl ContextMenuProvider for CoreMenuProvider {
             !disabled,
         );
         model.separator();
-        model.item("复制", IconName::Copy, ContextMenuCommand::Copy, !disabled);
+        model.item(
+            "复制",
+            IconName::Copy,
+            ContextMenuCommand::Copy,
+            !disabled && target.supports_local_ops,
+        );
         model.item(
             "复制完整路径",
             IconName::Link,
@@ -251,13 +260,13 @@ impl ContextMenuProvider for CoreMenuProvider {
             "剪切",
             IconName::Scissors,
             ContextMenuCommand::Cut,
-            !disabled,
+            !disabled && target.supports_local_ops,
         );
         model.item(
             "粘贴",
             IconName::ClipboardPaste,
             ContextMenuCommand::Paste,
-            !disabled && target.can_paste,
+            !disabled && target.can_paste && target.supports_local_ops,
         );
         if !policy.compact {
             model.separator();
@@ -266,7 +275,7 @@ impl ContextMenuProvider for CoreMenuProvider {
             "新建文件夹",
             IconName::FolderPlus,
             ContextMenuCommand::NewFolder,
-            !disabled,
+            !disabled && target.supports_local_ops,
         );
         model.item(
             "重命名",
@@ -589,6 +598,7 @@ mod tests {
                 can_paste: true,
                 git_available: true,
                 svn_available: true,
+                supports_local_ops: true,
             },
         )
     }
@@ -751,6 +761,7 @@ mod tests {
                 can_paste: true,
                 git_available: true,
                 svn_available: false,
+                supports_local_ops: true,
             },
         );
         let action = target.action(ContextMenuCommand::Paste);
@@ -758,6 +769,50 @@ mod tests {
         assert_eq!(action.target, PathBuf::from(r"C:\repo\src\main.rs"));
         assert_eq!(action.working_directory, PathBuf::from(r"C:\repo\src"));
         assert_eq!(action.command, ContextMenuCommand::Paste);
+    }
+
+    #[test]
+    fn shell_target_disables_local_operations() {
+        let target = ContextMenuTarget::entry(
+            PathBuf::from(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\phone\photo.jpg"),
+            "photo.jpg".to_string(),
+            false,
+            PathBuf::from(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\phone"),
+            ContextMenuCapabilities {
+                loading: false,
+                can_paste: true,
+                git_available: false,
+                svn_available: false,
+                supports_local_ops: false,
+            },
+        );
+        let model = build_model(&target, windows_policy());
+        let commands = model
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ContextMenuNode::Item { command, .. } => Some(*command),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(commands.contains(&ContextMenuCommand::Open));
+        assert!(commands.contains(&ContextMenuCommand::CopyPath));
+        assert!(commands.contains(&ContextMenuCommand::ShowProperties));
+        for command in [
+            ContextMenuCommand::Copy,
+            ContextMenuCommand::Paste,
+            ContextMenuCommand::Rename,
+            ContextMenuCommand::Recycle,
+        ] {
+            assert!(model.entries.iter().any(|entry| matches!(
+                entry,
+                ContextMenuNode::Item {
+                    command: item_command,
+                    enabled: false,
+                    ..
+                } if *item_command == command
+            )));
+        }
     }
 
     #[test]
@@ -770,6 +825,7 @@ mod tests {
                 can_paste: true,
                 git_available: true,
                 svn_available: false,
+                supports_local_ops: true,
             },
         );
         let action = target.action(ContextMenuCommand::NewFolder);

@@ -14,10 +14,11 @@ use crate::context_menu::{
 };
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
-    FileEntry, SortSpec, create_folder, format_size, load_directory, open_file, recycle_entry,
-    rename_entry, search_directory, transfer_entry, validate_name, worse_status,
+    DirectorySnapshot, FileEntry, SortSpec, create_folder, format_size, load_directory, open_file,
+    recycle_entry, rename_entry, search_directory, transfer_entry, validate_name, worse_status,
 };
 use crate::platform::{default_root_path, root_directory};
+use crate::shell_fs;
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
@@ -553,7 +554,7 @@ impl KiteApp {
 
         self._load_task = cx.spawn_in(window, async move |this, cx| {
             let result = cx
-                .background_spawn(async move { load_directory(&load_path, sort) })
+                .background_spawn(async move { load_directory_snapshot(&load_path, sort) })
                 .await;
 
             let _ = this.update_in(cx, |this, window, cx| {
@@ -806,7 +807,7 @@ impl KiteApp {
     }
 
     fn navigate_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(parent) = self.current_dir.parent() else {
+        let Some(parent) = navigation_parent(&self.current_dir) else {
             self.error = Some("已经在驱动器根目录".into());
             cx.notify();
             return;
@@ -847,6 +848,10 @@ impl KiteApp {
 
     fn refresh_vcs_statuses(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         self.vcs_generation = self.vcs_generation.wrapping_add(1);
+        if shell_fs::is_shell_namespace_path(&root) {
+            self._vcs_task = Task::ready(());
+            return;
+        }
         let generation = self.vcs_generation;
         let status_root = root.clone();
         self._vcs_task = cx.spawn(async move |this, cx| {
@@ -1056,6 +1061,12 @@ impl KiteApp {
         if query.is_empty() {
             return;
         }
+        if shell_fs::is_shell_namespace_path(&self.current_dir) {
+            self.notice = Some("移动设备内搜索暂不支持".into());
+            self.error = None;
+            cx.notify();
+            return;
+        }
         self.cancel_search();
         self.invalidate_vcs();
         self.invalidate_columns();
@@ -1212,11 +1223,16 @@ impl KiteApp {
     }
 
     fn open_entry(&mut self, entry: FileEntry, window: &mut Window, cx: &mut Context<Self>) {
+        if entry.is_dir() {
+            self.navigate_to(entry.path, NavigationIntent::Push, window, cx);
+            return;
+        }
         self.open_path(entry.path, window, cx);
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if path.is_dir() {
+        let shell_path = shell_fs::is_shell_namespace_path(&path);
+        if path.is_dir() || (shell_path && shell_fs::is_directory(&path)) {
             self.navigate_to(path, NavigationIntent::Push, window, cx);
             return;
         }
@@ -1224,7 +1240,15 @@ impl KiteApp {
         self.notice = Some("正在打开文件…".into());
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx.background_spawn(async move { open_file(&path) }).await;
+            let result = cx
+                .background_spawn(async move {
+                    if shell_path {
+                        shell_fs::open_item(&path)
+                    } else {
+                        open_file(&path)
+                    }
+                })
+                .await;
             let _ = this.update_in(cx, |this, _, cx| {
                 match result {
                     Ok(()) => this.notice = None,
@@ -2011,6 +2035,12 @@ impl KiteApp {
     }
 
     fn set_clipboard_path(&mut self, path: PathBuf, mode: ClipboardMode, cx: &mut Context<Self>) {
+        if shell_fs::is_shell_namespace_path(&path) {
+            self.error = None;
+            self.notice = Some("移动设备项目复制暂不支持".into());
+            cx.notify();
+            return;
+        }
         *self.clipboard.borrow_mut() = Some(FileClipboard { path, mode });
         self.sync_clipboard_state(cx);
         self.error = None;
@@ -2049,6 +2079,14 @@ impl KiteApp {
         };
         let source = clipboard.path;
         let move_source = clipboard.mode == ClipboardMode::Cut;
+        if shell_fs::is_shell_namespace_path(&source)
+            || shell_fs::is_shell_namespace_path(&destination_dir)
+        {
+            self.error = None;
+            self.notice = Some("移动设备项目粘贴暂不支持".into());
+            cx.notify();
+            return;
+        }
         self.error = None;
         self.notice = Some(if move_source {
             "正在移动项目…".into()
@@ -2097,6 +2135,12 @@ impl KiteApp {
         if self.loading {
             return;
         }
+        if shell_fs::is_shell_namespace_path(&directory) {
+            self.error = None;
+            self.notice = Some("移动设备内新建文件夹暂不支持".into());
+            cx.notify();
+            return;
+        }
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("文件夹名称")
@@ -2127,6 +2171,12 @@ impl KiteApp {
     }
 
     fn begin_rename_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if shell_fs::is_shell_namespace_path(&path) {
+            self.error = None;
+            self.notice = Some("移动设备内重命名暂不支持".into());
+            cx.notify();
+            return;
+        }
         let Some(name) = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -2263,6 +2313,12 @@ impl KiteApp {
     }
 
     fn confirm_recycle_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if shell_fs::is_shell_namespace_path(&path) {
+            self.error = None;
+            self.notice = Some("移动设备项目删除暂不支持".into());
+            cx.notify();
+            return;
+        }
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -2374,6 +2430,7 @@ impl KiteApp {
         let muted = cx.theme().muted_foreground;
         let hover_color = muted.opacity(0.12);
         let clicked = device.clone();
+        let active = same_path(&self.current_dir, Path::new(&device.shell_path));
         div()
             .id(SharedString::from(format!(
                 "portable-device-{}",
@@ -2389,8 +2446,17 @@ impl KiteApp {
             .cursor_pointer()
             .hover(move |style| style.bg(hover_color))
             .text_sm()
-            .text_color(cx.theme().sidebar_foreground)
-            .child(Icon::new(IconName::Usb).size_4().text_color(muted))
+            .text_color(if active {
+                cx.theme().accent_foreground
+            } else {
+                cx.theme().sidebar_foreground
+            })
+            .when(active, |this| this.bg(cx.theme().accent))
+            .child(Icon::new(IconName::Usb).size_4().text_color(if active {
+                cx.theme().accent_foreground
+            } else {
+                muted
+            }))
             .child(div().flex_1().min_w_0().truncate().child(device.name))
             .child(
                 div()
@@ -2400,24 +2466,24 @@ impl KiteApp {
                     .child("MTP"),
             )
             .child(Icon::new(IconName::ChevronRight).size_3())
-            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                this.open_portable_device(clicked.clone(), cx);
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.open_portable_device(clicked.clone(), window, cx);
             }))
             .into_any_element()
     }
 
-    fn open_portable_device(&mut self, device: PortableDevice, cx: &mut Context<Self>) {
-        match device.open_in_system() {
-            Ok(()) => {
-                self.error = None;
-                self.notice = Some(format!("已在 Windows 中打开 {}", device.name).into());
-            }
-            Err(error) => {
-                self.notice = None;
-                self.error = Some(error.into());
-            }
-        }
-        cx.notify();
+    fn open_portable_device(
+        &mut self,
+        device: PortableDevice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigate_to(
+            PathBuf::from(device.shell_path),
+            NavigationIntent::Push,
+            window,
+            cx,
+        );
     }
     fn render_sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let section_color = cx.theme().muted_foreground;
@@ -2625,6 +2691,7 @@ impl KiteApp {
         let preview_more_items = preview_more_menu_items();
         let preview_more_target = entry.path.clone();
         let preview_more_working_directory = self.current_dir.clone();
+        let preview_more_supports_local_ops = !shell_fs::is_shell_namespace_path(&entry.path);
         let preview = self
             .column_preview
             .as_ref()
@@ -2875,7 +2942,7 @@ impl KiteApp {
                                     if matches!(index, 3 | 4) {
                                         menu = menu.separator();
                                     }
-                                    menu = menu.menu_with_icon(
+                                    menu = menu.menu_with_icon_and_disabled(
                                         *label,
                                         *icon,
                                         Box::new(ContextMenuAction {
@@ -2884,6 +2951,8 @@ impl KiteApp {
                                                 .clone(),
                                             command: *command,
                                         }),
+                                        !preview_more_supports_local_ops
+                                            && *command == ContextMenuCommand::Copy,
                                     );
                                 }
                                 menu
@@ -3200,6 +3269,9 @@ impl KiteApp {
                             can_paste,
                             git_available: row_git_available,
                             svn_available: row_svn_available,
+                            supports_local_ops: !shell_fs::is_shell_namespace_path(
+                                &menu_entry.path,
+                            ),
                         },
                     );
                     render_context_menu(menu, &target, row_action_context.clone(), window, cx)
@@ -3420,6 +3492,22 @@ fn update_notes_summary(notes: &str) -> String {
     }
 }
 
+fn load_directory_snapshot(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
+    if shell_fs::is_shell_namespace_path(path) {
+        shell_fs::load_directory(path, sort)
+    } else {
+        load_directory(path, sort)
+    }
+}
+
+fn navigation_parent(path: &Path) -> Option<PathBuf> {
+    if shell_fs::is_shell_namespace_path(path) {
+        shell_fs::parent_path(path)
+    } else {
+        path.parent().map(Path::to_path_buf)
+    }
+}
+
 fn path_text(path: &Path) -> String {
     path.display().to_string()
 }
@@ -3522,6 +3610,9 @@ fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, St
     }
 
     let path = PathBuf::from(raw);
+    if shell_fs::is_shell_namespace_path(&path) {
+        return Ok(path);
+    }
     if path.is_absolute() {
         Ok(path)
     } else {
@@ -3708,6 +3799,9 @@ fn read_log_preview(path: &Path) -> Result<String, String> {
 }
 
 fn column_chain(root: &Path) -> Vec<PathBuf> {
+    if shell_fs::is_shell_namespace_path(root) {
+        return vec![root.to_path_buf()];
+    }
     let mut chain = root.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
     chain.reverse();
     chain
@@ -3722,9 +3816,20 @@ fn common_column_prefix(panes: &[ColumnPane], chain: &[PathBuf]) -> usize {
 }
 
 fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
-    let (mut entries, skipped) = load_directory(&path, sort)
+    let (mut entries, skipped) = load_directory_snapshot(&path, sort)
         .map(|snapshot| (snapshot.entries, snapshot.skipped))
         .unwrap_or_default();
+    if shell_fs::is_shell_namespace_path(&path) {
+        return ColumnPane {
+            path,
+            entries,
+            selected_path: None,
+            loading: false,
+            skipped,
+            git_available: false,
+            svn_available: false,
+        };
+    }
     let snapshot = load_vcs_snapshot(&path);
     apply_statuses(&mut entries, &path, &snapshot);
     ColumnPane {
@@ -3739,11 +3844,17 @@ fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
 }
 
 fn column_context_menu_target(pane: &ColumnPane, can_paste: bool) -> ContextMenuTarget {
-    let title = pane
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| pane.path.display().to_string());
+    let title = if shell_fs::is_shell_namespace_path(&pane.path) {
+        shell_fs::display_name(&pane.path)
+    } else {
+        None
+    }
+    .or_else(|| {
+        pane.path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+    })
+    .unwrap_or_else(|| pane.path.display().to_string());
     ContextMenuTarget::directory(
         pane.path.clone(),
         title,
@@ -3752,11 +3863,21 @@ fn column_context_menu_target(pane: &ColumnPane, can_paste: bool) -> ContextMenu
             can_paste,
             git_available: pane.git_available,
             svn_available: pane.svn_available,
+            supports_local_ops: !shell_fs::is_shell_namespace_path(&pane.path),
         },
     )
 }
 
 fn path_segments(path: &Path, final_is_file: bool) -> Vec<PathSegment> {
+    if shell_fs::is_shell_namespace_path(path) {
+        return vec![PathSegment {
+            label: shell_fs::display_name(path)
+                .unwrap_or_else(|| path.display().to_string())
+                .into(),
+            path: path.to_path_buf(),
+            clickable: false,
+        }];
+    }
     let mut ancestors = path.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
     ancestors.reverse();
     let count = ancestors.len();
@@ -3801,9 +3922,13 @@ impl Render for KiteApp {
         let is_dark = cx.theme().mode.is_dark();
         let can_back = self.history_index > 0;
         let can_forward = self.history_index + 1 < self.history.len();
-        let can_up = self.current_dir.parent().is_some();
+        let can_up = navigation_parent(&self.current_dir).is_some();
         let selected = self.selected_entry(cx);
         let selected_exists = selected.is_some();
+        let selected_local = selected
+            .as_ref()
+            .is_some_and(|entry| !shell_fs::is_shell_namespace_path(&entry.path));
+        let current_local = !shell_fs::is_shell_namespace_path(&self.current_dir);
         let has_clipboard = self.clipboard.borrow().is_some();
         let column_mode = self.view_mode == ViewMode::Columns && self.active_search.is_none();
         let item_count = if column_mode {
@@ -4058,7 +4183,7 @@ impl Render for KiteApp {
                             .compact()
                             .icon(IconName::Copy)
                             .tooltip("复制 (Ctrl+C)")
-                            .disabled(!selected_exists)
+                            .disabled(!selected_local)
                             .on_click(cx.listener(Self::copy_clicked)),
                     )
                     .child(
@@ -4067,7 +4192,7 @@ impl Render for KiteApp {
                             .compact()
                             .icon(IconName::Scissors)
                             .tooltip("剪切 (Ctrl+X)")
-                            .disabled(!selected_exists)
+                            .disabled(!selected_local)
                             .on_click(cx.listener(Self::cut_clicked)),
                     )
                     .child(
@@ -4076,7 +4201,7 @@ impl Render for KiteApp {
                             .compact()
                             .icon(IconName::ClipboardPaste)
                             .tooltip("粘贴 (Ctrl+V)")
-                            .disabled(!has_clipboard)
+                            .disabled(!has_clipboard || !current_local)
                             .on_click(cx.listener(Self::paste_clicked)),
                     )
                     .child(
@@ -4085,7 +4210,7 @@ impl Render for KiteApp {
                             .compact()
                             .icon(IconName::FolderPlus)
                             .tooltip("新建文件夹 (Ctrl+Shift+N)")
-                            .disabled(self.loading)
+                            .disabled(self.loading || !current_local)
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.begin_new_folder(window, cx)
                             })),
@@ -4096,7 +4221,7 @@ impl Render for KiteApp {
                             .compact()
                             .icon(IconName::Pencil)
                             .tooltip("重命名 (F2)")
-                            .disabled(!selected_exists)
+                            .disabled(!selected_local)
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.begin_rename(window, cx)
                             })),
@@ -4107,7 +4232,7 @@ impl Render for KiteApp {
                             .compact()
                             .icon(IconName::Trash)
                             .tooltip("移到回收站 (Delete)")
-                            .disabled(!selected_exists)
+                            .disabled(!selected_local)
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.confirm_recycle(window, cx)
                             })),
@@ -4342,7 +4467,7 @@ mod launch_target_tests {
 #[cfg(test)]
 mod path_bar_tests {
     use super::{
-        ColumnPane, column_context_menu_target, column_count_after_file_selection,
+        ColumnPane, column_chain, column_context_menu_target, column_count_after_file_selection,
         common_column_prefix, loaded_column_index, path_after_recycle, path_after_rename,
     };
     use std::path::{Path, PathBuf};
@@ -4357,6 +4482,12 @@ mod path_bar_tests {
             git_available: false,
             svn_available: false,
         }
+    }
+
+    #[test]
+    fn shell_namespace_path_uses_one_column() {
+        let path = PathBuf::from(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\phone\photo.jpg");
+        assert_eq!(column_chain(&path), vec![path]);
     }
 
     #[test]

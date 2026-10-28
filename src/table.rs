@@ -168,6 +168,7 @@ impl TableDelegate for FileTableDelegate {
                 can_paste: self.can_paste,
                 git_available: self.git_available,
                 svn_available: self.svn_available,
+                supports_local_ops: !crate::shell_fs::is_shell_namespace_path(&entry.path),
             },
         );
         let action_context = cx.entity().read(cx).focus_handle(cx);
