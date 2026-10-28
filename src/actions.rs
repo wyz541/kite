@@ -37,11 +37,13 @@ actions!(
 pub enum ContextMenuCommand {
     Open,
     Copy,
+    CopyPath,
     Cut,
     Paste,
     NewFolder,
     Rename,
     Recycle,
+    ShowProperties,
     Vcs(VcsMenuCommand),
     SystemMenu,
     Refresh,
