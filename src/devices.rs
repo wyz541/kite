@@ -37,12 +37,6 @@ pub struct PortableDevice {
     pub shell_path: String,
 }
 
-impl PortableDevice {
-    pub fn open_in_system(&self) -> Result<(), String> {
-        open::that_detached(&self.shell_path).map_err(|error| format!("无法打开移动设备：{error}"))
-    }
-}
-
 #[cfg(target_os = "windows")]
 mod platform {
     use super::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};

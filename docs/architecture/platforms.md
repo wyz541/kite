@@ -77,8 +77,20 @@ Windows 前端负责以下能力：
 - Kite 原生右键菜单。
 - `IContextMenu` Shell 扩展菜单。
 - WPD/MTP 设备展示。
+- WPD/MTP Shell 命名空间浏览。
 
 Windows 专属代码只在 `cfg(target_os = "windows")` 下编译。
+
+## WPD/MTP 浏览
+
+Windows 设备条目来自 WPD 枚举。
+设备路径是 Shell 命名空间路径，不是文件系统路径。
+`src/shell_fs.rs` 使用 `IShellItem` 和 `IEnumShellItems` 枚举目录。
+后台线程先调用 `CoInitializeEx`，再执行 Shell 枚举。
+设备内导航复用 Kite 的历史、路径栏和分栏状态。
+设备文件通过 Windows Shell 打开。
+设备内的复制、重命名、删除和粘贴暂不支持。
+Kite 在主菜单和工具栏中禁用这些操作。
 
 ## macOS 前端
 
@@ -191,7 +203,7 @@ macOS 将文件夹默认应用恢复为 Finder。
 | 文件打开 | Shell 默认程序 | NSWorkspace |
 | 快速查看 | 无统一 API | Quick Look |
 | 回收站 | Windows Recycle Bin | macOS Trash |
-| 移动设备 | WPD 枚举 + Windows Shell 打开 | macOS 卷枚举 |
+| 移动设备 | WPD 枚举 + Shell 命名空间浏览 | macOS 卷枚举 |
 | 快捷键 | Ctrl 映射 | Command 映射 |
 | 不可用菜单项 | 按现有要求显示禁用项 | 按 HIG 隐藏 |
 
