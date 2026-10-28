@@ -170,7 +170,8 @@ impl TableDelegate for FileTableDelegate {
                 svn_available: self.svn_available,
             },
         );
-        render_context_menu(menu, &target, window, cx)
+        let action_context = cx.entity().read(cx).focus_handle(cx);
+        render_context_menu(menu, &target, action_context, window, cx)
     }
 
     fn render_td(

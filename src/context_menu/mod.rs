@@ -1,7 +1,11 @@
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex};
+use gpui_kit::prelude::StatefulInteractiveElement as _;
 use gpui_kit::*;
 
 use crate::actions::{ContextMenuAction, ContextMenuCommand, VcsMenuCommand};
@@ -456,6 +460,7 @@ fn append_nodes(
     mut menu: PopupMenu,
     nodes: &[ContextMenuNode],
     target: &ContextMenuTarget,
+    action_context: &FocusHandle,
     window: &mut Window,
     cx: &mut App,
 ) -> PopupMenu {
@@ -468,12 +473,52 @@ fn append_nodes(
                 command,
                 enabled,
             } => {
-                menu = menu.menu_with_icon_and_disabled(
-                    *label,
-                    *icon,
-                    Box::new(target.action(*command)),
-                    !enabled,
-                );
+                let action = target.action(*command);
+                let item = if matches!(command, ContextMenuCommand::SystemMenu) {
+                    let hover_action = action.clone();
+                    let hover_context = action_context.clone();
+                    let hover_triggered = Rc::new(Cell::new(false));
+                    let label = *label;
+                    let icon = *icon;
+                    PopupMenuItem::element(move |_, cx| {
+                        let hover_context = hover_context.clone();
+                        let hover_action = hover_action.clone();
+                        let hover_triggered = hover_triggered.clone();
+                        h_flex()
+                            .id("context-menu-show-more-hover")
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .on_hover(move |hovered, window, cx| {
+                                if !*hovered {
+                                    hover_triggered.set(false);
+                                    return;
+                                }
+                                if hover_triggered.replace(true) {
+                                    return;
+                                }
+                                hover_context.focus(window, cx);
+                                window.dispatch_action(Box::new(hover_action.clone()), cx);
+                            })
+                            .child(label)
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .xsmall()
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                    })
+                    .icon(icon)
+                    .disabled(!enabled)
+                    .action(Box::new(action))
+                } else {
+                    PopupMenuItem::new(*label)
+                        .icon(*icon)
+                        .disabled(!enabled)
+                        .action(Box::new(action))
+                };
+                menu = menu.item(item);
             }
             ContextMenuNode::Submenu {
                 label,
@@ -483,8 +528,9 @@ fn append_nodes(
             } => {
                 let entries = entries.clone();
                 let target = target.clone();
+                let action_context = action_context.clone();
                 let submenu = PopupMenu::build(window, cx, move |menu, window, cx| {
-                    append_nodes(menu, &entries, &target, window, cx)
+                    append_nodes(menu, &entries, &target, &action_context, window, cx)
                 });
                 menu = menu.item(
                     PopupMenuItem::submenu(*label, submenu)
@@ -500,13 +546,14 @@ fn append_nodes(
 pub(crate) fn render_context_menu(
     menu: PopupMenu,
     target: &ContextMenuTarget,
+    action_context: FocusHandle,
     window: &mut Window,
     cx: &mut App,
 ) -> PopupMenu {
     let policy = ContextMenuPolicy::current();
     let model = build_model(target, policy);
     let menu = menu.label(target.title.clone()).separator();
-    append_nodes(menu, &model.entries, target, window, cx)
+    append_nodes(menu, &model.entries, target, &action_context, window, cx)
 }
 
 #[cfg(test)]
