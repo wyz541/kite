@@ -215,7 +215,7 @@ final class KiteModel: ObservableObject {
         guard let name = KitePlatform.promptForName(
             title: "新建文件夹",
             message: "在“\(columnTitle(for: directory))”中创建文件夹。",
-            defaultValue: "新建文件夹"
+            defaultValue: ""
         ) else {
             return
         }

@@ -2072,7 +2072,6 @@ impl KiteApp {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("文件夹名称")
-                .default_value("新建文件夹")
                 .clean_on_escape()
         });
         let subscription = cx.subscribe_in(
@@ -2137,7 +2136,11 @@ impl KiteApp {
     }
 
     fn close_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.modal = None;
+        if let Some(modal) = self.modal.take() {
+            modal
+                .input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
         self.focus_table(window, cx);
         cx.notify();
     }
@@ -2172,6 +2175,7 @@ impl KiteApp {
                         .await;
                     let _ = this.update_in(cx, |this, window, cx| match result {
                         Ok(_) => {
+                            this.close_modal(window, cx);
                             this.notice = Some("文件夹已创建".into());
                             this.refresh(window, cx);
                         }
@@ -2198,6 +2202,7 @@ impl KiteApp {
                         .await;
                     let _ = this.update_in(cx, |this, window, cx| match result {
                         Ok(_) => {
+                            this.close_modal(window, cx);
                             this.notice = Some("名称已更新".into());
                             let destination =
                                 path_after_rename(&this.current_dir, &path, &renamed_path);
@@ -2213,11 +2218,11 @@ impl KiteApp {
                 .detach();
             }
             ModalKind::GitCommit(path) => {
-                self.modal = None;
+                self.close_modal(window, cx);
                 self.run_vcs_task(VcsTool::Git, VcsOperation::Commit(value), path, window, cx);
             }
             ModalKind::SvnCommit(path) => {
-                self.modal = None;
+                self.close_modal(window, cx);
                 self.run_vcs_task(VcsTool::Svn, VcsOperation::Commit(value), path, window, cx);
             }
         }
