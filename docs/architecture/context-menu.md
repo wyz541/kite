@@ -124,11 +124,31 @@ RefreshMenuProvider
 
 ```text
 target: PathBuf
+working_directory: PathBuf
 command: ContextMenuCommand
 ```
 
 动作分发集中在 `KiteApp::on_context_menu_action`。
-因此，列表视图和分栏视图使用同一套命令语义。
+因此，列表视图、分栏视图和预览菜单使用同一套命令语义。
+
+### 预览更多菜单
+
+分栏预览标题栏提供“更多预览选项”按钮。
+该按钮复用 `ContextMenuAction` 和 `ContextMenuCommand`。
+当前菜单包含：
+
+- 打开文件。
+- 复制。
+- 复制完整路径。
+- 文件属性。
+- 显示原生菜单。
+
+`CopyPath` 写入系统文本剪贴板。
+`ShowProperties` 调用 Windows Shell 的 `SHObjectProperties`。
+该调用使用 `SHOP_FILEPATH` 对象类型。
+因此，属性对话框使用系统实现。
+后续预览操作只新增命令和菜单节点。
+后续预览操作不需要复制动作分发代码。
 
 ### Native Shell Bridge
 
@@ -176,11 +196,13 @@ Kite 原生项适合高频操作。
 
 - 打开。
 - 复制。
+- 复制完整路径。
 - 剪切。
 - 粘贴。
 - 新建文件夹。
 - 重命名。
 - 移到回收站。
+- 文件属性。
 - Git 操作。
 - SVN 操作。
 - 刷新。

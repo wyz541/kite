@@ -15,7 +15,7 @@ use crate::platform::HostPlatform;
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::request_system_menu;
+pub(crate) use windows::{request_system_menu, show_properties};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ContextMenuPolicy {
@@ -242,6 +242,12 @@ impl ContextMenuProvider for CoreMenuProvider {
         model.separator();
         model.item("复制", IconName::Copy, ContextMenuCommand::Copy, !disabled);
         model.item(
+            "复制完整路径",
+            IconName::Link,
+            ContextMenuCommand::CopyPath,
+            !disabled,
+        );
+        model.item(
             "剪切",
             IconName::Scissors,
             ContextMenuCommand::Cut,
@@ -273,6 +279,15 @@ impl ContextMenuProvider for CoreMenuProvider {
             IconName::Trash,
             ContextMenuCommand::Recycle,
             !disabled && target.target_can_change(),
+        );
+        if !policy.compact {
+            model.separator();
+        }
+        model.item(
+            "属性",
+            IconName::Info,
+            ContextMenuCommand::ShowProperties,
+            !disabled,
         );
     }
 }
@@ -613,6 +628,8 @@ mod tests {
 
         assert!(labels.contains(&"Git"));
         assert!(labels.contains(&"SVN"));
+        assert!(labels.contains(&"复制完整路径"));
+        assert!(labels.contains(&"属性"));
         assert!(model.entries.iter().any(|entry| matches!(
             entry,
             ContextMenuNode::Item {

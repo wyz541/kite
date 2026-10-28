@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::actions::*;
 use crate::context_menu::{
     ContextMenuCapabilities, ContextMenuTarget, render_context_menu, request_system_menu,
+    show_properties,
 };
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
@@ -27,7 +28,7 @@ use gpui_kit::base::{SelectableText, TextSelectionHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{
@@ -1270,6 +1271,12 @@ impl KiteApp {
             ContextMenuCommand::Copy => {
                 self.set_clipboard_path(action.target.clone(), ClipboardMode::Copy, cx)
             }
+            ContextMenuCommand::CopyPath => {
+                cx.write_to_clipboard(ClipboardItem::new_string(path_text(&action.target)));
+                self.error = None;
+                self.notice = Some("已复制完整路径".into());
+                cx.notify();
+            }
             ContextMenuCommand::Cut => {
                 self.set_clipboard_path(action.target.clone(), ClipboardMode::Cut, cx)
             }
@@ -1282,6 +1289,19 @@ impl KiteApp {
             ContextMenuCommand::Rename => self.begin_rename_path(action.target.clone(), window, cx),
             ContextMenuCommand::Recycle => {
                 self.confirm_recycle_path(action.target.clone(), window, cx)
+            }
+            ContextMenuCommand::ShowProperties => {
+                match show_properties(window, &action.target) {
+                    Ok(()) => {
+                        self.error = None;
+                        self.notice = Some("已打开文件属性".into());
+                    }
+                    Err(error) => {
+                        self.notice = None;
+                        self.error = Some(error.into());
+                    }
+                }
+                cx.notify();
             }
             ContextMenuCommand::Vcs(command) => {
                 self.run_vcs_command(command, action.target.clone(), window, cx)
@@ -2602,6 +2622,9 @@ impl KiteApp {
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let copy_text = preview_info_text(entry);
+        let preview_more_items = preview_more_menu_items();
+        let preview_more_target = entry.path.clone();
+        let preview_more_working_directory = self.current_dir.clone();
         let preview = self
             .column_preview
             .as_ref()
@@ -2820,6 +2843,7 @@ impl KiteApp {
                     .h(px(34.))
                     .w_full()
                     .px_2()
+                    .gap_1()
                     .items_center()
                     .border_b_1()
                     .border_color(border)
@@ -2836,6 +2860,34 @@ impl KiteApp {
                             .value(copy_text)
                             .tooltip("复制预览信息")
                             .accessibility_label("复制预览信息"),
+                    )
+                    .child(
+                        Button::new(format!("preview-more-{}", entry.path.display()))
+                            .ghost()
+                            .compact()
+                            .icon(IconName::Ellipsis)
+                            .tooltip("更多预览选项")
+                            .accessibility_label("更多预览选项")
+                            .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+                                for (index, (label, icon, command)) in
+                                    preview_more_items.iter().enumerate()
+                                {
+                                    if matches!(index, 3 | 4) {
+                                        menu = menu.separator();
+                                    }
+                                    menu = menu.menu_with_icon(
+                                        *label,
+                                        *icon,
+                                        Box::new(ContextMenuAction {
+                                            target: preview_more_target.clone(),
+                                            working_directory: preview_more_working_directory
+                                                .clone(),
+                                            command: *command,
+                                        }),
+                                    );
+                                }
+                                menu
+                            }),
                     ),
             )
             .child(
@@ -3492,6 +3544,24 @@ fn preview_property(label: &str, value: String, cx: &App) -> AnyElement {
             value,
         )))
         .into_any_element()
+}
+
+fn preview_more_menu_items() -> [(&'static str, IconName, ContextMenuCommand); 5] {
+    [
+        ("打开文件", IconName::FolderOpen, ContextMenuCommand::Open),
+        ("复制", IconName::Copy, ContextMenuCommand::Copy),
+        ("复制完整路径", IconName::Link, ContextMenuCommand::CopyPath),
+        (
+            "文件属性…",
+            IconName::Info,
+            ContextMenuCommand::ShowProperties,
+        ),
+        (
+            "显示原生菜单…",
+            IconName::Ellipsis,
+            ContextMenuCommand::SystemMenu,
+        ),
+    ]
 }
 
 fn preview_info_text(entry: &FileEntry) -> String {
@@ -4379,14 +4449,33 @@ mod path_bar_tests {
 #[cfg(test)]
 mod preview_tests {
     use super::{
-        is_text_preview_entry, preview_info_text, preview_text_lines, read_log_preview,
-        read_text_preview,
+        is_text_preview_entry, preview_info_text, preview_more_menu_items, preview_text_lines,
+        read_log_preview, read_text_preview,
     };
+    use crate::actions::ContextMenuCommand;
     use crate::fs::{EntryKind, FileEntry, VcsStatus};
     use gpui_kit::SharedString;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn preview_more_menu_contains_file_actions() {
+        let commands = preview_more_menu_items()
+            .iter()
+            .map(|(_, _, command)| *command)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            commands,
+            vec![
+                ContextMenuCommand::Open,
+                ContextMenuCommand::Copy,
+                ContextMenuCommand::CopyPath,
+                ContextMenuCommand::ShowProperties,
+                ContextMenuCommand::SystemMenu,
+            ]
+        );
+    }
 
     #[test]
     fn splits_preview_text_into_stable_lines() {

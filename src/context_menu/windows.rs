@@ -13,7 +13,7 @@ use windows::Win32::UI::Shell::{
     BHID_SFUIObject, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_PTINVOKE, CMINVOKECOMMANDINFO,
     CMINVOKECOMMANDINFOEX, DefSubclassProc, IContextMenu, IContextMenu2, IContextMenu3, IShellItem,
     IShellItemArray, RemoveWindowSubclass, SHCreateItemFromParsingName,
-    SHCreateShellItemArrayFromShellItem, SetWindowSubclass,
+    SHCreateShellItemArrayFromShellItem, SHOP_FILEPATH, SHObjectProperties, SetWindowSubclass,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, HMENU, PostMessageW,
@@ -115,6 +115,31 @@ pub(crate) fn request_system_menu(
     }
 
     Ok(receiver)
+}
+
+pub(crate) fn show_properties(window: &Window, path: &Path) -> Result<(), String> {
+    let hwnd = window_hwnd(window)?;
+    let file = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let opened = unsafe {
+        SHObjectProperties(
+            Some(hwnd),
+            SHOP_FILEPATH,
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+        )
+    };
+    if opened.as_bool() {
+        Ok(())
+    } else {
+        Err(format!(
+            "无法打开文件属性：{}",
+            std::io::Error::last_os_error()
+        ))
+    }
 }
 
 fn clear_pending_system_menu(hwnd: HWND) {
