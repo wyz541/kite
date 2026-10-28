@@ -23,7 +23,7 @@ use crate::vcs::{
     run_vcs_operation, run_vcs_query,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::base::SelectableText;
+use gpui_kit::base::{SelectableText, TextSelectionHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -128,9 +128,12 @@ struct ColumnListScroll {
 #[derive(Clone)]
 struct ColumnPreviewState {
     path: PathBuf,
-    text: Option<SharedString>,
+    // Fixed-height rows make the scroll extent deterministic for large files.
+    lines: Arc<Vec<SharedString>>,
+    selection: Option<TextSelectionHandle>,
     error: Option<SharedString>,
     loading: bool,
+    scroll: UniformListScrollHandle,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DirectoryScrollRoute {
@@ -1907,9 +1910,11 @@ impl KiteApp {
         self._preview_task = Task::ready(());
         self.column_preview = Some(ColumnPreviewState {
             path: path.clone(),
-            text: None,
+            lines: Arc::new(Vec::new()),
+            selection: None,
             error: None,
             loading: load_text,
+            scroll: UniformListScrollHandle::new(),
         });
         if !load_text {
             return;
@@ -1932,7 +1937,10 @@ impl KiteApp {
                 if let Some(preview) = this.column_preview.as_mut() {
                     preview.loading = false;
                     match result {
-                        Ok(text) => preview.text = Some(text.into()),
+                        Ok(text) => {
+                            preview.lines = Arc::new(preview_text_lines(&text));
+                            preview.selection = Some(TextSelectionHandle::new(text, cx));
+                        }
                         Err(error) => preview.error = Some(error.into()),
                     }
                 }
@@ -2599,11 +2607,10 @@ impl KiteApp {
             .as_ref()
             .filter(|preview| same_path(&preview.path, &entry.path))
             .cloned();
-
         let preview_area = if is_image_preview_entry(entry) {
             let fallback_entry = entry.clone();
             h_flex()
-                .h(px(180.))
+                .h(px(440.))
                 .w_full()
                 .items_center()
                 .justify_center()
@@ -2613,7 +2620,7 @@ impl KiteApp {
                 .child(
                     img(entry.path.clone())
                         .max_w_full()
-                        .max_h(px(170.))
+                        .max_h(px(520.))
                         .object_fit(ObjectFit::Contain)
                         .with_fallback(move || {
                             v_flex()
@@ -2632,58 +2639,143 @@ impl KiteApp {
                 )
                 .into_any_element()
         } else if is_text_preview_entry(entry) {
-            let preview_text = if let Some(preview) = preview.as_ref() {
+            let foreground = cx.theme().foreground;
+            let mut scrollbar = None;
+            let mut content = v_flex().size_full().p_2();
+            content = if let Some(preview) = preview.as_ref() {
                 if preview.loading {
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child("正在加载预览…")
-                        .into_any_element()
+                    content.child(div().text_xs().text_color(muted).child("正在加载预览…"))
                 } else if let Some(error) = preview.error.clone() {
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().danger)
-                        .child(SelectableText::new(
+                    content.child(div().text_xs().text_color(cx.theme().danger).child(
+                        SelectableText::new(
                             format!("column-preview-error-{}", entry.path.display()),
                             error,
+                        ),
+                    ))
+                } else if let Some(selection) = preview.selection.clone() {
+                    let lines = preview.lines.clone();
+                    let line_count = lines.len();
+                    let scroll = preview.scroll.clone();
+                    let scroll_for_wheel = scroll.clone();
+                    scrollbar = Some(scroll.clone());
+                    let list_id = SharedString::from(format!(
+                        "column-preview-lines-{}",
+                        entry.path.display()
+                    ));
+                    content
+                        .on_scroll_wheel(cx.listener(
+                            move |_this, event: &ScrollWheelEvent, window, cx| {
+                                let delta = event.delta.pixel_delta(window.line_height());
+                                let delta_x = delta.x.as_f32();
+                                let delta_y = delta.y.as_f32();
+                                if delta_y == 0.0 {
+                                    return;
+                                }
+                                if wheel_scrolls_columns(delta_x, delta_y) {
+                                    let base = scroll_for_wheel.0.borrow().base_handle.clone();
+                                    let current = base.offset();
+                                    let max_y = base.max_offset().y.as_f32().max(0.0);
+                                    let applied_y =
+                                        if delta.y.is_zero() { delta_x } else { delta_y };
+                                    let restored_y =
+                                        (current.y.as_f32() - applied_y).clamp(-max_y, 0.0);
+                                    base.set_offset(point(current.x, px(restored_y)));
+                                    cx.notify();
+                                    return;
+                                }
+                                cx.stop_propagation();
+                            },
                         ))
-                        .into_any_element()
-                } else if let Some(text) = preview.text.clone() {
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().foreground)
-                        .child(SelectableText::new(
-                            format!("column-preview-content-{}", entry.path.display()),
-                            text,
-                        ))
-                        .into_any_element()
+                        .child(
+                            uniform_list(
+                                list_id,
+                                line_count,
+                                cx.processor(move |_this, range: Range<usize>, _window, _cx| {
+                                    range
+                                        .map(|row_ix| {
+                                            let line =
+                                                lines.get(row_ix).cloned().unwrap_or_default();
+                                            h_flex()
+                                                .id(("column-preview-line", row_ix))
+                                                .h(px(20.))
+                                                .w_full()
+                                                .min_w_0()
+                                                .items_center()
+                                                .overflow_hidden()
+                                                .px_1()
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(foreground)
+                                                        .whitespace_nowrap()
+                                                        .child(
+                                                            SelectableText::with_handle(
+                                                                (
+                                                                    "column-preview-line-text",
+                                                                    row_ix,
+                                                                ),
+                                                                selection.clone(),
+                                                                line,
+                                                            )
+                                                            .document_order(row_ix as u64),
+                                                        ),
+                                                )
+                                                .into_any_element()
+                                        })
+                                        .collect::<Vec<_>>()
+                                }),
+                            )
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .track_scroll(&scroll),
+                        )
                 } else {
+                    content.child(div().text_xs().text_color(muted).child("无文本预览"))
+                }
+            } else {
+                content.child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("无文本预览")
-                        .into_any_element()
-                }
-            } else {
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child("选择文件后加载预览")
-                    .into_any_element()
+                        .child("选择文件后加载预览"),
+                )
             };
-            div()
+
+            let mut panel = v_flex()
                 .id("column-preview-text")
-                .h(px(180.))
+                .h(px(440.))
                 .w_full()
-                .overflow_y_scroll()
                 .rounded_md()
                 .bg(cx.theme().muted.opacity(0.25))
-                .p_2()
-                .child(preview_text)
-                .into_any_element()
+                .relative()
+                .overflow_hidden()
+                .child(content);
+            if let Some(scroll) = scrollbar {
+                panel = panel.child(
+                    div().absolute().inset_0().child(
+                        Scrollbar::vertical(&scroll)
+                            .id("column-preview-text-scrollbar")
+                            .mode(ScrollbarMode::Always)
+                            .styles(|styles| {
+                                let track = cx.theme().muted.opacity(0.55);
+                                let thumb = cx.theme().muted_foreground.opacity(0.75);
+                                let thumb_hover = cx.theme().muted_foreground.opacity(0.95);
+                                styles
+                                    .track(|style| style.bg(track).width(px(10.)))
+                                    .thumb(|style| {
+                                        style.bg(thumb).width(px(6.)).inset(px(2.)).radius(px(99.))
+                                    })
+                                    .thumb_hover(|style| style.bg(thumb_hover))
+                            })
+                            .viewport_from_layout(),
+                    ),
+                );
+            }
+            panel.into_any_element()
         } else {
             v_flex()
-                .h(px(180.))
+                .h(px(440.))
                 .w_full()
                 .items_center()
                 .justify_center()
@@ -2718,7 +2810,7 @@ impl KiteApp {
         }
 
         v_flex()
-            .w(px(300.))
+            .w(px(420.))
             .h_full()
             .flex_shrink_0()
             .border_r_1()
@@ -3417,6 +3509,15 @@ fn preview_info_text(entry: &FileEntry) -> String {
         lines.push(format!("SVN：{} ({})", status.label(), status.code()));
     }
     lines.join("\n")
+}
+
+fn preview_text_lines(text: &str) -> Vec<SharedString> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    text.split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line).into())
+        .collect()
 }
 
 fn is_image_preview_entry(entry: &FileEntry) -> bool {
@@ -4277,11 +4378,22 @@ mod path_bar_tests {
 
 #[cfg(test)]
 mod preview_tests {
-    use super::{is_text_preview_entry, preview_info_text, read_log_preview, read_text_preview};
+    use super::{
+        is_text_preview_entry, preview_info_text, preview_text_lines, read_log_preview,
+        read_text_preview,
+    };
     use crate::fs::{EntryKind, FileEntry, VcsStatus};
+    use gpui_kit::SharedString;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn splits_preview_text_into_stable_lines() {
+        assert!(preview_text_lines("").is_empty());
+        let expected: Vec<SharedString> = vec!["first".into(), "second".into(), "".into()];
+        assert_eq!(preview_text_lines("first\r\nsecond\n"), expected);
+    }
 
     #[test]
     fn reads_text_preview_and_rejects_binary_content() {
