@@ -2806,6 +2806,7 @@ impl KiteApp {
             .unwrap_or_else(|| path.display().to_string());
         let can_paste = self.clipboard.borrow().is_some();
         let column_menu_target = column_context_menu_target(pane, can_paste);
+        let action_context = self.focus_handle.clone();
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let accent = cx.theme().accent;
@@ -2884,7 +2885,13 @@ impl KiteApp {
                     .child(body),
             )
             .context_menu(move |menu, window, cx| {
-                render_context_menu(menu, &column_menu_target, window, cx)
+                render_context_menu(
+                    menu,
+                    &column_menu_target,
+                    action_context.clone(),
+                    window,
+                    cx,
+                )
             })
             .into_any_element()
     }
@@ -2973,6 +2980,7 @@ impl KiteApp {
         let accent = cx.theme().accent;
         let hover = cx.theme().muted;
         let muted = cx.theme().muted_foreground;
+        let action_context = self.focus_handle.clone();
         let mut rows = Vec::new();
         for row_ix in range {
             let Some(entry) = entries.get(row_ix).cloned() else {
@@ -2983,6 +2991,7 @@ impl KiteApp {
                 .is_some_and(|path| same_path(path, &entry.path));
             let row_column_path = column_path.clone();
             let menu_entry = entry.clone();
+            let row_action_context = action_context.clone();
             let row_git_available = git_available || entry.git_status.is_some();
             let row_svn_available = svn_available || entry.svn_status.is_some();
             let icon_status = worse_status(entry.git_status, entry.svn_status);
@@ -3049,7 +3058,7 @@ impl KiteApp {
                             svn_available: row_svn_available,
                         },
                     );
-                    render_context_menu(menu, &target, window, cx)
+                    render_context_menu(menu, &target, row_action_context.clone(), window, cx)
                 })
                 .into_any_element();
             rows.push(row);
