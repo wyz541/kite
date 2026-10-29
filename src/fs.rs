@@ -442,6 +442,44 @@ pub fn recycle_entry(path: &Path) -> Result<(), String> {
     trash::delete(path).map_err(|error| format!("移到回收站失败：{error}"))
 }
 
+#[cfg(target_os = "windows")]
+pub fn open_file(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
+    let operation = "open\0".encode_utf16().collect::<Vec<_>>();
+    let file = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let directory = directory
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR(directory.as_ptr()),
+            SW_SHOWNORMAL,
+        )
+    };
+    let code = result.0 as isize;
+    if code <= 32 {
+        Err(format!("打开文件失败：Windows 错误 {code}"))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn open_file(path: &Path) -> Result<(), String> {
     open::that(path).map_err(|error| format!("打开文件失败：{error}"))
 }
@@ -525,6 +563,39 @@ mod tests {
         assert_eq!(format_size(512), "512 B");
         assert_eq!(format_size(1536), "1.5 KB");
         assert_eq!(format_size(2 * 1024 * 1024), "2.0 MB");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "launches a visible batch process"]
+    fn opens_batch_files_in_their_parent_directory() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("kite-batch-cwd-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&root).expect("create batch directory");
+        let result_path = root.join("result.txt");
+        let batch_path = root.join("capture-cwd.bat");
+        let batch = format!("@echo off\r\ncd > \"{}\"\r\n", result_path.display());
+        fs::write(&batch_path, batch).expect("write batch file");
+
+        open_file(&batch_path).expect("launch batch file");
+        let mut actual = String::new();
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(100));
+            if let Ok(value) = fs::read_to_string(&result_path) {
+                actual = value.trim().to_string();
+                break;
+            }
+        }
+
+        assert!(!actual.is_empty(), "batch file did not run");
+        assert!(crate::platform::paths_equal(Path::new(&actual), &root));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
