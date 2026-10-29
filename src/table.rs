@@ -73,6 +73,27 @@ impl FileTableDelegate {
         sort_entries(&mut self.entries, self.sort);
     }
 
+    pub fn directory_context_menu_target(&self) -> ContextMenuTarget {
+        let title = self
+            .working_directory
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.working_directory.display().to_string());
+        ContextMenuTarget::directory(
+            self.working_directory.clone(),
+            title,
+            ContextMenuCapabilities {
+                loading: self.loading,
+                can_paste: self.can_paste,
+                git_available: self.git_available,
+                svn_available: self.svn_available,
+                supports_local_ops: !crate::shell_fs::is_shell_namespace_path(
+                    &self.working_directory,
+                ),
+            },
+        )
+    }
+
     pub fn clear_entries(&mut self) {
         self.entries.clear();
         self.active_query = None;
@@ -403,4 +424,26 @@ fn vcs_cell_text(entry: &FileEntry) -> String {
         values.push(format!("SVN {}", status.label()));
     }
     values.join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileTableDelegate;
+    use crate::fs::SortSpec;
+    use std::path::PathBuf;
+
+    #[test]
+    fn directory_context_menu_target_uses_the_view_directory() {
+        let root = PathBuf::from("C:/repo/src");
+        let mut delegate = FileTableDelegate::new(Vec::new(), SortSpec::default(), root.clone());
+        delegate.set_can_paste(true);
+
+        let target = delegate.directory_context_menu_target();
+
+        assert_eq!(target.path, root);
+        assert_eq!(target.working_directory, target.path);
+        assert!(target.is_dir);
+        assert!(target.can_paste);
+        assert!(target.supports_local_ops);
+    }
 }
