@@ -42,6 +42,8 @@ pub enum ContextMenuCommand {
     Paste,
     NewFolder,
     NewFile,
+    AddFavorite,
+    RemoveFavorite,
     Rename,
     Recycle,
     ShowProperties,

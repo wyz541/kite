@@ -13,6 +13,9 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 tabBar
                 toolbar
+                if !model.favorites.isEmpty {
+                    favoritesBar
+                }
                 columnBrowser
                 statusBar
             }
@@ -167,6 +170,47 @@ struct ContentView: View {
         .frame(height: 34)
     }
 
+    private var favoritesBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Label("收藏", systemImage: "star.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                ForEach(model.favorites, id: \.path) { favorite in
+                    Button {
+                        model.openFavorite(favorite)
+                    } label: {
+                        Label(
+                            favorite.name,
+                            systemImage: favorite.isDirectory ? "folder.fill" : "doc.fill"
+                        )
+                        .font(.caption)
+                        .lineLimit(1)
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.thinMaterial, in: Capsule())
+                    .help(favorite.path)
+                    .accessibilityLabel("打开收藏 \(favorite.name)")
+                    .contextMenu {
+                        Button("从收藏移除") {
+                            model.removeFavorite(favorite)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+        }
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
     private var columnBrowser: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 1) {
@@ -224,6 +268,13 @@ struct ContentView: View {
             .disabled(!KitePlatform.canModify(column.path))
         Button("新建文件…") { model.createFile(in: column.path) }
             .disabled(!KitePlatform.canModify(column.path))
+        Button("添加到收藏") {
+            model.addFavorite(
+                path: column.path,
+                name: URL(fileURLWithPath: column.path).lastPathComponent,
+                isDirectory: true
+            )
+        }
         Button("重命名…") { model.rename(column.path) }
             .disabled(!KitePlatform.canModify(column.path))
         Divider()
@@ -367,6 +418,13 @@ struct ContentView: View {
             }
             Button("新建文件…") {
                 model.createFile(in: URL(fileURLWithPath: entry.path).deletingLastPathComponent().path)
+            }
+            Button("添加到收藏") {
+                model.addFavorite(
+                    path: entry.path,
+                    name: entry.name,
+                    isDirectory: entry.isDirectory
+                )
             }
             Divider()
             Button("分享…") { KitePlatform.share(entry.path) }

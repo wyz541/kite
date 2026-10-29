@@ -53,6 +53,10 @@ Kite 把界面当作一条可牵引的线。
 - 复制、剪切和粘贴文件或文件夹。
 - 右键文件行或分栏目录区域打开操作菜单。
 - 在右键菜单中执行 Git 和 SVN 操作。
+- 右键添加文件或文件夹到收藏栏。
+- 收藏配置跨启动保留。
+- 收藏文件夹点击后直接导航。
+- 收藏文件点击后使用系统默认程序打开。
 - 显示 Git 和 SVN 状态徽标。
 - 在浅色主题和深色主题之间切换。
 - 检查 GitHub Release，并更新本机 Kite。
@@ -193,6 +197,14 @@ TortoiseGit 和 TortoiseSVN 扩展也可出现在此菜单中。
 当前提供者包括核心文件操作、Git/SVN、Windows Shell 和刷新。
 详细设计见 `docs/architecture/context-menu.md`。
 跨平台边界见 `docs/architecture/platforms.md`。
+
+### 收藏栏
+
+右键文件或文件夹可添加到收藏。
+收藏配置跨启动保留。
+Windows 收藏项显示在侧边栏。
+macOS 收藏项显示在工具栏下方。
+详细设计见 `docs/architecture/favorites.md`。
 
 ## 分栏视图与路径栏
 
@@ -463,6 +475,7 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 - `src/fs.rs`：跨平台文件夹读取、搜索、排序、格式化和文件操作。
 - `src/platform/mod.rs`：跨平台路径和文件名规则。
 - `src/session.rs`：跨平台会话保存、恢复和损坏回退。
+- `src/favorites.rs`：跨平台收藏保存、去重和损坏回退。
 - `src/table.rs`：Windows 虚拟文件表格和列定义。
 - `src/main.rs`：Windows GPUI 前端入口。
 - `apps/macos/Sources`：SwiftUI 和 AppKit macOS 前端。

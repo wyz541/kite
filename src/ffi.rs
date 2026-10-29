@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
+use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory};
 use crate::platform::{HostPlatform, default_root_path, host_platform};
 use crate::session::{self as session_store, SessionStateDto};
@@ -147,6 +148,24 @@ impl KiteCore {
             volumes: snapshot.volumes.iter().map(volume_dto).collect(),
             portable_devices: snapshot.portable_devices.iter().map(device_dto).collect(),
         }
+    }
+
+    pub fn favorites(&self) -> Vec<FavoriteEntryDto> {
+        favorites_store::load_favorites()
+    }
+
+    pub fn add_favorite(
+        &self,
+        path: String,
+        name: String,
+        is_directory: bool,
+    ) -> Result<bool, KiteError> {
+        favorites_store::add_favorite(&PathBuf::from(path), &name, is_directory)
+            .map_err(KiteError::operation)
+    }
+
+    pub fn remove_favorite(&self, path: String) -> Result<bool, KiteError> {
+        favorites_store::remove_favorite(&PathBuf::from(path)).map_err(KiteError::operation)
     }
 
     pub fn load_session(&self) -> Option<SessionStateDto> {

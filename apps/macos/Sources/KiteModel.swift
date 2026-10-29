@@ -56,6 +56,7 @@ final class KiteModel: ObservableObject {
     private let core: KiteCore
 
     @Published private(set) var tabs: [BrowserTab] = []
+    @Published private(set) var favorites: [FavoriteEntryDto] = []
     @Published private(set) var activeTabID: UUID?
     @Published var errorMessage: String?
     @Published var focusedAddressRequest = 0
@@ -64,6 +65,7 @@ final class KiteModel: ObservableObject {
 
     init(core: KiteCore = KiteCore()) {
         self.core = core
+        self.favorites = core.favorites()
         restoreOrCreateTabs()
     }
 
@@ -242,6 +244,34 @@ final class KiteModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func addFavorite(path: String, name: String, isDirectory: Bool) {
+        do {
+            _ = try core.addFavorite(path: path, name: name, isDirectory: isDirectory)
+            favorites = core.favorites()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeFavorite(_ favorite: FavoriteEntryDto) {
+        do {
+            _ = try core.removeFavorite(path: favorite.path)
+            favorites = core.favorites()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func openFavorite(_ favorite: FavoriteEntryDto) {
+        if favorite.isDirectory {
+            loadRoot(favorite.path)
+        } else {
+            KitePlatform.open(favorite.path)
         }
     }
 
