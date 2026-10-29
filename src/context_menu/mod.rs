@@ -278,6 +278,12 @@ impl ContextMenuProvider for CoreMenuProvider {
             !disabled && target.supports_local_ops,
         );
         model.item(
+            "新建文件",
+            IconName::FileText,
+            ContextMenuCommand::NewFile,
+            !disabled && target.supports_local_ops,
+        );
+        model.item(
             "重命名",
             IconName::Pencil,
             ContextMenuCommand::Rename,
@@ -638,6 +644,8 @@ mod tests {
 
         assert!(labels.contains(&"Git"));
         assert!(labels.contains(&"SVN"));
+        assert!(labels.contains(&"新建文件夹"));
+        assert!(labels.contains(&"新建文件"));
         assert!(labels.contains(&"复制完整路径"));
         assert!(labels.contains(&"属性"));
         assert!(model.entries.iter().any(|entry| matches!(
@@ -719,9 +727,20 @@ mod tests {
             }
             _ => true,
         });
+        let new_file_disabled = model.entries.iter().any(|entry| {
+            matches!(
+                entry,
+                ContextMenuNode::Item {
+                    command: ContextMenuCommand::NewFile,
+                    enabled: false,
+                    ..
+                }
+            )
+        });
 
         assert!(native_shell_enabled);
         assert!(vcs_disabled);
+        assert!(new_file_disabled);
     }
 
     #[test]
@@ -801,6 +820,8 @@ mod tests {
         for command in [
             ContextMenuCommand::Copy,
             ContextMenuCommand::Paste,
+            ContextMenuCommand::NewFolder,
+            ContextMenuCommand::NewFile,
             ContextMenuCommand::Rename,
             ContextMenuCommand::Recycle,
         ] {
@@ -828,9 +849,12 @@ mod tests {
                 supports_local_ops: true,
             },
         );
-        let action = target.action(ContextMenuCommand::NewFolder);
+        let folder_action = target.action(ContextMenuCommand::NewFolder);
+        let file_action = target.action(ContextMenuCommand::NewFile);
 
-        assert_eq!(action.target, PathBuf::from(r"C:\repo\src\ui"));
-        assert_eq!(action.working_directory, action.target);
+        assert_eq!(folder_action.target, PathBuf::from(r"C:\repo\src\ui"));
+        assert_eq!(folder_action.working_directory, folder_action.target);
+        assert_eq!(file_action.target, PathBuf::from(r"C:\repo\src\ui"));
+        assert_eq!(file_action.working_directory, file_action.target);
     }
 }

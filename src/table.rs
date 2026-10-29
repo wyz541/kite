@@ -282,7 +282,7 @@ impl TableDelegate for FileTableDelegate {
             (
                 IconName::Folder,
                 "此文件夹为空".to_string(),
-                "按 Ctrl+Shift+N 可新建文件夹。",
+                "右键可新建文件或文件夹。",
             )
         };
 

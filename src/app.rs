@@ -14,8 +14,9 @@ use crate::context_menu::{
 };
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::fs::{
-    DirectorySnapshot, FileEntry, SortSpec, create_folder, format_size, load_directory, open_file,
-    recycle_entry, rename_entry, search_directory, transfer_entry, validate_name, worse_status,
+    DirectorySnapshot, FileEntry, SortSpec, create_file, create_folder, format_size,
+    load_directory, open_file, recycle_entry, rename_entry, search_directory, transfer_entry,
+    validate_name, worse_status,
 };
 use crate::platform::{default_root_path, root_directory};
 use crate::preview_window::PreviewWindow;
@@ -72,6 +73,7 @@ struct SearchState {
 #[derive(Clone)]
 enum ModalKind {
     NewFolder(PathBuf),
+    NewFile(PathBuf),
     Rename(PathBuf),
 
     GitCommit(PathBuf),
@@ -1349,6 +1351,9 @@ impl KiteApp {
             ContextMenuCommand::NewFolder => {
                 self.begin_new_folder_in(action.working_directory.clone(), window, cx)
             }
+            ContextMenuCommand::NewFile => {
+                self.begin_new_file_in(action.working_directory.clone(), window, cx)
+            }
             ContextMenuCommand::Rename => self.begin_rename_path(action.target.clone(), window, cx),
             ContextMenuCommand::Recycle => {
                 self.confirm_recycle_path(action.target.clone(), window, cx)
@@ -2220,6 +2225,44 @@ impl KiteApp {
         cx.notify();
     }
 
+    fn begin_new_file_in(
+        &mut self,
+        directory: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.loading {
+            return;
+        }
+        if shell_fs::is_shell_namespace_path(&directory) {
+            self.error = None;
+            self.notice = Some("移动设备内新建文件暂不支持".into());
+            cx.notify();
+            return;
+        }
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("文件名，例如 notes.txt")
+                .clean_on_escape()
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this: &mut Self, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.submit_modal(window, cx);
+                }
+            },
+        );
+        self.modal = Some(ModalState {
+            kind: ModalKind::NewFile(directory),
+            input: input.clone(),
+            _subscription: subscription,
+        });
+        input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
     fn begin_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.selected_entry(cx) {
             self.begin_rename_path(entry.path, window, cx);
@@ -2286,7 +2329,9 @@ impl KiteApp {
         let value = modal.input.read(cx).value().trim().to_string();
         let kind = modal.kind.clone();
         let validation = match &kind {
-            ModalKind::NewFolder(_) | ModalKind::Rename(_) => validate_name(&value),
+            ModalKind::NewFolder(_) | ModalKind::NewFile(_) | ModalKind::Rename(_) => {
+                validate_name(&value)
+            }
             ModalKind::GitCommit(_) | ModalKind::SvnCommit(_) if value.is_empty() => {
                 Err("请输入提交说明".to_string())
             }
@@ -2311,6 +2356,28 @@ impl KiteApp {
                         Ok(_) => {
                             this.close_modal(window, cx);
                             this.notice = Some("文件夹已创建".into());
+                            this.refresh(window, cx);
+                        }
+                        Err(error) => {
+                            this.notice = None;
+                            this.error = Some(error.into());
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            }
+            ModalKind::NewFile(parent) => {
+                let name = value;
+                self.notice = Some("正在新建文件…".into());
+                cx.spawn_in(window, async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move { create_file(&parent, &name) })
+                        .await;
+                    let _ = this.update_in(cx, |this, window, cx| match result {
+                        Ok(_) => {
+                            this.close_modal(window, cx);
+                            this.notice = Some("文件已创建".into());
                             this.refresh(window, cx);
                         }
                         Err(error) => {
@@ -3385,6 +3452,7 @@ impl KiteApp {
         };
         let (title, description, action_label) = match &modal.kind {
             ModalKind::NewFolder(_) => ("新建文件夹", "输入文件夹名称。按 Enter 创建。", "创建"),
+            ModalKind::NewFile(_) => ("新建文件", "输入文件名。按 Enter 创建空文件。", "创建"),
             ModalKind::Rename(path) => (
                 "重命名",
                 "输入新名称。文件内容不会改变。",

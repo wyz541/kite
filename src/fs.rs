@@ -422,6 +422,23 @@ pub fn create_folder(parent: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+pub fn create_file(parent: &Path, name: &str) -> Result<PathBuf, String> {
+    validate_name(name)?;
+    let target = parent.join(name.trim());
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                "同名项目已经存在".to_string()
+            } else {
+                format!("新建文件失败：{error}")
+            }
+        })?;
+    Ok(target)
+}
+
 pub fn rename_entry(path: &Path, name: &str) -> Result<PathBuf, String> {
     validate_name(name)?;
     let Some(parent) = path.parent() else {
@@ -616,6 +633,29 @@ mod tests {
             assert!(validate_name("bad:name").is_err());
             assert!(validate_name("bad.").is_err());
         }
+    }
+
+    #[test]
+    fn creates_an_empty_file_and_rejects_duplicate_names() {
+        let root = std::env::temp_dir().join(format!(
+            "kite-create-file-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("create test folder");
+
+        let created = create_file(&root, "notes.txt").expect("create file");
+        assert!(created.is_file());
+        assert_eq!(fs::metadata(&created).expect("file metadata").len(), 0);
+        assert_eq!(
+            create_file(&root, "notes.txt").unwrap_err(),
+            "同名项目已经存在"
+        );
+
+        fs::remove_dir_all(root).expect("clean test folder");
     }
 
     #[test]

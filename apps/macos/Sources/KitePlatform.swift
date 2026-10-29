@@ -64,6 +64,12 @@ enum KitePlatform {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
     }
 
+    static func createFile(in directory: String, name: String) throws {
+        try validateName(name)
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(name, isDirectory: false)
+        try Data().write(to: url, options: .withoutOverwriting)
+    }
+
     static func rename(_ path: String, to name: String) throws {
         try validateName(name)
         let source = URL(fileURLWithPath: path)
