@@ -18,6 +18,7 @@ use crate::fs::{
     recycle_entry, rename_entry, search_directory, transfer_entry, validate_name, worse_status,
 };
 use crate::platform::{default_root_path, root_directory};
+use crate::preview_window::PreviewWindow;
 use crate::shell_fs;
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
 use crate::vcs::{
@@ -1236,6 +1237,36 @@ impl KiteApp {
             return;
         }
         self.open_path(entry.path, window, cx);
+    }
+
+    fn open_preview_window(
+        &mut self,
+        entry: FileEntry,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = format!("Kite 预览 — {}", entry.name);
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some(title.into()),
+                ..Default::default()
+            }),
+            window_bounds: Some(WindowBounds::centered(size(px(980.), px(760.)), cx)),
+            window_min_size: Some(size(px(640.), px(480.))),
+            ..Default::default()
+        };
+        match gpui_kit::open_window(options, cx, move |_, cx| {
+            cx.new(|cx| PreviewWindow::new(entry, cx))
+        }) {
+            Ok(_) => {
+                self.error = None;
+            }
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(format!("无法打开预览窗口：{error}").into());
+            }
+        }
+        cx.notify();
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -2716,6 +2747,7 @@ impl KiteApp {
         let preview_more_items = preview_more_menu_items();
         let preview_more_target = entry.path.clone();
         let preview_more_working_directory = self.current_dir.clone();
+        let preview_window_entry = entry.clone();
         let preview_more_supports_local_ops = !shell_fs::is_shell_namespace_path(&entry.path);
         let preview = self
             .column_preview
@@ -2976,6 +3008,17 @@ impl KiteApp {
                             .child("预览"),
                     )
                     .child(div().flex_1())
+                    .child(
+                        Button::new(format!("preview-enlarge-{}", entry.path.display()))
+                            .ghost()
+                            .compact()
+                            .icon(IconName::Maximize2)
+                            .tooltip("在窗口中预览")
+                            .accessibility_label("在窗口中预览")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.open_preview_window(preview_window_entry.clone(), window, cx);
+                            })),
+                    )
                     .child(
                         Clipboard::new(format!("copy-preview-info-{}", entry.path.display()))
                             .value(copy_text)
@@ -3755,25 +3798,25 @@ fn preview_text_lines(text: &str) -> Vec<SharedString> {
         .collect()
 }
 
-fn is_image_preview_entry(entry: &FileEntry) -> bool {
+pub(crate) fn is_image_preview_entry(entry: &FileEntry) -> bool {
     matches!(
         entry.extension.as_str(),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg"
     )
 }
 
-fn is_log_preview_entry(entry: &FileEntry) -> bool {
+pub(crate) fn is_log_preview_entry(entry: &FileEntry) -> bool {
     entry.extension.eq_ignore_ascii_case("log")
 }
 
-fn is_markdown_preview_entry(entry: &FileEntry) -> bool {
+pub(crate) fn is_markdown_preview_entry(entry: &FileEntry) -> bool {
     matches!(
         entry.extension.to_ascii_lowercase().as_str(),
         "txt" | "md" | "markdown"
     )
 }
 
-fn is_text_preview_entry(entry: &FileEntry) -> bool {
+pub(crate) fn is_text_preview_entry(entry: &FileEntry) -> bool {
     if entry.size > 512 * 1024 && !is_log_preview_entry(entry) {
         return false;
     }
@@ -3812,7 +3855,7 @@ fn is_text_preview_entry(entry: &FileEntry) -> bool {
         )
 }
 
-fn read_text_preview(path: &Path) -> Result<String, String> {
+pub(crate) fn read_text_preview(path: &Path) -> Result<String, String> {
     let file = std::fs::File::open(path).map_err(|error| format!("无法读取预览：{error}"))?;
     let mut reader = std::io::BufReader::new(file).take(64 * 1024);
     let mut bytes = Vec::new();
@@ -3834,7 +3877,7 @@ fn read_text_preview(path: &Path) -> Result<String, String> {
     }
 }
 
-fn read_log_preview(path: &Path) -> Result<String, String> {
+pub(crate) fn read_log_preview(path: &Path) -> Result<String, String> {
     const READ_LIMIT: u64 = 64 * 1024;
     const CHAR_LIMIT: usize = 6_000;
 
