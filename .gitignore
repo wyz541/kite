@@ -6,4 +6,5 @@
 cargo-check.log
 *.png
 !assets/kite-icon-master.png
+!assets/kite-icon-preview.png
 /docs/screenshots/

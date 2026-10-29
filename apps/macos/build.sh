@@ -36,6 +36,7 @@ xcrun swiftc \
     -o "$CONTENTS/MacOS/Kite"
 
 cp "$ROOT/apps/macos/Info.plist" "$CONTENTS/Info.plist"
+cp "$ROOT/assets/kite.icns" "$CONTENTS/Resources/AppIcon.icns"
 cp "$ROOT/target/release/libkite_core.dylib" "$CONTENTS/Frameworks/"
 install_name_tool -id @rpath/libkite_core.dylib "$CONTENTS/Frameworks/libkite_core.dylib"
 codesign --force --deep --sign - "$APP_DIR"

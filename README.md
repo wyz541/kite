@@ -355,18 +355,31 @@ Kite 使用 Windows Shell 命名空间枚举设备目录。
 
 ## 图标设计
 
-图标使用浅蓝天空色玻璃底板。
-风筝使用半透明翼面、柔和高光、蓝色阴影和珠光风筝线。
+图标使用透明画布。
+风筝使用不对称玻璃三角翼。
+左侧翼面使用氧化橙玻璃。
+右侧翼面使用藏青玻璃。
+两条尾流分别使用橙色和藏青色。
+六角钢制尾轴使用藏青色。
 图标没有黑色背景。
+图标不是 Rust 官方标志。
 
-图标母版为 `assets/kite-icon-master.png`。
-ICO 包含 16、24、32、48、64、128 和 256 像素尺寸。
+图标源文件为 `assets/icon/kite-icon.svg`。
+预览板为 `assets/kite-icon-preview.png`。
+Windows ICO 包含 16、24、32、48、64、128 和 256 像素尺寸。
+macOS ICNS 包含 16 至 1024 像素尺寸。
+设计说明见 `docs/design/icon-system.md`。
 
 重新生成图标：
 
+1. 安装 Pillow。
+2. 安装 Chrome、Edge 或 Chromium。
+3. 运行图标构建脚本。
+4. 运行 Windows 构建脚本。
+
 ```powershell
 py -m pip install pillow
-py .\assets\generate_icon.py
+py .\assets\icon\build_icons.py
 .\build.ps1
 ```
 
@@ -454,7 +467,11 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 - `src/main.rs`：Windows GPUI 前端入口。
 - `apps/macos/Sources`：SwiftUI 和 AppKit macOS 前端。
 - `build.rs`：Windows 图标和版本资源。
+- `assets/icon/kite-icon.svg`：矢量图标源文件。
+- `assets/icon/build_icons.py`：图标生成脚本。
 - `assets/kite.ico`：Windows 应用图标。
+- `assets/kite.icns`：macOS 应用图标。
+- `assets/kite-icon-preview.png`：图标预览板。
 
 ## 技术栈
 
