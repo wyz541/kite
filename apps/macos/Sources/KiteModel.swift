@@ -228,6 +228,23 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    func createFile(in directory: String) {
+        guard let name = KitePlatform.promptForName(
+            title: "新建文件",
+            message: "在“\(columnTitle(for: directory))”中创建空文件。",
+            defaultValue: ""
+        ) else {
+            return
+        }
+        do {
+            try KitePlatform.createFile(in: directory, name: name)
+            refresh()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func rename(_ path: String) {
         let source = URL(fileURLWithPath: path).standardizedFileURL
         guard KitePlatform.canModify(path) else {

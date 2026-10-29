@@ -221,6 +221,9 @@ struct ContentView: View {
         Button("拷贝路径") { KitePlatform.copyPath(column.path) }
         Divider()
         Button("新建文件夹…") { model.createFolder(in: column.path) }
+            .disabled(!KitePlatform.canModify(column.path))
+        Button("新建文件…") { model.createFile(in: column.path) }
+            .disabled(!KitePlatform.canModify(column.path))
         Button("重命名…") { model.rename(column.path) }
             .disabled(!KitePlatform.canModify(column.path))
         Divider()
@@ -358,6 +361,13 @@ struct ContentView: View {
             Button("在 Finder 中显示") { KitePlatform.revealInFinder(entry.path) }
             Button("快速查看") { KitePlatform.quickLook(entry.path) }
             Button("拷贝路径") { KitePlatform.copyPath(entry.path) }
+            Divider()
+            Button("新建文件夹…") {
+                model.createFolder(in: URL(fileURLWithPath: entry.path).deletingLastPathComponent().path)
+            }
+            Button("新建文件…") {
+                model.createFile(in: URL(fileURLWithPath: entry.path).deletingLastPathComponent().path)
+            }
             Divider()
             Button("分享…") { KitePlatform.share(entry.path) }
             Divider()

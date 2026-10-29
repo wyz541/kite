@@ -41,6 +41,7 @@ pub enum ContextMenuCommand {
     Cut,
     Paste,
     NewFolder,
+    NewFile,
     Rename,
     Recycle,
     ShowProperties,
