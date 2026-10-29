@@ -30,8 +30,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
-use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
+use gpui_kit::component::text::{TextView, TextViewState};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, Size, StyledExt as _, Theme, ThemeMode,
     h_flex, v_flex,
@@ -133,9 +134,16 @@ struct ColumnPreviewState {
     // Fixed-height rows make the scroll extent deterministic for large files.
     lines: Arc<Vec<SharedString>>,
     selection: Option<TextSelectionHandle>,
+    markdown_view: Option<Entity<TextViewState>>,
     error: Option<SharedString>,
     loading: bool,
     scroll: UniformListScrollHandle,
+    markdown_scroll: ScrollHandle,
+}
+
+enum PreviewScrollbar {
+    Lines(UniformListScrollHandle),
+    Markdown(ScrollHandle),
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DirectoryScrollRoute {
@@ -1951,14 +1959,23 @@ impl KiteApp {
         let path = entry.path.clone();
         let load_text = !is_image_preview_entry(&entry) && is_text_preview_entry(&entry);
         let log_preview = is_log_preview_entry(&entry);
+        let markdown_view = (load_text && is_markdown_preview_entry(&entry)).then(|| {
+            cx.new(|cx| {
+                TextViewState::markdown("正在加载预览…", cx)
+                    .selectable(true)
+                    .scrollable(false)
+            })
+        });
         self._preview_task = Task::ready(());
         self.column_preview = Some(ColumnPreviewState {
             path: path.clone(),
             lines: Arc::new(Vec::new()),
             selection: None,
+            markdown_view,
             error: None,
             loading: load_text,
             scroll: UniformListScrollHandle::new(),
+            markdown_scroll: ScrollHandle::new(),
         });
         if !load_text {
             return;
@@ -1978,12 +1995,20 @@ impl KiteApp {
                 if this.preview_generation != generation {
                     return;
                 }
+                let markdown_view = this
+                    .column_preview
+                    .as_ref()
+                    .and_then(|preview| preview.markdown_view.clone());
                 if let Some(preview) = this.column_preview.as_mut() {
                     preview.loading = false;
                     match result {
                         Ok(text) => {
-                            preview.lines = Arc::new(preview_text_lines(&text));
-                            preview.selection = Some(TextSelectionHandle::new(text, cx));
+                            if let Some(markdown_view) = markdown_view {
+                                markdown_view.update(cx, |view, cx| view.set_text(&text, cx));
+                            } else {
+                                preview.lines = Arc::new(preview_text_lines(&text));
+                                preview.selection = Some(TextSelectionHandle::new(text, cx));
+                            }
                         }
                         Err(error) => preview.error = Some(error.into()),
                     }
@@ -2730,7 +2755,7 @@ impl KiteApp {
                 .into_any_element()
         } else if is_text_preview_entry(entry) {
             let foreground = cx.theme().foreground;
-            let mut scrollbar = None;
+            let mut scrollbar: Option<PreviewScrollbar> = None;
             let mut content = v_flex().size_full().p_2();
             content = if let Some(preview) = preview.as_ref() {
                 if preview.loading {
@@ -2742,12 +2767,55 @@ impl KiteApp {
                             error,
                         ),
                     ))
+                } else if let Some(markdown_view) = preview.markdown_view.clone() {
+                    let scroll = preview.markdown_scroll.clone();
+                    let scroll_for_wheel = scroll.clone();
+                    scrollbar = Some(PreviewScrollbar::Markdown(scroll.clone()));
+                    content
+                        .text_color(foreground)
+                        .on_scroll_wheel(cx.listener(
+                            move |_this, event: &ScrollWheelEvent, window, cx| {
+                                let delta = event.delta.pixel_delta(window.line_height());
+                                let delta_x = delta.x.as_f32();
+                                let delta_y = delta.y.as_f32();
+                                if delta_y == 0.0 {
+                                    return;
+                                }
+                                if wheel_scrolls_columns(delta_x, delta_y) {
+                                    let current = scroll_for_wheel.offset();
+                                    let max_y = scroll_for_wheel.max_offset().y.as_f32().max(0.0);
+                                    let applied_y =
+                                        if delta.y.is_zero() { delta_x } else { delta_y };
+                                    let restored_y =
+                                        (current.y.as_f32() - applied_y).clamp(-max_y, 0.0);
+                                    scroll_for_wheel.set_offset(point(current.x, px(restored_y)));
+                                    cx.notify();
+                                    return;
+                                }
+                                cx.stop_propagation();
+                            },
+                        ))
+                        .child(
+                            div()
+                                .id("column-preview-markdown-scroll")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&scroll)
+                                .child(
+                                    TextView::new(&markdown_view)
+                                        .w_full()
+                                        .text_sm()
+                                        .text_color(foreground)
+                                        .selectable(true)
+                                        .scrollable(false),
+                                ),
+                        )
                 } else if let Some(selection) = preview.selection.clone() {
                     let lines = preview.lines.clone();
                     let line_count = lines.len();
                     let scroll = preview.scroll.clone();
                     let scroll_for_wheel = scroll.clone();
-                    scrollbar = Some(scroll.clone());
+                    scrollbar = Some(PreviewScrollbar::Lines(scroll.clone()));
                     let list_id = SharedString::from(format!(
                         "column-preview-lines-{}",
                         entry.path.display()
@@ -2842,25 +2910,11 @@ impl KiteApp {
                 .overflow_hidden()
                 .child(content);
             if let Some(scroll) = scrollbar {
-                panel = panel.child(
-                    div().absolute().inset_0().child(
-                        Scrollbar::vertical(&scroll)
-                            .id("column-preview-text-scrollbar")
-                            .mode(ScrollbarMode::Always)
-                            .styles(|styles| {
-                                let track = cx.theme().muted.opacity(0.55);
-                                let thumb = cx.theme().muted_foreground.opacity(0.75);
-                                let thumb_hover = cx.theme().muted_foreground.opacity(0.95);
-                                styles
-                                    .track(|style| style.bg(track).width(px(10.)))
-                                    .thumb(|style| {
-                                        style.bg(thumb).width(px(6.)).inset(px(2.)).radius(px(99.))
-                                    })
-                                    .thumb_hover(|style| style.bg(thumb_hover))
-                            })
-                            .viewport_from_layout(),
-                    ),
-                );
+                let scrollbar = match scroll {
+                    PreviewScrollbar::Lines(handle) => preview_scrollbar_element(&handle, cx),
+                    PreviewScrollbar::Markdown(handle) => preview_scrollbar_element(&handle, cx),
+                };
+                panel = panel.child(div().absolute().inset_0().child(scrollbar));
             }
             panel.into_any_element()
         } else {
@@ -3637,6 +3691,26 @@ fn preview_property(label: &str, value: String, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+fn preview_scrollbar_element<H>(handle: &H, cx: &App) -> AnyElement
+where
+    H: ScrollbarHandle + Clone + 'static,
+{
+    Scrollbar::vertical(handle)
+        .id("column-preview-text-scrollbar")
+        .mode(ScrollbarMode::Always)
+        .styles(|styles| {
+            let track = cx.theme().muted.opacity(0.55);
+            let thumb = cx.theme().muted_foreground.opacity(0.75);
+            let thumb_hover = cx.theme().muted_foreground.opacity(0.95);
+            styles
+                .track(|style| style.bg(track).width(px(10.)))
+                .thumb(|style| style.bg(thumb).width(px(6.)).inset(px(2.)).radius(px(99.)))
+                .thumb_hover(|style| style.bg(thumb_hover))
+        })
+        .viewport_from_layout()
+        .into_any_element()
+}
+
 fn preview_more_menu_items() -> [(&'static str, IconName, ContextMenuCommand); 5] {
     [
         ("打开文件", IconName::FolderOpen, ContextMenuCommand::Open),
@@ -3692,6 +3766,13 @@ fn is_log_preview_entry(entry: &FileEntry) -> bool {
     entry.extension.eq_ignore_ascii_case("log")
 }
 
+fn is_markdown_preview_entry(entry: &FileEntry) -> bool {
+    matches!(
+        entry.extension.to_ascii_lowercase().as_str(),
+        "txt" | "md" | "markdown"
+    )
+}
+
 fn is_text_preview_entry(entry: &FileEntry) -> bool {
     if entry.size > 512 * 1024 && !is_log_preview_entry(entry) {
         return false;
@@ -3702,6 +3783,7 @@ fn is_text_preview_entry(entry: &FileEntry) -> bool {
             entry.extension.as_str(),
             "txt"
                 | "md"
+                | "markdown"
                 | "log"
                 | "json"
                 | "toml"
@@ -4580,8 +4662,8 @@ mod path_bar_tests {
 #[cfg(test)]
 mod preview_tests {
     use super::{
-        is_text_preview_entry, preview_info_text, preview_more_menu_items, preview_text_lines,
-        read_log_preview, read_text_preview,
+        is_markdown_preview_entry, is_text_preview_entry, preview_info_text,
+        preview_more_menu_items, preview_text_lines, read_log_preview, read_text_preview,
     };
     use crate::actions::ContextMenuCommand;
     use crate::fs::{EntryKind, FileEntry, VcsStatus};
@@ -4606,6 +4688,30 @@ mod preview_tests {
                 ContextMenuCommand::SystemMenu,
             ]
         );
+    }
+
+    #[test]
+    fn txt_and_markdown_entries_use_markdown_preview() {
+        let make_entry = |extension: &str| FileEntry {
+            path: PathBuf::from(format!(
+                r"C:\demo
+otes.{extension}"
+            )),
+            name: format!("notes.{extension}"),
+            kind: EntryKind::File,
+            size: 128,
+            modified: None,
+            extension: extension.to_string(),
+            git_status: None,
+            svn_status: None,
+        };
+
+        assert!(is_markdown_preview_entry(&make_entry("txt")));
+        assert!(is_markdown_preview_entry(&make_entry("TXT")));
+        assert!(is_markdown_preview_entry(&make_entry("md")));
+        assert!(is_markdown_preview_entry(&make_entry("markdown")));
+        assert!(!is_markdown_preview_entry(&make_entry("log")));
+        assert!(is_text_preview_entry(&make_entry("markdown")));
     }
 
     #[test]

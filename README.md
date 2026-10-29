@@ -36,6 +36,7 @@ Kite 把界面当作一条可牵引的线。
 - 在分栏视图任意栏选中文件时显示预览和属性。
 - 预览属性文本支持选择，并可用 `Ctrl+C` 或 `Command+C` 复制。
 - 预览标题栏提供“复制预览信息”按钮。
+- TXT、MD 和 Markdown 文件预览支持 Markdown 格式。
 - 使用地址栏打开绝对路径或相对路径。
 - 输入文件路径时，Kite 打开文件所在文件夹，并调用系统默认程序打开文件。
 - 使用返回、前进和上一级按钮导航。
@@ -224,6 +225,8 @@ SVN 状态使用圆角方形徽标。
 在分栏视图任意栏选中文件后，Kite 收起右侧分栏并显示预览和属性栏。
 属性包含名称、类型、大小、修改日期、位置和 Git/SVN 状态。
 Windows 支持图片预览和文本摘要。
+Windows 对 TXT、MD 和 Markdown 文件显示 Markdown 渲染结果。
+Markdown 预览支持标题、列表、链接、引用、代码块和文本选择。
 Windows 对日志显示末尾预览，不受常规文本文件大小上限影响。
 日志预览读取末尾 64 KiB，并显示最后 6,000 个字符。
 Windows 对没有内置预览的文件显示类型图标。
@@ -407,7 +410,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.18-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.19-windows-x64.zip`。
 
 ### macOS 构建
 
