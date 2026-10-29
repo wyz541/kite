@@ -4230,12 +4230,25 @@ impl Render for KiteApp {
         let main_view = if column_mode {
             self.render_columns(window, cx)
         } else {
-            DataTable::new(&self.table)
-                .with_size(Size::Small)
-                .bordered(false)
-                .stripe(false)
-                .scroll_bounce(false)
-                .scrollbar_visible(false, true)
+            let menu_target = self
+                .table
+                .read(cx)
+                .delegate()
+                .directory_context_menu_target();
+            let action_context = self.focus_handle.clone();
+            div()
+                .size_full()
+                .context_menu(move |menu, window, cx| {
+                    render_context_menu(menu, &menu_target, action_context.clone(), window, cx)
+                })
+                .child(
+                    DataTable::new(&self.table)
+                        .with_size(Size::Small)
+                        .bordered(false)
+                        .stripe(false)
+                        .scroll_bounce(false)
+                        .scrollbar_visible(false, true),
+                )
                 .into_any_element()
         };
         let path_bar = if show_path_bar {
