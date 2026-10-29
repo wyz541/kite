@@ -284,6 +284,12 @@ impl ContextMenuProvider for CoreMenuProvider {
             !disabled && target.supports_local_ops,
         );
         model.item(
+            "添加到收藏",
+            IconName::StarPlus,
+            ContextMenuCommand::AddFavorite,
+            !disabled && target.supports_local_ops,
+        );
+        model.item(
             "重命名",
             IconName::Pencil,
             ContextMenuCommand::Rename,
@@ -646,6 +652,7 @@ mod tests {
         assert!(labels.contains(&"SVN"));
         assert!(labels.contains(&"新建文件夹"));
         assert!(labels.contains(&"新建文件"));
+        assert!(labels.contains(&"添加到收藏"));
         assert!(labels.contains(&"复制完整路径"));
         assert!(labels.contains(&"属性"));
         assert!(model.entries.iter().any(|entry| matches!(
@@ -822,6 +829,7 @@ mod tests {
             ContextMenuCommand::Paste,
             ContextMenuCommand::NewFolder,
             ContextMenuCommand::NewFile,
+            ContextMenuCommand::AddFavorite,
             ContextMenuCommand::Rename,
             ContextMenuCommand::Recycle,
         ] {
@@ -851,10 +859,13 @@ mod tests {
         );
         let folder_action = target.action(ContextMenuCommand::NewFolder);
         let file_action = target.action(ContextMenuCommand::NewFile);
+        let favorite_action = target.action(ContextMenuCommand::AddFavorite);
 
         assert_eq!(folder_action.target, PathBuf::from(r"C:\repo\src\ui"));
         assert_eq!(folder_action.working_directory, folder_action.target);
         assert_eq!(file_action.target, PathBuf::from(r"C:\repo\src\ui"));
         assert_eq!(file_action.working_directory, file_action.target);
+        assert_eq!(favorite_action.target, PathBuf::from(r"C:\repo\src\ui"));
+        assert_eq!(favorite_action.working_directory, favorite_action.target);
     }
 }

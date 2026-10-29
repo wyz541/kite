@@ -13,6 +13,7 @@ use crate::context_menu::{
     show_properties,
 };
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
+use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::fs::{
     DirectorySnapshot, FileEntry, SortSpec, create_file, create_folder, format_size,
     load_directory, open_file, recycle_entry, rename_entry, search_directory, transfer_entry,
@@ -31,7 +32,8 @@ use gpui_kit::base::{SelectableText, TextSelectionHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::text::{TextView, TextViewState};
@@ -185,6 +187,7 @@ pub struct KiteApp {
     history: Vec<PathBuf>,
     history_index: usize,
     quick_links: Vec<QuickLink>,
+    favorites: Vec<FavoriteEntryDto>,
     connected_devices: Vec<QuickLink>,
     drives: Vec<QuickLink>,
     portable_devices: Vec<PortableDevice>,
@@ -321,6 +324,7 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) -> Self {
         let quick_links = build_quick_links();
+        let favorites = favorites_store::load_favorites();
         let snapshot = crate::devices::snapshot();
         let (connected_devices, drives) = volume_quick_links(&snapshot.volumes);
         let portable_devices = snapshot.portable_devices;
@@ -373,6 +377,7 @@ impl KiteApp {
             history: Vec::new(),
             history_index: 0,
             quick_links,
+            favorites,
             connected_devices,
             drives,
             portable_devices,
@@ -1354,6 +1359,8 @@ impl KiteApp {
             ContextMenuCommand::NewFile => {
                 self.begin_new_file_in(action.working_directory.clone(), window, cx)
             }
+            ContextMenuCommand::AddFavorite => self.add_favorite(action.target.clone(), cx),
+            ContextMenuCommand::RemoveFavorite => self.remove_favorite(action.target.clone(), cx),
             ContextMenuCommand::Rename => self.begin_rename_path(action.target.clone(), window, cx),
             ContextMenuCommand::Recycle => {
                 self.confirm_recycle_path(action.target.clone(), window, cx)
@@ -2183,6 +2190,46 @@ impl KiteApp {
         .detach();
     }
 
+    fn add_favorite(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let name = favorite_name(&path);
+        let is_directory = path.is_dir();
+        match favorites_store::add_favorite(&path, &name, is_directory) {
+            Ok(true) => {
+                self.favorites = favorites_store::load_favorites();
+                self.error = None;
+                self.notice = Some("已添加到收藏".into());
+            }
+            Ok(false) => {
+                self.error = None;
+                self.notice = Some("已在收藏中".into());
+            }
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+            }
+        }
+        cx.notify();
+    }
+
+    fn remove_favorite(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        match favorites_store::remove_favorite(&path) {
+            Ok(true) => {
+                self.favorites = favorites_store::load_favorites();
+                self.error = None;
+                self.notice = Some("已从收藏移除".into());
+            }
+            Ok(false) => {
+                self.error = None;
+                self.notice = Some("项目不在收藏中".into());
+            }
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+            }
+        }
+        cx.notify();
+    }
+
     fn begin_new_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.begin_new_folder_in(self.current_dir.clone(), window, cx);
     }
@@ -2549,6 +2596,71 @@ impl KiteApp {
             .into_any_element()
     }
 
+    fn favorite_item(
+        &self,
+        favorite: FavoriteEntryDto,
+        active: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let path = PathBuf::from(&favorite.path);
+        let navigation_path = path.clone();
+        let remove_path = path.clone();
+        let action_context = self.focus_handle.clone();
+        let muted = cx.theme().muted_foreground;
+        let fg = cx.theme().sidebar_foreground;
+        let active_fg = cx.theme().accent_foreground;
+        let accent = cx.theme().accent;
+        let hover = muted.opacity(0.12);
+        let is_directory = favorite.is_directory;
+        let icon = if is_directory {
+            IconName::Folder
+        } else {
+            IconName::File
+        };
+        let remove_action = ContextMenuAction {
+            target: remove_path,
+            working_directory: path.clone(),
+            command: ContextMenuCommand::RemoveFavorite,
+        };
+
+        div()
+            .id(SharedString::from(format!("favorite-{}", favorite.path)))
+            .h(px(32.))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .rounded_md()
+            .cursor_pointer()
+            .text_sm()
+            .text_color(if active { active_fg } else { fg })
+            .when(active, |this| this.bg(accent))
+            .when(!active, |this| this.hover(move |style| style.bg(hover)))
+            .child(
+                Icon::new(icon)
+                    .size_4()
+                    .text_color(if active { active_fg } else { muted }),
+            )
+            .child(div().flex_1().min_w_0().truncate().child(favorite.name))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if is_directory {
+                    this.navigate_to(navigation_path.clone(), NavigationIntent::Push, window, cx);
+                } else {
+                    this.open_path(navigation_path.clone(), window, cx);
+                }
+            }))
+            .context_menu(move |menu, window, cx| {
+                action_context.focus(window, cx);
+                menu.item(
+                    PopupMenuItem::new("从收藏移除")
+                        .icon(IconName::StarMinus)
+                        .action(Box::new(remove_action.clone())),
+                )
+            })
+            .into_any_element()
+    }
+
     fn portable_device_item(&self, device: PortableDevice, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let hover_color = muted.opacity(0.12);
@@ -2615,6 +2727,32 @@ impl KiteApp {
             div()
                 .px_2()
                 .pt_1()
+                .pb_1()
+                .text_xs()
+                .font_medium()
+                .text_color(section_color)
+                .child("收藏"),
+        );
+        if self.favorites.is_empty() {
+            content = content.child(
+                div()
+                    .px_2()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(section_color)
+                    .child("右键文件或文件夹添加"),
+            );
+        } else {
+            for favorite in self.favorites.clone() {
+                let active = favorite.is_directory
+                    && same_path(Path::new(&favorite.path), &self.current_dir);
+                content = content.child(self.favorite_item(favorite, active, cx));
+            }
+        }
+        content = content.child(
+            div()
+                .px_2()
+                .pt_4()
                 .pb_1()
                 .text_xs()
                 .font_medium()
@@ -2689,7 +2827,13 @@ impl KiteApp {
             .bg(cx.theme().sidebar)
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
-            .child(div().flex_1().min_h_0().child(content))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(content),
+            )
             .into_any_element()
     }
     fn render_path_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -3548,6 +3692,12 @@ impl KiteApp {
             )
             .into_any_element()
     }
+}
+
+fn favorite_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn build_quick_links() -> Vec<QuickLink> {
