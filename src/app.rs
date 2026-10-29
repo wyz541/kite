@@ -3416,12 +3416,8 @@ impl KiteApp {
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     this.activate_column_entry(column, row_ix, event, window, cx)
                 }))
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                        this.select_column_entry(column, row_ix, cx)
-                    }),
-                )
+                // Right-click must not select the row. Selection loads the next
+                // column for folders and starts preview loading for files.
                 .context_menu(move |menu, window, cx| {
                     let target = ContextMenuTarget::entry(
                         menu_entry.path.clone(),
