@@ -8,6 +8,8 @@
     <string>Kite</string>
     <key>CFBundleIdentifier</key>
     <string>com.wyz541.kite</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
