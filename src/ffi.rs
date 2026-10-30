@@ -7,6 +7,7 @@ use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory};
 use crate::platform::{HostPlatform, default_root_path, host_platform};
 use crate::session::{self as session_store, SessionStateDto};
+use crate::text_editor::{self, TextDocument, TextLineEnding};
 use crate::updater::{self, UpdateInfo};
 use crate::vcs::{apply_statuses, load_vcs_snapshot};
 
@@ -66,6 +67,17 @@ pub struct UpdateInfoDto {
     pub asset_url: String,
     pub asset_sha256: String,
     pub asset_size: u64,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TextDocumentDto {
+    pub path: String,
+    pub text: String,
+    pub language: String,
+    pub line_ending: String,
+    pub has_bom: bool,
+    pub content_sha256: String,
+    pub byte_len: u64,
 }
 
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
@@ -174,6 +186,45 @@ impl KiteCore {
 
     pub fn save_session(&self, state: SessionStateDto) -> Result<(), KiteError> {
         session_store::save_session(&state).map_err(KiteError::operation)
+    }
+
+    pub fn open_text_document(&self, path: String) -> Result<TextDocumentDto, KiteError> {
+        text_editor::TextDocument::open(&PathBuf::from(path))
+            .map(text_document_dto)
+            .map_err(KiteError::operation)
+    }
+
+    pub fn save_text_document(
+        &self,
+        path: String,
+        text: String,
+        line_ending: String,
+        has_bom: bool,
+        expected_sha256: String,
+    ) -> Result<TextDocumentDto, KiteError> {
+        let line_ending = TextLineEnding::parse(&line_ending)
+            .ok_or_else(|| KiteError::operation("不支持的换行格式"))?;
+        text_editor::save_text_document(
+            &PathBuf::from(path),
+            &text,
+            line_ending,
+            has_bom,
+            &expected_sha256,
+        )
+        .map(text_document_dto)
+        .map_err(KiteError::operation)
+    }
+}
+
+fn text_document_dto(document: TextDocument) -> TextDocumentDto {
+    TextDocumentDto {
+        path: document.path.to_string_lossy().into_owned(),
+        text: document.text,
+        language: document.language,
+        line_ending: document.line_ending.as_str().to_string(),
+        has_bom: document.has_bom,
+        content_sha256: document.content_sha256,
+        byte_len: document.byte_len,
     }
 }
 

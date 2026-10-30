@@ -24,6 +24,7 @@ use crate::platform::{default_root_path, root_directory};
 use crate::preview_window::PreviewWindow;
 use crate::shell_fs;
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
+use crate::text_editor;
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
     run_vcs_operation, run_vcs_query,
@@ -525,6 +526,7 @@ impl KiteApp {
             KeyBinding::new("delete", RecycleSelection, Some("Kite")),
             KeyBinding::new("enter", OpenSelection, Some("Kite")),
             KeyBinding::new("escape", ClearSearchOverlay, Some("Kite")),
+            KeyBinding::new("secondary-s", SaveEditor, Some("KiteEditor")),
         ]);
     }
     pub fn install_menus(cx: &mut App) {
@@ -1277,7 +1279,13 @@ impl KiteApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let title = format!("Kite 预览 — {}", entry.name);
+        let editor_target = text_editor::is_text_path(&entry.path)
+            && entry.size <= text_editor::MAX_TEXT_FILE_BYTES;
+        let title = if editor_target {
+            format!("Kite 编辑器 — {}", entry.name)
+        } else {
+            format!("Kite 预览 — {}", entry.name)
+        };
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(title.into()),
@@ -1287,8 +1295,8 @@ impl KiteApp {
             window_min_size: Some(size(px(640.), px(480.))),
             ..Default::default()
         };
-        match gpui_kit::open_window(options, cx, move |_, cx| {
-            cx.new(|cx| PreviewWindow::new(entry, cx))
+        match gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| PreviewWindow::new(entry, window, cx))
         }) {
             Ok(_) => {
                 self.error = None;
@@ -3126,6 +3134,9 @@ impl KiteApp {
         let preview_more_working_directory = self.current_dir.clone();
         let preview_window_entry = entry.clone();
         let preview_more_supports_local_ops = !shell_fs::is_shell_namespace_path(&entry.path);
+        let editor_preview = preview_more_supports_local_ops
+            && text_editor::is_text_path(&entry.path)
+            && entry.size <= text_editor::MAX_TEXT_FILE_BYTES;
         let preview = self
             .column_preview
             .as_ref()
@@ -3389,9 +3400,21 @@ impl KiteApp {
                         Button::new(format!("preview-enlarge-{}", entry.path.display()))
                             .ghost()
                             .compact()
-                            .icon(IconName::Maximize2)
-                            .tooltip("在窗口中预览")
-                            .accessibility_label("在窗口中预览")
+                            .icon(if editor_preview {
+                                IconName::FilePen
+                            } else {
+                                IconName::Maximize2
+                            })
+                            .tooltip(if editor_preview {
+                                "在文本编辑器中打开"
+                            } else {
+                                "在窗口中预览"
+                            })
+                            .accessibility_label(if editor_preview {
+                                "在文本编辑器中打开"
+                            } else {
+                                "在窗口中预览"
+                            })
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.open_preview_window(preview_window_entry.clone(), window, cx);
                             })),

@@ -30,6 +30,7 @@ actions!(
         RestoreDefaultExplorer,
         CreateStartMenuShortcut,
         CheckForUpdates,
+        SaveEditor,
     ]
 );
 

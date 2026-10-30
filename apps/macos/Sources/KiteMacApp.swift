@@ -63,6 +63,23 @@ struct KiteMacApp: App {
         }
         .windowStyle(.titleBar)
         .commands {
+            CommandGroup(replacing: .saveItem) {
+                Button("保存") {
+                    TextEditorWindowController.saveKeyWindow()
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+            }
+            CommandMenu("编辑器") {
+                Button("查找…") {
+                    TextEditorWindowController.showFindInKeyWindow(replace: false)
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+
+                Button("查找并替换…") {
+                    TextEditorWindowController.showFindInKeyWindow(replace: true)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+            }
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") {
                     model.checkForUpdates()
