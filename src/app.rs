@@ -15,6 +15,7 @@ use crate::context_menu::{
 };
 use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::favorites::{self as favorites_store, FavoriteEntryDto};
+use crate::file_clipboard::{self, ClipboardMode, FileClipboard};
 use crate::fs::{
     DirectorySnapshot, FileEntry, SortSpec, create_file, create_folder, format_size,
     load_directory, open_file, recycle_entry, rename_entry, search_directory, transfer_entry,
@@ -108,18 +109,6 @@ struct ModalState {
     kind: ModalKind,
     input: Entity<InputState>,
     _subscription: Subscription,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ClipboardMode {
-    Copy,
-    Cut,
-}
-
-#[derive(Clone)]
-pub(crate) struct FileClipboard {
-    path: PathBuf,
-    mode: ClipboardMode,
 }
 
 pub(crate) type SharedClipboard = Rc<RefCell<Option<FileClipboard>>>;
@@ -1959,7 +1948,7 @@ impl KiteApp {
     }
 
     pub(crate) fn sync_clipboard_state(&mut self, cx: &mut Context<Self>) {
-        let can_paste = self.clipboard.borrow().is_some();
+        let can_paste = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         self.table.update(cx, |state, cx| {
             state.delegate_mut().set_can_paste(can_paste);
             cx.notify();
@@ -2144,9 +2133,12 @@ impl KiteApp {
             cx.notify();
             return;
         }
-        *self.clipboard.borrow_mut() = Some(FileClipboard { path, mode });
+        let paths = vec![path];
+        let system_error = file_clipboard::write_file_clipboard(&paths, mode).err();
+        *self.clipboard.borrow_mut() = Some(FileClipboard { paths, mode });
         self.sync_clipboard_state(cx);
-        self.error = None;
+        self.error = system_error
+            .map(|error| format!("系统文件剪贴板不可用，复制仅在 Kite 内有效：{error}").into());
         self.notice = Some(if mode == ClipboardMode::Cut {
             "已剪切 1 项".into()
         } else {
@@ -2250,12 +2242,19 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(clipboard) = self.clipboard.borrow().clone() else {
+        let Some(clipboard) =
+            file_clipboard::read_file_clipboard().or_else(|| self.clipboard.borrow().clone())
+        else {
             return;
         };
-        let source = clipboard.path;
+        let sources = clipboard.paths;
         let move_source = clipboard.mode == ClipboardMode::Cut;
-        if shell_fs::is_shell_namespace_path(&source)
+        if sources.is_empty() {
+            return;
+        }
+        if sources
+            .iter()
+            .any(|source| shell_fs::is_shell_namespace_path(source))
             || shell_fs::is_shell_namespace_path(&destination_dir)
         {
             self.error = None;
@@ -2263,6 +2262,7 @@ impl KiteApp {
             cx.notify();
             return;
         }
+        let cleared_sources = sources.clone();
         self.error = None;
         self.notice = Some(if move_source {
             "正在移动项目…".into()
@@ -2271,20 +2271,25 @@ impl KiteApp {
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
-                .background_spawn(
-                    async move { transfer_entry(&source, &destination_dir, move_source) },
-                )
+                .background_spawn(async move {
+                    let mut destinations = Vec::with_capacity(sources.len());
+                    for source in &sources {
+                        destinations.push(transfer_entry(source, &destination_dir, move_source)?);
+                    }
+                    Ok::<_, String>(destinations)
+                })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(_) => {
+                Ok(destinations) => {
                     if move_source {
                         *this.clipboard.borrow_mut() = None;
+                        file_clipboard::clear_if_matches(&cleared_sources);
                         this.sync_clipboard_state(cx);
                     }
                     this.notice = Some(if move_source {
-                        "项目已移动".into()
+                        format!("已移动 {} 项", destinations.len()).into()
                     } else {
-                        "项目已粘贴".into()
+                        format!("已粘贴 {} 项", destinations.len()).into()
                     });
                     this.refresh(window, cx);
                 }
@@ -3589,7 +3594,7 @@ impl KiteApp {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
-        let can_paste = self.clipboard.borrow().is_some();
+        let can_paste = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let column_menu_target = column_context_menu_target(pane, can_paste);
         let action_context = self.focus_handle.clone();
         let border = cx.theme().border;
@@ -3759,7 +3764,7 @@ impl KiteApp {
         let column_path = pane.path.clone();
         let selected_path = pane.selected_path.clone();
         let loading = pane.loading;
-        let can_paste = self.clipboard.borrow().is_some();
+        let can_paste = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let git_available = pane.git_available;
         let svn_available = pane.svn_available;
         let accent = cx.theme().accent;
@@ -4545,7 +4550,7 @@ impl Render for KiteApp {
             .as_ref()
             .is_some_and(|entry| !shell_fs::is_shell_namespace_path(&entry.path));
         let current_local = !shell_fs::is_shell_namespace_path(&self.current_dir);
-        let has_clipboard = self.clipboard.borrow().is_some();
+        let has_clipboard = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let column_mode = self.view_mode == ViewMode::Columns && self.active_search.is_none();
         let item_count = if column_mode {
             self.column_panes
@@ -5042,7 +5047,7 @@ mod clipboard_tests {
         let destination = source.clone();
 
         *source.borrow_mut() = Some(FileClipboard {
-            path: PathBuf::from(r"C:\example.txt"),
+            paths: vec![PathBuf::from(r"C:\example.txt")],
             mode: ClipboardMode::Copy,
         });
 
