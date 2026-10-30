@@ -70,7 +70,7 @@ struct QuickLink {
 #[derive(Clone)]
 enum SidebarChildrenState {
     Loading,
-    Loaded(Vec<PathBuf>),
+    Loaded(Vec<FileEntry>),
     Failed(SharedString),
 }
 
@@ -2583,11 +2583,7 @@ impl KiteApp {
         let depth = item.depth;
         let expanded = is_directory && self.sidebar_expanded.contains(&item.path);
         let children_state = self.sidebar_children.get(&item.path).cloned();
-        let has_chevron = is_directory
-            && !matches!(
-                children_state,
-                Some(SidebarChildrenState::Loaded(ref children)) if children.is_empty()
-            );
+        let has_chevron = is_directory;
         let action_context = self.focus_handle.clone();
         let remove_action = is_favorite.then(|| ContextMenuAction {
             target: item.path.clone(),
@@ -2654,6 +2650,9 @@ impl KiteApp {
             })
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 if is_directory {
+                    if !expanded {
+                        this.toggle_sidebar_directory(navigation_path.clone(), window, cx);
+                    }
                     this.navigate_to(navigation_path.clone(), NavigationIntent::Push, window, cx);
                 } else {
                     this.open_path(navigation_path.clone(), window, cx);
@@ -2696,27 +2695,40 @@ impl KiteApp {
                     );
                 }
                 Some(SidebarChildrenState::Loaded(children)) => {
-                    for child_path in children {
-                        let label = sidebar_path_label(&child_path);
-                        let child_id = SharedString::from(format!(
-                            "{}/{}",
-                            group_id,
-                            child_path.to_string_lossy()
-                        ));
-                        container = container.child(self.sidebar_tree_item(
-                            SidebarTreeItem {
-                                id: child_id,
-                                label,
-                                path: child_path.clone(),
-                                icon: IconName::Folder,
-                                detail: None,
-                                active: same_path(&child_path, &self.current_dir),
-                                depth: depth + 1,
-                                is_directory: true,
-                                favorite: false,
-                            },
-                            cx,
-                        ));
+                    if children.is_empty() {
+                        container = container.child(
+                            div()
+                                .h(px(24.))
+                                .pl(px(((depth + 1) as f32) * 14. + 22.))
+                                .text_xs()
+                                .text_color(muted)
+                                .child("没有项目"),
+                        );
+                    } else {
+                        for entry in children {
+                            let child_path = entry.path.clone();
+                            let is_directory = entry.is_dir();
+                            let child_id = SharedString::from(format!(
+                                "{}/{}",
+                                group_id,
+                                child_path.to_string_lossy()
+                            ));
+                            container = container.child(self.sidebar_tree_item(
+                                SidebarTreeItem {
+                                    id: child_id,
+                                    label: entry.name.clone().into(),
+                                    path: child_path.clone(),
+                                    icon: icon_for(&entry),
+                                    detail: None,
+                                    active: is_directory
+                                        && same_path(&child_path, &self.current_dir),
+                                    depth: depth + 1,
+                                    is_directory,
+                                    favorite: false,
+                                },
+                                cx,
+                            ));
+                        }
                     }
                 }
                 None => {}
@@ -3848,13 +3860,6 @@ impl KiteApp {
     }
 }
 
-fn sidebar_path_label(path: &Path) -> SharedString {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
-        .into()
-}
-
 fn favorite_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -3964,16 +3969,9 @@ fn update_notes_summary(notes: &str) -> String {
     }
 }
 
-fn load_sidebar_children(path: &Path) -> Result<Vec<PathBuf>, String> {
-    load_directory(path, SortSpec::default()).map(|snapshot| {
-        snapshot
-            .entries
-            .into_iter()
-            .filter(|entry| entry.is_dir())
-            .take(256)
-            .map(|entry| entry.path)
-            .collect()
-    })
+fn load_sidebar_children(path: &Path) -> Result<Vec<FileEntry>, String> {
+    load_directory(path, SortSpec::default())
+        .map(|snapshot| snapshot.entries.into_iter().take(256).collect())
 }
 
 fn load_directory_snapshot(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
@@ -5310,7 +5308,7 @@ mod sidebar_tree_tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn sidebar_children_include_directories_only() {
+    fn sidebar_children_include_folders_before_files() {
         let root = std::env::temp_dir().join(format!(
             "kite-sidebar-tree-{}-{}",
             std::process::id(),
@@ -5323,8 +5321,11 @@ mod sidebar_tree_tests {
         fs::write(root.join("file.txt"), b"file").expect("create child file");
 
         let children = load_sidebar_children(&root).expect("load sidebar children");
-        assert_eq!(children.len(), 1);
-        assert!(children[0].ends_with("folder"));
+        assert_eq!(children.len(), 2);
+        assert!(children[0].is_dir());
+        assert_eq!(children[0].name, "folder");
+        assert!(!children[1].is_dir());
+        assert_eq!(children[1].name, "file.txt");
 
         fs::remove_dir_all(root).expect("clean sidebar tree test");
     }
