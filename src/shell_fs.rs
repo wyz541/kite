@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::c_void;
+use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -11,7 +11,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::SystemServices::SFGAO_FOLDER;
 use windows::Win32::UI::Shell::{
     BHID_EnumItems, IEnumShellItems, IShellItem, SHCreateItemFromParsingName,
-    SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, ShellExecuteW,
+    SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{PCWSTR, PWSTR};
@@ -23,7 +23,7 @@ pub(crate) fn is_shell_namespace_path(path: &Path) -> bool {
 
 pub(crate) fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
     let _com = ComGuard::new()?;
-    let folder = create_item(path).map_err(|error| format!("无法读取移动设备目录：{error}"))?;
+    let folder = resolve_item(path).map_err(|error| format!("无法读取移动设备目录：{error}"))?;
     let enumerator: IEnumShellItems = unsafe {
         folder
             .BindToHandler(None::<&IBindCtx>, &BHID_EnumItems)
@@ -59,7 +59,7 @@ pub(crate) fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySna
 
 pub(crate) fn parent_path(path: &Path) -> Option<PathBuf> {
     let _com = ComGuard::new().ok()?;
-    let item = create_item(path).ok()?;
+    let item = resolve_item(path).ok()?;
     let parent = unsafe { item.GetParent().ok()? };
     let value = display_name_for_item(&parent, SIGDN_DESKTOPABSOLUTEPARSING)?;
     (!value.is_empty()).then(|| PathBuf::from(value))
@@ -73,7 +73,7 @@ pub(crate) fn display_name(path: &Path) -> Option<String> {
         return Some(name);
     }
     let _com = ComGuard::new().ok()?;
-    let item = create_item(path).ok()?;
+    let item = resolve_item(path).ok()?;
     let name = display_name_for_item(&item, SIGDN_NORMALDISPLAY)?;
     DISPLAY_NAMES.with(|names| {
         names.borrow_mut().insert(path.to_path_buf(), name.clone());
@@ -85,7 +85,7 @@ pub(crate) fn is_directory(path: &Path) -> bool {
     let Ok(_com) = ComGuard::new() else {
         return false;
     };
-    let Ok(item) = create_item(path) else {
+    let Ok(item) = resolve_item(path) else {
         return false;
     };
     unsafe { item.GetAttributes(SFGAO_FOLDER) }
@@ -127,6 +127,79 @@ fn create_item(path: &Path) -> windows::core::Result<IShellItem> {
     unsafe { SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None::<&IBindCtx>) }
 }
 
+/// Resolves shell items whose absolute parsing name cannot be reparsed.
+///
+/// WPD children can expose a desktop-absolute parsing name that
+/// SHCreateItemFromParsingName rejects. Walk down from a reparsable
+/// ancestor and match the child through the Shell namespace enumerator.
+fn resolve_item(path: &Path) -> Result<IShellItem, String> {
+    let mut current_path = path.to_path_buf();
+    let mut pending_names: Vec<OsString> = Vec::new();
+
+    loop {
+        let create_error = match create_item(&current_path) {
+            Ok(mut item) => {
+                while let Some(name) = pending_names.pop() {
+                    item = find_child_item(&item, &name)?;
+                }
+                return Ok(item);
+            }
+            Err(error) => error,
+        };
+
+        let Some(name) = current_path.file_name() else {
+            return Err(format!("无法解析移动设备路径：{create_error}"));
+        };
+        pending_names.push(name.to_os_string());
+
+        let Some(parent) = current_path.parent() else {
+            return Err(format!("无法定位移动设备项目：{}", path.display()));
+        };
+        if parent == current_path {
+            return Err(format!("无法定位移动设备项目：{}", path.display()));
+        }
+        current_path = parent.to_path_buf();
+    }
+}
+
+fn find_child_item(parent: &IShellItem, relative_name: &OsStr) -> Result<IShellItem, String> {
+    let expected = relative_name.to_string_lossy();
+    let enumerator: IEnumShellItems = unsafe {
+        parent
+            .BindToHandler(None::<&IBindCtx>, &BHID_EnumItems)
+            .map_err(|error| format!("无法枚举移动设备父目录：{error}"))?
+    };
+
+    loop {
+        let mut batch: [Option<IShellItem>; 32] = std::array::from_fn(|_| None);
+        let mut fetched = 0u32;
+        unsafe {
+            enumerator
+                .Next(&mut batch, Some(&mut fetched))
+                .map_err(|error| format!("读取移动设备子项目失败：{error}"))?;
+        }
+        if fetched == 0 {
+            break;
+        }
+        for item in batch.into_iter().take(fetched as usize).flatten() {
+            let matches_parent_relative = display_name_for_item(&item, SIGDN_PARENTRELATIVEPARSING)
+                .is_some_and(|value| value.eq_ignore_ascii_case(&expected));
+            let matches_display_name = display_name_for_item(&item, SIGDN_NORMALDISPLAY)
+                .is_some_and(|value| value.eq_ignore_ascii_case(&expected));
+            let matches_desktop_absolute =
+                display_name_for_item(&item, SIGDN_DESKTOPABSOLUTEPARSING).is_some_and(|value| {
+                    Path::new(&value)
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(&expected))
+                });
+            if matches_parent_relative || matches_display_name || matches_desktop_absolute {
+                return Ok(item);
+            }
+        }
+    }
+
+    Err(format!("无法定位移动设备项目：{expected}"))
+}
 fn shell_entry(item: &IShellItem) -> Option<FileEntry> {
     let name =
         display_name_for_item(item, SIGDN_NORMALDISPLAY).filter(|value| !value.is_empty())?;
@@ -219,6 +292,22 @@ mod tests {
             "loaded {} entries from {}",
             snapshot.entries.len(),
             device.name
+        );
+
+        let child = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.is_dir())
+            .expect("portable device directory")
+            .clone();
+        let child_snapshot = super::load_directory(&child.path, crate::fs::SortSpec::default())
+            .unwrap_or_else(|error| {
+                panic!("load portable directory {}: {error}", child.path.display())
+            });
+        eprintln!(
+            "loaded {} entries from {}",
+            child_snapshot.entries.len(),
+            child.name
         );
     }
 
