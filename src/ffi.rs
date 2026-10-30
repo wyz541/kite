@@ -4,7 +4,7 @@ use std::time::UNIX_EPOCH;
 
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
 use crate::favorites::{self as favorites_store, FavoriteEntryDto};
-use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory};
+use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory, transfer_entry};
 use crate::platform::{HostPlatform, default_root_path, host_platform};
 use crate::session::{self as session_store, SessionStateDto};
 use crate::text_editor::{self, TextDocument, TextLineEnding};
@@ -192,6 +192,34 @@ impl KiteCore {
         text_editor::TextDocument::open(&PathBuf::from(path))
             .map(text_document_dto)
             .map_err(KiteError::operation)
+    }
+
+    pub fn copy_path_to(
+        &self,
+        source: String,
+        destination_directory: String,
+    ) -> Result<String, KiteError> {
+        transfer_entry(
+            &PathBuf::from(source),
+            &PathBuf::from(destination_directory),
+            false,
+        )
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(KiteError::operation)
+    }
+
+    pub fn move_path_to(
+        &self,
+        source: String,
+        destination_directory: String,
+    ) -> Result<String, KiteError> {
+        transfer_entry(
+            &PathBuf::from(source),
+            &PathBuf::from(destination_directory),
+            true,
+        )
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(KiteError::operation)
     }
 
     pub fn save_text_document(

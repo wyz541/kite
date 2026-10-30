@@ -38,6 +38,7 @@ actions!(
 pub enum ContextMenuCommand {
     Open,
     Copy,
+    CopyTo,
     CopyPath,
     Cut,
     Paste,

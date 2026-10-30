@@ -828,6 +828,25 @@ mod transfer_tests {
     }
 
     #[test]
+    fn copies_directory_recursively() {
+        let root = test_root("copy-directory");
+        let source = root.join("source");
+        let nested = source.join("nested");
+        let destination = root.join("destination");
+        fs::create_dir_all(&nested).expect("create source directory");
+        fs::create_dir_all(&destination).expect("create destination");
+        fs::write(nested.join("note.txt"), b"nested copy").expect("write source file");
+
+        let copied = transfer_entry(&source, &destination, false).expect("copy directory");
+        assert_eq!(
+            fs::read(copied.join("nested").join("note.txt")).expect("read copied file"),
+            b"nested copy"
+        );
+        assert!(source.exists());
+        fs::remove_dir_all(root).expect("clean test root");
+    }
+
+    #[test]
     fn renames_conflicting_copy_without_overwrite() {
         let root = test_root("conflict");
         let destination = root.join("destination");
