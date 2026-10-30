@@ -291,6 +291,18 @@ struct ContentView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
+                if KitePlatform.isEditableTextFile(entry.path) {
+                    Button {
+                        KitePlatform.openTextEditor(entry.path)
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.caption)
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("在 Kite 编辑器中打开")
+                    .accessibilityLabel("在 Kite 编辑器中打开")
+                }
                 Button {
                     KitePlatform.copyText(previewInfoText(entry))
                 } label: {
@@ -409,6 +421,9 @@ struct ContentView: View {
         .accessibilityLabel(entryAccessibilityLabel(entry))
         .contextMenu {
             Button("打开") { KitePlatform.open(entry.path) }
+            if KitePlatform.isEditableTextFile(entry.path) {
+                Button("在 Kite 编辑器中打开") { KitePlatform.openTextEditor(entry.path) }
+            }
             Button("在 Finder 中显示") { KitePlatform.revealInFinder(entry.path) }
             Button("快速查看") { KitePlatform.quickLook(entry.path) }
             Button("拷贝路径") { KitePlatform.copyPath(entry.path) }

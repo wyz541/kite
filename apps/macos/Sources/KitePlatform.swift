@@ -10,6 +10,30 @@ enum KitePlatform {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
+    static func openTextEditor(_ path: String) {
+        do {
+            try TextEditorWindowController.open(path: path)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "无法打开文本编辑器"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    static func isEditableTextFile(_ path: String) -> Bool {
+        let extensionName = URL(fileURLWithPath: path).pathExtension.lowercased()
+        return [
+            "", "txt", "md", "markdown", "log", "json", "jsonc", "toml", "yaml", "yml",
+            "xml", "ini", "conf", "cfg", "properties", "env", "csv", "tsv", "svg",
+            "rs", "py", "pyw", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm",
+            "css", "scss", "less", "c", "h", "cc", "cpp", "cxx", "hpp", "hxx", "cs",
+            "java", "go", "kt", "kts", "sh", "bash", "zsh", "bat", "cmd", "ps1", "psm1",
+            "psd1", "sql", "swift", "lua", "rb", "php", "proto", "cmake", "diff", "patch"
+        ].contains(extensionName)
+    }
+
     static func revealInFinder(_ path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
