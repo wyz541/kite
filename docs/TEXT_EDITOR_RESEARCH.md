@@ -23,13 +23,13 @@ A shared Rust module owns text-file validation and safe save operations.
 
 | Candidate | Strength | Integration risk | Decision |
 | --- | --- | --- | --- |
-| `gpui-kit` editor | Rope buffer, tree-sitter highlighting, search panel, replace, undo, LSP hooks | Already used by Kite | Use on Windows |
+| `gpui-kit` editor | Rope buffer, syntax highlighting, search panel, replace, undo, and LSP hooks | Already used by Kite | Use on Windows |
 | Zed editor | Mature editor and GPUI based | Full application and GPL components; not a small reusable dependency | Do not embed |
 | Lapce | Rust native editor | Full application architecture and large dependency surface | Do not embed |
 | Helix | Fast editor core and terminal UI | Terminal-focused architecture; no GPUI component | Do not embed |
 | `ropey` | Proven rope text storage | Data structure only; no editor UI or input handling | Use through `gpui-kit` |
-| `syntect` | Mature TextMate syntax engine | Separate highlight model; no editor behavior | Do not add |
-| `tree-sitter` | Incremental parsing and language grammars | Needs UI integration and grammar selection | Use through `gpui-kit` |
+| `syntect` | About 200 TextMate languages with a small binary cost | Regex based; no syntax tree | Use through `gpui-kit` |
+| `tree-sitter` | Incremental parsing and structural grammar support | Full grammar set increases the Kite executable by about 32 MB | Do not enable for this editor |
 | AppKit `NSTextView` | Native find bar, undo, selection, accessibility, services | macOS only | Use on macOS |
 
 ## Why not embed another editor
@@ -40,8 +40,13 @@ Embedding one of these applications would add a second architecture to Kite.
 The result would increase startup cost, binary size, update risk, and platform-specific maintenance.
 
 `gpui-kit` is the existing Kite UI dependency.
-Its editor uses Rope storage, a search matcher, tree-sitter languages, and GPUI-native input handling.
+Its editor uses Rope storage, a search matcher, syntect languages, and GPUI-native input handling.
 The editor keeps one rendering stack on Windows.
+
+`syntect` supports about 200 TextMate languages.
+The tree-sitter build produced a 54.3 MB executable.
+The syntect build produced a 22.3 MB executable.
+The editor uses syntect because Kite needs broad highlighting and a small package.
 
 ## Shared Core boundary
 
@@ -68,7 +73,7 @@ The Core owns file encoding, file identity, and save safety.
 Features:
 
 - Line numbers.
-- Tree-sitter syntax highlighting.
+- TextMate syntax highlighting through syntect.
 - Undo and redo.
 - Search and replace.
 - Save shortcut.
