@@ -10,6 +10,7 @@ enum KitePlatform {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
+    @MainActor
     static func openTextEditor(_ path: String) {
         do {
             try TextEditorWindowController.open(path: path)
