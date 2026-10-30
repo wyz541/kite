@@ -181,8 +181,8 @@ private struct KiteTextEditorSurface: NSViewRepresentable {
         textView.isHorizontallyResizable = true
         textView.autoresizingMask = [.width]
         textView.textContainer?.containerSize = NSSize(
-            width: .greatestFiniteMagnitude,
-            height: .greatestFiniteMagnitude
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
         )
         textView.textContainer?.widthTracksTextView = false
         textView.textContainer?.lineFragmentPadding = 8
