@@ -89,11 +89,16 @@ final class KiteModel: ObservableObject {
         }
     }
 
-    var selectedColumnFile: BrowserEntry? {
+    var selectedColumnEntry: BrowserEntry? {
         guard let column = columns.last,
-              let selectedPath = column.selectedPath,
-              let entry = column.entries.first(where: { $0.path == selectedPath }),
-              !entry.isDirectory else {
+              let selectedPath = column.selectedPath else {
+            return nil
+        }
+        return column.entries.first { $0.path == selectedPath }
+    }
+
+    var selectedColumnFile: BrowserEntry? {
+        guard let entry = selectedColumnEntry, !entry.isDirectory else {
             return nil
         }
         return entry
@@ -198,6 +203,99 @@ final class KiteModel: ObservableObject {
 
     func refresh() {
         loadRoot(currentPath)
+    }
+
+    func copyFile(_ path: String) {
+        KitePlatform.writeFilePasteboard([path], cut: false)
+        errorMessage = nil
+    }
+
+    func cutFile(_ path: String) {
+        KitePlatform.writeFilePasteboard([path], cut: true)
+        errorMessage = nil
+    }
+
+    func pasteFiles(into directory: String) {
+        let paths = KitePlatform.filePasteboardPaths()
+        guard !paths.isEmpty else {
+            errorMessage = "剪贴板中没有文件。"
+            return
+        }
+        let moveFiles = KitePlatform.filePasteboardIsCut()
+        let core = self.core
+
+        Task {
+            do {
+                for path in paths {
+                    if moveFiles {
+                        _ = try await Task.detached(priority: .userInitiated) {
+                            try core.movePathTo(
+                                source: path,
+                                destinationDirectory: directory
+                            )
+                        }.value
+                    } else {
+                        _ = try await Task.detached(priority: .userInitiated) {
+                            try core.copyPathTo(
+                                source: path,
+                                destinationDirectory: directory
+                            )
+                        }.value
+                    }
+                }
+                if moveFiles {
+                    KitePlatform.clearFilePasteboard()
+                }
+                errorMessage = nil
+                refreshIfShowing(directory)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func copyTo(path: String) {
+        guard let destination = KitePlatform.chooseDirectory(prompt: "拷贝到这里") else {
+            return
+        }
+        transferPaths([path], to: destination, moveFiles: false)
+    }
+
+    private func transferPaths(_ paths: [String], to directory: String, moveFiles: Bool) {
+        let core = self.core
+        Task {
+            do {
+                for path in paths {
+                    if moveFiles {
+                        _ = try await Task.detached(priority: .userInitiated) {
+                            try core.movePathTo(
+                                source: path,
+                                destinationDirectory: directory
+                            )
+                        }.value
+                    } else {
+                        _ = try await Task.detached(priority: .userInitiated) {
+                            try core.copyPathTo(
+                                source: path,
+                                destinationDirectory: directory
+                            )
+                        }.value
+                    }
+                }
+                errorMessage = nil
+                refreshIfShowing(directory)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func refreshIfShowing(_ directory: String) {
+        let current = URL(fileURLWithPath: currentPath).standardizedFileURL
+        let destination = URL(fileURLWithPath: directory).standardizedFileURL
+        if current.path == destination.path {
+            refresh()
+        }
     }
 
     func moveToTrash(_ entry: BrowserEntry) {

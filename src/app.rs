@@ -1374,6 +1374,7 @@ impl KiteApp {
             ContextMenuCommand::Copy => {
                 self.set_clipboard_path(action.target.clone(), ClipboardMode::Copy, cx)
             }
+            ContextMenuCommand::CopyTo => self.copy_to_directory(action.target.clone(), window, cx),
             ContextMenuCommand::CopyPath => {
                 cx.write_to_clipboard(ClipboardItem::new_string(path_text(&action.target)));
                 self.error = None;
@@ -1384,7 +1385,8 @@ impl KiteApp {
                 self.set_clipboard_path(action.target.clone(), ClipboardMode::Cut, cx)
             }
             ContextMenuCommand::Paste => {
-                self.paste_clipboard_into(action.working_directory.clone(), window, cx)
+                let destination = paste_destination(&action.target, &action.working_directory);
+                self.paste_clipboard_into(destination, window, cx)
             }
             ContextMenuCommand::NewFolder => {
                 self.begin_new_folder_in(action.working_directory.clone(), window, cx)
@@ -2167,6 +2169,79 @@ impl KiteApp {
 
     fn paste_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.paste_clipboard_into(self.current_dir.clone(), window, cx);
+    }
+
+    fn copy_to_directory(&mut self, source: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if shell_fs::is_shell_namespace_path(&source) {
+            self.error = None;
+            self.notice = Some("移动设备项目暂不支持拷贝到指定目录".into());
+            cx.notify();
+            return;
+        }
+
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("拷贝到这里".into()),
+        });
+        self.error = None;
+        self.notice = Some("请选择目标文件夹…".into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let selected = match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Ok(Ok(None)) => None,
+                Ok(Err(error)) => {
+                    let _ = this.update_in(cx, |this, _, cx| {
+                        this.notice = None;
+                        this.error = Some(format!("无法打开目标文件夹选择器：{error}").into());
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(_) => None,
+            };
+            let Some(destination_dir) = selected else {
+                let _ = this.update_in(cx, |this, _, cx| {
+                    this.notice = None;
+                    cx.notify();
+                });
+                return;
+            };
+
+            let copy_source = source.clone();
+            let copy_destination = destination_dir.clone();
+            let result = cx
+                .background_spawn(
+                    async move { transfer_entry(&copy_source, &copy_destination, false) },
+                )
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(copied) => {
+                    this.error = None;
+                    this.notice = Some(
+                        format!(
+                            "已拷贝到 {}",
+                            copied.parent().unwrap_or(&destination_dir).display()
+                        )
+                        .into(),
+                    );
+                    if same_path(&this.current_dir, &destination_dir) {
+                        this.refresh(window, cx);
+                    } else {
+                        cx.notify();
+                    }
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn paste_clipboard_into(
@@ -4030,6 +4105,14 @@ fn same_path(left: &Path, right: &Path) -> bool {
     crate::platform::paths_equal(left, right)
 }
 
+fn paste_destination(target: &Path, working_directory: &Path) -> PathBuf {
+    if target.is_dir() {
+        target.to_path_buf()
+    } else {
+        working_directory.to_path_buf()
+    }
+}
+
 fn path_after_rename(current_dir: &Path, original: &Path, renamed: &Path) -> PathBuf {
     if current_dir == original {
         return renamed.to_path_buf();
@@ -4911,6 +4994,38 @@ impl Render for KiteApp {
                     .child(div().max_w(px(520.)).truncate().child(footer_right)),
             )
             .child(self.render_modal(cx))
+    }
+}
+
+#[cfg(test)]
+mod clipboard_destination_tests {
+    use super::paste_destination;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn file_target_pastes_into_the_working_directory() {
+        let destination =
+            paste_destination(Path::new(r"C:\repo\src\main.rs"), Path::new(r"C:\repo\src"));
+        assert_eq!(destination, PathBuf::from(r"C:\repo\src"));
+    }
+
+    #[test]
+    fn directory_target_pastes_inside_the_directory() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "kite-paste-destination-{}-{unique}",
+            std::process::id()
+        ));
+        let target = root.join("src");
+        std::fs::create_dir_all(&target).expect("create target directory");
+
+        let destination = paste_destination(&target, &root);
+        assert_eq!(destination, target);
+        std::fs::remove_dir_all(root).expect("remove test directory");
     }
 }
 

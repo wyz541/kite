@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 
 enum KitePlatform {
     private static let quickLookController = QuickLookController()
+    private static let fileCutPasteboardType = NSPasteboard.PasteboardType(
+        "dev.kite.file-cut"
+    )
 
     static func open(_ path: String) {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
@@ -51,6 +54,43 @@ enum KitePlatform {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    static func writeFilePasteboard(_ paths: [String], cut: Bool) {
+        let urls = paths.map { URL(fileURLWithPath: $0) as NSURL }
+        guard !urls.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls)
+        if cut {
+            pasteboard.setString("1", forType: fileCutPasteboardType)
+        }
+    }
+
+    static func filePasteboardPaths() -> [String] {
+        let urls = NSPasteboard.general.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [NSURL] ?? []
+        return urls.compactMap { $0 as URL }.map(\.path)
+    }
+
+    static func filePasteboardIsCut() -> Bool {
+        NSPasteboard.general.string(forType: fileCutPasteboardType) == "1"
+    }
+
+    static func clearFilePasteboard() {
+        NSPasteboard.general.clearContents()
+    }
+
+    static func chooseDirectory(prompt: String) -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = prompt
+        return panel.runModal() == .OK ? panel.url?.path : nil
     }
 
     static func share(_ path: String) {

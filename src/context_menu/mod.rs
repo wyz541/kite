@@ -251,6 +251,12 @@ impl ContextMenuProvider for CoreMenuProvider {
             !disabled && target.supports_local_ops,
         );
         model.item(
+            "拷贝到…",
+            IconName::FolderInput,
+            ContextMenuCommand::CopyTo,
+            !disabled && target.supports_local_ops,
+        );
+        model.item(
             "复制完整路径",
             IconName::Link,
             ContextMenuCommand::CopyPath,
@@ -653,6 +659,7 @@ mod tests {
         assert!(labels.contains(&"新建文件夹"));
         assert!(labels.contains(&"新建文件"));
         assert!(labels.contains(&"添加到收藏"));
+        assert!(labels.contains(&"拷贝到…"));
         assert!(labels.contains(&"复制完整路径"));
         assert!(labels.contains(&"属性"));
         assert!(model.entries.iter().any(|entry| matches!(
@@ -826,6 +833,7 @@ mod tests {
         assert!(commands.contains(&ContextMenuCommand::ShowProperties));
         for command in [
             ContextMenuCommand::Copy,
+            ContextMenuCommand::CopyTo,
             ContextMenuCommand::Paste,
             ContextMenuCommand::NewFolder,
             ContextMenuCommand::NewFile,

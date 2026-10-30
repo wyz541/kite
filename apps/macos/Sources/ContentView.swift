@@ -141,6 +141,45 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .help("刷新")
             .accessibilityLabel("刷新")
+
+            Divider()
+                .frame(height: 18)
+
+            Button {
+                if let entry = model.selectedColumnEntry {
+                    model.copyFile(entry.path)
+                }
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.selectedColumnEntry == nil)
+            .help("拷贝选中项目")
+            .accessibilityLabel("拷贝选中项目")
+
+            Button {
+                if let entry = model.selectedColumnEntry {
+                    model.cutFile(entry.path)
+                }
+            } label: {
+                Image(systemName: "scissors")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.selectedColumnEntry == nil)
+            .help("剪切选中项目")
+            .accessibilityLabel("剪切选中项目")
+
+            Button {
+                model.pasteFiles(into: model.currentPath)
+            } label: {
+                Image(systemName: "doc.on.clipboard")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderless)
+            .help("粘贴文件")
+            .accessibilityLabel("粘贴文件")
         }
         .padding(.horizontal, 4)
         .frame(height: 34)
@@ -263,6 +302,10 @@ struct ContentView: View {
         Button("在 Finder 中显示") { KitePlatform.revealInFinder(column.path) }
         Button("快速查看") { KitePlatform.quickLook(column.path) }
         Button("拷贝路径") { KitePlatform.copyPath(column.path) }
+        Divider()
+        Button("拷贝") { model.copyFile(column.path) }
+        Button("粘贴") { model.pasteFiles(into: column.path) }
+        Button("拷贝到…") { model.copyTo(path: column.path) }
         Divider()
         Button("新建文件夹…") { model.createFolder(in: column.path) }
             .disabled(!KitePlatform.canModify(column.path))
@@ -398,6 +441,9 @@ struct ContentView: View {
     }
     private func entryRow(_ entry: BrowserEntry, columnIndex: Int) -> some View {
         let selected = model.columns[columnIndex].selectedPath == entry.path
+        let pasteDirectory = entry.isDirectory
+            ? entry.path
+            : URL(fileURLWithPath: entry.path).deletingLastPathComponent().path
         return Button {
             model.select(column: columnIndex, entry: entry)
         } label: {
@@ -427,6 +473,11 @@ struct ContentView: View {
             Button("在 Finder 中显示") { KitePlatform.revealInFinder(entry.path) }
             Button("快速查看") { KitePlatform.quickLook(entry.path) }
             Button("拷贝路径") { KitePlatform.copyPath(entry.path) }
+            Divider()
+            Button("拷贝") { model.copyFile(entry.path) }
+            Button("剪切") { model.cutFile(entry.path) }
+            Button("粘贴") { model.pasteFiles(into: pasteDirectory) }
+            Button("拷贝到…") { model.copyTo(path: entry.path) }
             Divider()
             Button("新建文件夹…") {
                 model.createFolder(in: URL(fileURLWithPath: entry.path).deletingLastPathComponent().path)
