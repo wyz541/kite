@@ -106,18 +106,18 @@ final class TextEditorDocumentModel: ObservableObject {
     }
 
     func showFindPanel() {
-        showFindAction(.showFindPanel)
+        showTextFinderAction(.showFindInterface)
     }
 
     func showReplacePanel() {
-        showFindAction(.showReplacePanel)
+        showTextFinderAction(.showReplaceInterface)
     }
 
-    private func showFindAction(_ action: NSFindPanelAction) {
+    private func showTextFinderAction(_ action: NSTextFinder.Action) {
         guard let textView else { return }
         let sender = NSMenuItem()
-        sender.tag = Int(action.rawValue)
-        textView.performFindPanelAction(sender)
+        sender.tag = action.rawValue
+        textView.performTextFinderAction(sender)
     }
 
     private func updateStatistics() {
@@ -134,7 +134,7 @@ final class TextEditorDocumentModel: ObservableObject {
             .count ?? 0
         line = currentLine
         column = currentColumn + 1
-        lineCount = value.reduce(into: 1) { count, character in
+        lineCount = textView.string.reduce(into: 1) { count, character in
             if character == "\n" { count += 1 }
         }
     }
@@ -176,7 +176,7 @@ private struct KiteTextEditorSurface: NSViewRepresentable {
         textView.font = .monospacedSystemFont(ofSize: 13.5, weight: .regular)
         textView.textContainerInset = NSSize(width: 14, height: 14)
         textView.minSize = NSSize(width: 0, height: 0)
-        textView.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = true
         textView.autoresizingMask = [.width]
