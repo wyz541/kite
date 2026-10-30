@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -41,7 +42,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, Size, StyledExt as _, Theme, ThemeMode,
     h_flex, v_flex,
 };
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::prelude::{FluentBuilder as _, StatefulInteractiveElement as _};
 use gpui_kit::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -64,6 +65,26 @@ struct QuickLink {
     path: PathBuf,
     icon: IconName,
     detail: Option<SharedString>,
+}
+
+#[derive(Clone)]
+enum SidebarChildrenState {
+    Loading,
+    Loaded(Vec<PathBuf>),
+    Failed(SharedString),
+}
+
+#[derive(Clone)]
+struct SidebarTreeItem {
+    id: SharedString,
+    label: SharedString,
+    path: PathBuf,
+    icon: IconName,
+    detail: Option<SharedString>,
+    active: bool,
+    depth: usize,
+    is_directory: bool,
+    favorite: bool,
 }
 
 #[derive(Clone)]
@@ -188,6 +209,8 @@ pub struct KiteApp {
     history_index: usize,
     quick_links: Vec<QuickLink>,
     favorites: Vec<FavoriteEntryDto>,
+    sidebar_expanded: HashSet<PathBuf>,
+    sidebar_children: HashMap<PathBuf, SidebarChildrenState>,
     connected_devices: Vec<QuickLink>,
     drives: Vec<QuickLink>,
     portable_devices: Vec<PortableDevice>,
@@ -378,6 +401,8 @@ impl KiteApp {
             history_index: 0,
             quick_links,
             favorites,
+            sidebar_expanded: HashSet::new(),
+            sidebar_children: HashMap::new(),
             connected_devices,
             drives,
             portable_devices,
@@ -2544,56 +2569,205 @@ impl KiteApp {
         };
         Theme::change(mode, Some(window), cx);
     }
-    fn sidebar_item(
-        &self,
-        label: SharedString,
-        icon: IconName,
-        path: PathBuf,
-        detail: Option<SharedString>,
-        active: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn sidebar_tree_item(&self, item: SidebarTreeItem, cx: &mut Context<Self>) -> AnyElement {
         let accent = cx.theme().accent;
         let active_fg = cx.theme().accent_foreground;
         let fg = cx.theme().sidebar_foreground;
         let muted = cx.theme().muted_foreground;
-        let id = SharedString::from(format!("nav-{}", path.display()));
+        let row_id = item.id.clone();
+        let group_id = item.id.clone();
+        let navigation_path = item.path.clone();
+        let chevron_path = item.path.clone();
+        let is_directory = item.is_directory;
+        let is_favorite = item.favorite;
+        let depth = item.depth;
+        let expanded = is_directory && self.sidebar_expanded.contains(&item.path);
+        let children_state = self.sidebar_children.get(&item.path).cloned();
+        let has_chevron = is_directory
+            && !matches!(
+                children_state,
+                Some(SidebarChildrenState::Loaded(ref children)) if children.is_empty()
+            );
+        let action_context = self.focus_handle.clone();
+        let remove_action = is_favorite.then(|| ContextMenuAction {
+            target: item.path.clone(),
+            working_directory: item.path.clone(),
+            command: ContextMenuCommand::RemoveFavorite,
+        });
+        let remove_context = action_context.clone();
 
-        div()
-            .id(id)
-            .h(px(32.))
+        let chevron_id = SharedString::from(format!("chevron-{}", item.id));
+        let chevron = div()
+            .w(px(16.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(has_chevron, |this| {
+                this.child(
+                    Button::new(chevron_id)
+                        .ghost()
+                        .compact()
+                        .icon(if expanded {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.toggle_sidebar_directory(chevron_path.clone(), window, cx);
+                        })),
+                )
+            });
+
+        let row = div()
+            .id(row_id)
+            .h(px(30.))
             .w_full()
             .flex()
             .items_center()
-            .gap_2()
-            .px_2()
+            .gap_1()
+            .px_1()
             .rounded_md()
             .cursor_pointer()
             .text_sm()
-            .text_color(if active { active_fg } else { fg })
-            .when(active, |this| this.bg(accent))
-            .when(!active, |this| {
+            .text_color(if item.active { active_fg } else { fg })
+            .when(item.active, |this| this.bg(accent))
+            .when(!item.active, |this| {
                 this.hover(move |style| style.bg(muted.opacity(0.12)))
             })
-            .child(
-                Icon::new(icon)
-                    .size_4()
-                    .text_color(if active { active_fg } else { muted }),
-            )
-            .child(div().flex_1().min_w_0().truncate().child(label))
-            .when_some(detail, |this, detail| {
+            .child(div().w(px((depth as f32) * 14.)))
+            .child(chevron)
+            .child(Icon::new(item.icon).size_4().text_color(if item.active {
+                active_fg
+            } else {
+                muted
+            }))
+            .child(div().flex_1().min_w_0().truncate().child(item.label))
+            .when_some(item.detail, |this, detail| {
                 this.child(
                     div()
                         .flex_shrink_0()
                         .text_xs()
-                        .text_color(if active { active_fg } else { muted })
+                        .text_color(if item.active { active_fg } else { muted })
                         .child(detail),
                 )
             })
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                this.navigate_to(path.clone(), NavigationIntent::Push, window, cx);
-            }))
-            .into_any_element()
+                if is_directory {
+                    this.navigate_to(navigation_path.clone(), NavigationIntent::Push, window, cx);
+                } else {
+                    this.open_path(navigation_path.clone(), window, cx);
+                }
+            }));
+
+        let mut container = v_flex().w_full().gap_0p5();
+        if let Some(remove_action) = remove_action {
+            container = container.child(row.context_menu(move |menu, window, cx| {
+                remove_context.focus(window, cx);
+                menu.item(
+                    PopupMenuItem::new("从收藏移除")
+                        .icon(IconName::StarMinus)
+                        .action(Box::new(remove_action.clone())),
+                )
+            }));
+        } else {
+            container = container.child(row);
+        }
+        if expanded {
+            match children_state {
+                Some(SidebarChildrenState::Loading) => {
+                    container = container.child(
+                        div()
+                            .h(px(24.))
+                            .pl(px(((depth + 1) as f32) * 14. + 22.))
+                            .text_xs()
+                            .text_color(muted)
+                            .child("正在读取…"),
+                    );
+                }
+                Some(SidebarChildrenState::Failed(error)) => {
+                    container = container.child(
+                        div()
+                            .h(px(24.))
+                            .pl(px(((depth + 1) as f32) * 14. + 22.))
+                            .text_xs()
+                            .text_color(cx.theme().danger)
+                            .child(error),
+                    );
+                }
+                Some(SidebarChildrenState::Loaded(children)) => {
+                    for child_path in children {
+                        let label = sidebar_path_label(&child_path);
+                        let child_id = SharedString::from(format!(
+                            "{}/{}",
+                            group_id,
+                            child_path.to_string_lossy()
+                        ));
+                        container = container.child(self.sidebar_tree_item(
+                            SidebarTreeItem {
+                                id: child_id,
+                                label,
+                                path: child_path.clone(),
+                                icon: IconName::Folder,
+                                detail: None,
+                                active: same_path(&child_path, &self.current_dir),
+                                depth: depth + 1,
+                                is_directory: true,
+                                favorite: false,
+                            },
+                            cx,
+                        ));
+                    }
+                }
+                None => {}
+            }
+        }
+
+        container.into_any_element()
+    }
+
+    fn toggle_sidebar_directory(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !path.is_dir() {
+            return;
+        }
+        if self.sidebar_expanded.remove(&path) {
+            cx.notify();
+            return;
+        }
+
+        self.sidebar_expanded.insert(path.clone());
+        let should_load = matches!(
+            self.sidebar_children.get(&path),
+            None | Some(SidebarChildrenState::Failed(_))
+        );
+        if !should_load {
+            cx.notify();
+            return;
+        }
+
+        self.sidebar_children
+            .insert(path.clone(), SidebarChildrenState::Loading);
+        cx.notify();
+        let load_path = path.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { load_sidebar_children(&load_path) })
+                .await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                let state = match result {
+                    Ok(children) => SidebarChildrenState::Loaded(children),
+                    Err(error) => SidebarChildrenState::Failed(error.into()),
+                };
+                this.sidebar_children.insert(path, state);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn favorite_item(
@@ -2603,62 +2777,24 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let path = PathBuf::from(&favorite.path);
-        let navigation_path = path.clone();
-        let remove_path = path.clone();
-        let action_context = self.focus_handle.clone();
-        let muted = cx.theme().muted_foreground;
-        let fg = cx.theme().sidebar_foreground;
-        let active_fg = cx.theme().accent_foreground;
-        let accent = cx.theme().accent;
-        let hover = muted.opacity(0.12);
-        let is_directory = favorite.is_directory;
-        let icon = if is_directory {
-            IconName::Folder
-        } else {
-            IconName::File
-        };
-        let remove_action = ContextMenuAction {
-            target: remove_path,
-            working_directory: path.clone(),
-            command: ContextMenuCommand::RemoveFavorite,
-        };
-
-        div()
-            .id(SharedString::from(format!("favorite-{}", favorite.path)))
-            .h(px(32.))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .rounded_md()
-            .cursor_pointer()
-            .text_sm()
-            .text_color(if active { active_fg } else { fg })
-            .when(active, |this| this.bg(accent))
-            .when(!active, |this| this.hover(move |style| style.bg(hover)))
-            .child(
-                Icon::new(icon)
-                    .size_4()
-                    .text_color(if active { active_fg } else { muted }),
-            )
-            .child(div().flex_1().min_w_0().truncate().child(favorite.name))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                if is_directory {
-                    this.navigate_to(navigation_path.clone(), NavigationIntent::Push, window, cx);
+        self.sidebar_tree_item(
+            SidebarTreeItem {
+                id: SharedString::from(format!("favorite-{}", favorite.path)),
+                label: favorite.name.into(),
+                path,
+                icon: if favorite.is_directory {
+                    IconName::Folder
                 } else {
-                    this.open_path(navigation_path.clone(), window, cx);
-                }
-            }))
-            .context_menu(move |menu, window, cx| {
-                action_context.focus(window, cx);
-                menu.item(
-                    PopupMenuItem::new("从收藏移除")
-                        .icon(IconName::StarMinus)
-                        .action(Box::new(remove_action.clone())),
-                )
-            })
-            .into_any_element()
+                    IconName::File
+                },
+                detail: None,
+                active,
+                depth: 0,
+                is_directory: favorite.is_directory,
+                favorite: true,
+            },
+            cx,
+        )
     }
 
     fn portable_device_item(&self, device: PortableDevice, cx: &mut Context<Self>) -> AnyElement {
@@ -2761,12 +2897,18 @@ impl KiteApp {
         );
         for link in self.quick_links.clone() {
             let active = same_path(&link.path, &self.current_dir);
-            content = content.child(self.sidebar_item(
-                link.label,
-                link.icon,
-                link.path,
-                link.detail,
-                active,
+            content = content.child(self.sidebar_tree_item(
+                SidebarTreeItem {
+                    id: SharedString::from(format!("quick-{}", link.path.display())),
+                    label: link.label,
+                    path: link.path,
+                    icon: link.icon,
+                    detail: link.detail,
+                    active,
+                    depth: 0,
+                    is_directory: true,
+                    favorite: false,
+                },
                 cx,
             ));
         }
@@ -2783,12 +2925,18 @@ impl KiteApp {
             );
             for device in self.connected_devices.clone() {
                 let active = same_path(&device.path, &self.current_dir);
-                content = content.child(self.sidebar_item(
-                    device.label,
-                    device.icon,
-                    device.path,
-                    device.detail,
-                    active,
+                content = content.child(self.sidebar_tree_item(
+                    SidebarTreeItem {
+                        id: SharedString::from(format!("device-{}", device.path.display())),
+                        label: device.label,
+                        path: device.path,
+                        icon: device.icon,
+                        detail: device.detail,
+                        active,
+                        depth: 0,
+                        is_directory: true,
+                        favorite: false,
+                    },
                     cx,
                 ));
             }
@@ -2808,12 +2956,18 @@ impl KiteApp {
         );
         for drive in self.drives.clone() {
             let active = same_path(&drive.path, &self.current_dir);
-            content = content.child(self.sidebar_item(
-                drive.label,
-                drive.icon,
-                drive.path,
-                drive.detail,
-                active,
+            content = content.child(self.sidebar_tree_item(
+                SidebarTreeItem {
+                    id: SharedString::from(format!("drive-{}", drive.path.display())),
+                    label: drive.label,
+                    path: drive.path,
+                    icon: drive.icon,
+                    detail: drive.detail,
+                    active,
+                    depth: 0,
+                    is_directory: true,
+                    favorite: false,
+                },
                 cx,
             ));
         }
@@ -3694,6 +3848,13 @@ impl KiteApp {
     }
 }
 
+fn sidebar_path_label(path: &Path) -> SharedString {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+        .into()
+}
+
 fn favorite_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -3801,6 +3962,18 @@ fn update_notes_summary(notes: &str) -> String {
     } else {
         summary
     }
+}
+
+fn load_sidebar_children(path: &Path) -> Result<Vec<PathBuf>, String> {
+    load_directory(path, SortSpec::default()).map(|snapshot| {
+        snapshot
+            .entries
+            .into_iter()
+            .filter(|entry| entry.is_dir())
+            .take(256)
+            .map(|entry| entry.path)
+            .collect()
+    })
 }
 
 fn load_directory_snapshot(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
@@ -5127,5 +5300,32 @@ mod scroll_routing_tests {
                 column_delta: -90.0,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod sidebar_tree_tests {
+    use super::load_sidebar_children;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn sidebar_children_include_directories_only() {
+        let root = std::env::temp_dir().join(format!(
+            "kite-sidebar-tree-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("folder")).expect("create child directory");
+        fs::write(root.join("file.txt"), b"file").expect("create child file");
+
+        let children = load_sidebar_children(&root).expect("load sidebar children");
+        assert_eq!(children.len(), 1);
+        assert!(children[0].ends_with("folder"));
+
+        fs::remove_dir_all(root).expect("clean sidebar tree test");
     }
 }
