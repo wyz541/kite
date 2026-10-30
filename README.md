@@ -253,7 +253,7 @@ Windows 对 TXT、MD 和 Markdown 文件显示 Markdown 渲染结果。
 Markdown 预览支持标题、列表、链接、引用、代码块和文本选择。
 文本文件的放大按钮打开专业文本编辑器。
 Windows 编辑器使用 GPUI Kit 的 Rope 编辑器内核。
-编辑器支持行号、树语法高亮、撤销、重做、自动换行和空白字符显示。
+编辑器支持行号、TextMate 语法高亮、撤销、重做、自动换行和空白字符显示。
 编辑器支持 `Ctrl+F` 查找和 `Ctrl+H` 查找替换。
 编辑器支持 `Ctrl+S` 保存、未保存状态和关闭保护。
 macOS 编辑器使用原生 `NSTextView`。
@@ -457,7 +457,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.30-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.31-windows-x64.zip`。
 
 ### macOS 构建
 
