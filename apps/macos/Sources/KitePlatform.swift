@@ -146,19 +146,70 @@ enum KitePlatform {
         URL(fileURLWithPath: path).standardizedFileURL.path != "/"
     }
 
-    static func setKiteAsDefaultFolderOpener() async throws {
-        try await NSWorkspace.shared.setDefaultApplication(
-            at: Bundle.main.bundleURL,
-            toOpen: .folder
-        )
+    static var canSetDefaultFolderHandler: Bool {
+        if #available(macOS 26.0, *) {
+            return false
+        }
+        return true
     }
 
-    static func restoreFinderAsDefaultFolderOpener() async throws {
+    static func setKiteAsDefaultFileViewer() async throws {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            throw platformError("无法读取 Kite 的应用标识。")
+        }
+
+        try setGlobalFileViewer(bundleIdentifier)
+        if canSetDefaultFolderHandler {
+            try await NSWorkspace.shared.setDefaultApplication(
+                at: Bundle.main.bundleURL,
+                toOpen: .folder
+            )
+        }
+    }
+
+    static func restoreFinderAsDefaultFileViewer() async throws {
+        try setGlobalFileViewer(nil)
+
+        guard canSetDefaultFolderHandler else { return }
         let finder = URL(
             fileURLWithPath: "/System/Library/CoreServices/Finder.app",
             isDirectory: true
         )
         try await NSWorkspace.shared.setDefaultApplication(at: finder, toOpen: .folder)
+    }
+
+    private static func setGlobalFileViewer(_ bundleIdentifier: String?) throws {
+        let key = "NSFileViewer" as CFString
+        CFPreferencesSetValue(
+            key,
+            bundleIdentifier as CFString?,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        )
+        let synchronized = CFPreferencesSynchronize(
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        )
+        let current = CFPreferencesCopyValue(
+            key,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? String
+
+        guard synchronized, current == bundleIdentifier else {
+            throw platformError("未能写入 macOS 的文件查看器设置。")
+        }
+    }
+
+    private static func platformError(_ message: String) -> NSError {
+        NSError(
+            domain: "KitePlatform",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
     }
 
     static func installUpdate(archivePath: String, version: String) throws {
