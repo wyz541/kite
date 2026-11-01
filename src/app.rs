@@ -2676,9 +2676,7 @@ impl KiteApp {
         let current_favorite = self.current_dir_is_favorite();
         let view_mode = self.view_mode;
         let loading = self.loading;
-        let path_bar = self
-            .show_path_bar
-            .then(|| self.render_path_bar(cx));
+        let path_bar = self.show_path_bar.then(|| self.render_path_bar(cx));
 
         let navigation_group = h_flex()
             .h(px(34.))
@@ -2829,16 +2827,11 @@ impl KiteApp {
                     .gap_2()
                     .items_center()
                     .child(navigation_group)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(180.))
-                            .child(
-                                Input::new(&self.address_input)
-                                    .aria_label("地址")
-                                    .prefix(Icon::new(IconName::Folder).size_4()),
-                            ),
-                    )
+                    .child(div().flex_1().min_w(px(180.)).child(
+                        Input::new(&self.address_input)
+                            .aria_label("地址")
+                            .prefix(Icon::new(IconName::Folder).size_4()),
+                    ))
                     .child(
                         Input::new(&self.search_input)
                             .aria_label("搜索")
@@ -3297,10 +3290,7 @@ impl KiteApp {
                         Box::new(RestoreDefaultExplorer),
                     )
                     .separator()
-                    .menu(
-                        "创建开始菜单快捷方式…",
-                        Box::new(CreateStartMenuShortcut),
-                    )
+                    .menu("创建开始菜单快捷方式…", Box::new(CreateStartMenuShortcut))
             });
         let theme_icon = if cx.theme().mode.is_dark() {
             IconName::Sun
