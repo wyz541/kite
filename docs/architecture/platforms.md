@@ -13,6 +13,10 @@ Kite 是共享 Rust Core 加两个原生 UI 前端。
 两端共享领域模型和文件操作。
 两端不共享 UI 渲染器。
 
+macOS 原生 UI 是视觉与交互基准。
+Windows GPUI UI 按 macOS Kite UI 实现。
+该边界由 [Kite 项目宪法](../design/manifesto.md) 约束。
+
 ## 模块边界
 
 ```text

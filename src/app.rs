@@ -2324,6 +2324,20 @@ impl KiteApp {
         cx.notify();
     }
 
+    fn toggle_current_favorite(&mut self, cx: &mut Context<Self>) {
+        if self.current_dir_is_favorite() {
+            self.remove_favorite(self.current_dir.clone(), cx);
+        } else {
+            self.add_favorite(self.current_dir.clone(), cx);
+        }
+    }
+
+    fn current_dir_is_favorite(&self) -> bool {
+        self.favorites
+            .iter()
+            .any(|favorite| same_path(Path::new(&favorite.path), &self.current_dir))
+    }
+
     fn remove_favorite(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         match favorites_store::remove_favorite(&path) {
             Ok(true) => {
@@ -2649,6 +2663,192 @@ impl KiteApp {
         }
     }
 
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let can_back = self.history_index > 0;
+        let can_forward = self.history_index + 1 < self.history.len();
+        let can_up = navigation_parent(&self.current_dir).is_some();
+        let selected_local = self
+            .selected_entry(cx)
+            .as_ref()
+            .is_some_and(|entry| !shell_fs::is_shell_namespace_path(&entry.path));
+        let current_local = !shell_fs::is_shell_namespace_path(&self.current_dir);
+        let has_clipboard = self.clipboard.borrow().is_some() || file_clipboard::has_files();
+        let current_favorite = self.current_dir_is_favorite();
+        let view_mode = self.view_mode;
+        let loading = self.loading;
+        let path_bar = self.show_path_bar.then(|| self.render_path_bar(cx));
+
+        let navigation_group = h_flex()
+            .h(px(34.))
+            .gap_0p5()
+            .px_1()
+            .items_center()
+            .rounded_md()
+            .bg(cx.theme().background.opacity(0.42))
+            .child(
+                Button::new("nav-back")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::ChevronLeft)
+                    .tooltip("返回 (Alt+←)")
+                    .disabled(!can_back)
+                    .on_click(cx.listener(Self::go_back)),
+            )
+            .child(
+                Button::new("nav-forward")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::ChevronRight)
+                    .tooltip("前进 (Alt+→)")
+                    .disabled(!can_forward)
+                    .on_click(cx.listener(Self::go_forward)),
+            )
+            .child(
+                Button::new("nav-up")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::ArrowUp)
+                    .tooltip("上一级 (Alt+↑)")
+                    .disabled(!can_up)
+                    .on_click(cx.listener(Self::go_up)),
+            )
+            .child(
+                Button::new("refresh")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::RotateCw)
+                    .tooltip("刷新 (Ctrl+R)")
+                    .on_click(cx.listener(Self::refresh_clicked)),
+            );
+
+        let actions = h_flex()
+            .h(px(34.))
+            .gap_0p5()
+            .px_1()
+            .items_center()
+            .rounded_md()
+            .bg(cx.theme().background.opacity(0.42))
+            .child(
+                Button::new("favorite-current-directory")
+                    .ghost()
+                    .compact()
+                    .icon(if current_favorite {
+                        IconName::StarMinus
+                    } else {
+                        IconName::StarPlus
+                    })
+                    .tooltip(if current_favorite {
+                        "取消收藏当前文件夹"
+                    } else {
+                        "收藏当前文件夹"
+                    })
+                    .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
+                        this.toggle_current_favorite(cx)
+                    })),
+            )
+            .child(
+                Button::new("copy")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::Copy)
+                    .tooltip("复制 (Ctrl+C)")
+                    .disabled(!selected_local)
+                    .on_click(cx.listener(Self::copy_clicked)),
+            )
+            .child(
+                Button::new("cut")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::Scissors)
+                    .tooltip("剪切 (Ctrl+X)")
+                    .disabled(!selected_local)
+                    .on_click(cx.listener(Self::cut_clicked)),
+            )
+            .child(
+                Button::new("paste")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::ClipboardPaste)
+                    .tooltip("粘贴 (Ctrl+V)")
+                    .disabled(!has_clipboard || !current_local)
+                    .on_click(cx.listener(Self::paste_clicked)),
+            )
+            .child(
+                Button::new("new-folder")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::FolderPlus)
+                    .tooltip("新建文件夹 (Ctrl+Shift+N)")
+                    .disabled(loading || !current_local)
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.begin_new_folder(window, cx)
+                    })),
+            )
+            .child(
+                Button::new("toggle-view")
+                    .ghost()
+                    .compact()
+                    .icon(if view_mode == ViewMode::Columns {
+                        IconName::List
+                    } else {
+                        IconName::Columns3
+                    })
+                    .tooltip(if view_mode == ViewMode::Columns {
+                        "切换到列表视图 (Ctrl+1)"
+                    } else {
+                        "切换到分栏视图 (Ctrl+2)"
+                    })
+                    .on_click(cx.listener(Self::toggle_view_clicked)),
+            )
+            .child(
+                Button::new("toggle-path-bar")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::PanelBottom)
+                    .tooltip("显示或隐藏路径栏 (Alt+P)")
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.toggle_path_bar(&TogglePathBar, window, cx);
+                    })),
+            );
+
+        let mut toolbar = v_flex()
+            .w_full()
+            .flex_shrink_0()
+            .gap_1()
+            .p_2()
+            .rounded_lg()
+            .bg(cx.theme().title_bar)
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                h_flex()
+                    .h(px(36.))
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(navigation_group)
+                    .child(
+                        div().flex_1().min_w(px(180.)).child(
+                            Input::new(&self.address_input)
+                                .aria_label("地址")
+                                .prefix(Icon::new(IconName::Folder).size_4()),
+                        ),
+                    )
+                    .child(
+                        Input::new(&self.search_input)
+                            .aria_label("搜索")
+                            .prefix(Icon::new(IconName::Search).size_4())
+                            .cleanable(true)
+                            .w(px(168.)),
+                    )
+                    .child(actions),
+            );
+        if let Some(path_bar) = path_bar {
+            toolbar = toolbar.child(path_bar);
+        }
+        toolbar.into_any_element()
+    }
+
     fn toggle_theme(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         let mode = if cx.theme().mode.is_dark() {
             ThemeMode::Light
@@ -2967,32 +3167,6 @@ impl KiteApp {
                 .text_xs()
                 .font_medium()
                 .text_color(section_color)
-                .child("收藏"),
-        );
-        if self.favorites.is_empty() {
-            content = content.child(
-                div()
-                    .px_2()
-                    .pb_2()
-                    .text_xs()
-                    .text_color(section_color)
-                    .child("右键文件或文件夹添加"),
-            );
-        } else {
-            for favorite in self.favorites.clone() {
-                let active = favorite.is_directory
-                    && same_path(Path::new(&favorite.path), &self.current_dir);
-                content = content.child(self.favorite_item(favorite, active, cx));
-            }
-        }
-        content = content.child(
-            div()
-                .px_2()
-                .pt_4()
-                .pb_1()
-                .text_xs()
-                .font_medium()
-                .text_color(section_color)
                 .child("快速访问"),
         );
         for link in self.quick_links.clone() {
@@ -3011,6 +3185,32 @@ impl KiteApp {
                 },
                 cx,
             ));
+        }
+        content = content.child(
+            div()
+                .px_2()
+                .pt_4()
+                .pb_1()
+                .text_xs()
+                .font_medium()
+                .text_color(section_color)
+                .child("收藏"),
+        );
+        if self.favorites.is_empty() {
+            content = content.child(
+                div()
+                    .px_2()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(section_color)
+                    .child("点击工具栏星标或右键菜单添加"),
+            );
+        } else {
+            for favorite in self.favorites.clone() {
+                let active = favorite.is_directory
+                    && same_path(Path::new(&favorite.path), &self.current_dir);
+                content = content.child(self.favorite_item(favorite, active, cx));
+            }
         }
         if !self.connected_devices.is_empty() || !self.portable_devices.is_empty() {
             content = content.child(
@@ -3072,21 +3272,74 @@ impl KiteApp {
             ));
         }
 
+        let settings = DropdownButton::new("sidebar-settings")
+            .with_size(Size::Small)
+            .menu_accessibility_label("Kite 设置")
+            .button(
+                Button::new("sidebar-settings-action")
+                    .ghost()
+                    .compact()
+                    .label("设置")
+                    .tooltip("Kite 设置"),
+            )
+            .dropdown_menu(|menu, _, _| {
+                menu.menu("检查更新…", Box::new(CheckForUpdates))
+                    .separator()
+                    .menu("设为默认资源管理器…", Box::new(SetDefaultExplorer))
+                    .separator()
+                    .menu(
+                        "恢复之前的文件夹打开方式…",
+                        Box::new(RestoreDefaultExplorer),
+                    )
+                    .separator()
+                    .menu("创建开始菜单快捷方式…", Box::new(CreateStartMenuShortcut))
+            });
+        let theme_icon = if cx.theme().mode.is_dark() {
+            IconName::Sun
+        } else {
+            IconName::Moon
+        };
+        let theme_tooltip = if cx.theme().mode.is_dark() {
+            "切换到浅色主题"
+        } else {
+            "切换到深色主题"
+        };
+
         v_flex()
-            .w(px(208.))
+            .w(px(218.))
             .h_full()
             .flex_shrink_0()
             .gap_1()
             .p_2()
+            .rounded_lg()
             .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
+            .border_1()
+            .border_color(cx.theme().border)
             .child(
                 v_flex()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scrollbar()
                     .child(content),
+            )
+            .child(
+                h_flex()
+                    .h(px(38.))
+                    .w_full()
+                    .px_1()
+                    .gap_1()
+                    .items_center()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(div().flex_1().child(settings))
+                    .child(
+                        Button::new("sidebar-theme")
+                            .ghost()
+                            .compact()
+                            .icon(theme_icon)
+                            .tooltip(theme_tooltip)
+                            .on_click(cx.listener(Self::toggle_theme)),
+                    ),
             )
             .into_any_element()
     }
@@ -3100,16 +3353,15 @@ impl KiteApp {
         let scroll_handle = self.path_bar_scroll.clone();
         let mut bar = h_flex()
             .id("path-bar")
-            .h(px(32.))
+            .h(px(28.))
             .w_full()
-            .px_3()
+            .px_2()
             .gap_1()
             .items_center()
+            .rounded_md()
             .overflow_x_scroll()
             .track_scroll(&scroll_handle)
-            .bg(cx.theme().status_bar)
-            .border_t_1()
-            .border_color(cx.theme().status_bar_border);
+            .bg(cx.theme().background.opacity(0.32));
         let count = segments.len();
         for (index, segment) in segments.into_iter().enumerate() {
             if segment.clickable {
@@ -3143,6 +3395,8 @@ impl KiteApp {
             .id("column-strip")
             .size_full()
             .items_stretch()
+            .gap_2()
+            .p_2()
             .overflow_x_scroll()
             .track_scroll(&scroll_handle);
         if self.column_panes.is_empty() {
@@ -3454,10 +3708,13 @@ impl KiteApp {
         }
 
         v_flex()
-            .w(px(420.))
+            .w(px(316.))
             .h_full()
             .flex_shrink_0()
-            .border_r_1()
+            .rounded_lg()
+            .overflow_hidden()
+            .bg(cx.theme().title_bar)
+            .border_1()
             .border_color(border)
             .child(
                 h_flex()
@@ -3634,16 +3891,19 @@ impl KiteApp {
         };
         v_flex()
             .id(("column", index))
-            .w(px(250.))
+            .w(px(274.))
             .h_full()
             .flex_shrink_0()
-            .border_r_1()
+            .rounded_lg()
+            .overflow_hidden()
+            .bg(cx.theme().title_bar)
+            .border_1()
             .border_color(border)
             .child(
                 h_flex()
                     .h(px(34.))
                     .w_full()
-                    .px_2()
+                    .px_3()
                     .gap_2()
                     .items_center()
                     .border_b_1()
@@ -4540,17 +4800,8 @@ impl EventEmitter<TabRequest> for KiteApp {}
 
 impl Render for KiteApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_dark = cx.theme().mode.is_dark();
-        let can_back = self.history_index > 0;
-        let can_forward = self.history_index + 1 < self.history.len();
-        let can_up = navigation_parent(&self.current_dir).is_some();
         let selected = self.selected_entry(cx);
         let selected_exists = selected.is_some();
-        let selected_local = selected
-            .as_ref()
-            .is_some_and(|entry| !shell_fs::is_shell_namespace_path(&entry.path));
-        let current_local = !shell_fs::is_shell_namespace_path(&self.current_dir);
-        let has_clipboard = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let column_mode = self.view_mode == ViewMode::Columns && self.active_search.is_none();
         let item_count = if column_mode {
             self.column_panes
@@ -4570,9 +4821,6 @@ impl Render for KiteApp {
         let active_search = self.active_search.clone();
         let search_truncated = self.search_truncated;
         let skipped = self.skipped;
-        let view_mode = self.view_mode;
-        let show_path_bar = self.show_path_bar;
-
         if self.column_scroll_pending {
             self.column_scroll_pending = false;
             let handle = self.column_scroll.clone();
@@ -4679,18 +4927,13 @@ impl Render for KiteApp {
                 )
                 .into_any_element()
         };
-        let path_bar = if show_path_bar {
-            Some(self.render_path_bar(cx))
-        } else {
-            None
-        };
-
         v_flex()
             .id("kite-root")
             .key_context("Kite")
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
+            .gap_2()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(
@@ -4751,205 +4994,14 @@ impl Render for KiteApp {
             .on_action(cx.listener(Self::set_default_explorer))
             .on_action(cx.listener(Self::restore_default_explorer))
             .on_action(cx.listener(Self::create_start_menu_shortcut))
-            .child(
-                h_flex()
-                    .h(px(54.))
-                    .w_full()
-                    .flex_shrink_0()
-                    .px_3()
-                    .gap_2()
-                    .items_center()
-                    .bg(cx.theme().title_bar)
-                    .border_b_1()
-                    .border_color(cx.theme().title_bar_border)
-                    .child(
-                        Button::new("nav-back")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::ChevronLeft)
-                            .tooltip("返回 (Alt+←)")
-                            .disabled(!can_back)
-                            .on_click(cx.listener(Self::go_back)),
-                    )
-                    .child(
-                        Button::new("nav-forward")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::ChevronRight)
-                            .tooltip("前进 (Alt+→)")
-                            .disabled(!can_forward)
-                            .on_click(cx.listener(Self::go_forward)),
-                    )
-                    .child(
-                        Button::new("nav-up")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::ArrowUp)
-                            .tooltip("上一级 (Alt+↑)")
-                            .disabled(!can_up)
-                            .on_click(cx.listener(Self::go_up)),
-                    )
-                    .child(
-                        Input::new(&self.address_input)
-                            .aria_label("地址")
-                            .prefix(Icon::new(IconName::Folder).size_4())
-                            .flex_1()
-                            .min_w(px(160.)),
-                    )
-                    .child(
-                        Input::new(&self.search_input)
-                            .aria_label("搜索")
-                            .prefix(Icon::new(IconName::Search).size_4())
-                            .cleanable(true)
-                            .w(px(180.)),
-                    )
-                    .child(
-                        Button::new("refresh")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::RotateCw)
-                            .tooltip("刷新 (Ctrl+R)")
-                            .on_click(cx.listener(Self::refresh_clicked)),
-                    )
-                    .child(
-                        Button::new("copy")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::Copy)
-                            .tooltip("复制 (Ctrl+C)")
-                            .disabled(!selected_local)
-                            .on_click(cx.listener(Self::copy_clicked)),
-                    )
-                    .child(
-                        Button::new("cut")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::Scissors)
-                            .tooltip("剪切 (Ctrl+X)")
-                            .disabled(!selected_local)
-                            .on_click(cx.listener(Self::cut_clicked)),
-                    )
-                    .child(
-                        Button::new("paste")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::ClipboardPaste)
-                            .tooltip("粘贴 (Ctrl+V)")
-                            .disabled(!has_clipboard || !current_local)
-                            .on_click(cx.listener(Self::paste_clicked)),
-                    )
-                    .child(
-                        Button::new("new-folder")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::FolderPlus)
-                            .tooltip("新建文件夹 (Ctrl+Shift+N)")
-                            .disabled(self.loading || !current_local)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.begin_new_folder(window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("rename")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::Pencil)
-                            .tooltip("重命名 (F2)")
-                            .disabled(!selected_local)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.begin_rename(window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("recycle")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::Trash)
-                            .tooltip("移到回收站 (Delete)")
-                            .disabled(!selected_local)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.confirm_recycle(window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("toggle-view")
-                            .ghost()
-                            .compact()
-                            .icon(if view_mode == ViewMode::Columns {
-                                IconName::List
-                            } else {
-                                IconName::Columns3
-                            })
-                            .tooltip(if view_mode == ViewMode::Columns {
-                                "切换到列表视图 (Ctrl+1)"
-                            } else {
-                                "切换到分栏视图 (Ctrl+2)"
-                            })
-                            .on_click(cx.listener(Self::toggle_view_clicked)),
-                    )
-                    .child(
-                        Button::new("toggle-path-bar")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::PanelBottom)
-                            .tooltip("显示或隐藏路径栏 (Alt+P)")
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.toggle_path_bar(&TogglePathBar, window, cx);
-                            })),
-                    )
-                    .child(
-                        DropdownButton::new("default-explorer-menu")
-                            .with_size(Size::Small)
-                            .menu_accessibility_label("Kite 设置")
-                            .button(
-                                Button::new("default-explorer-action")
-                                    .ghost()
-                                    .compact()
-                                    .icon(IconName::FolderCog)
-                                    .tooltip("设为默认资源管理器")
-                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                        this.set_default_explorer(&SetDefaultExplorer, window, cx);
-                                    })),
-                            )
-                            .dropdown_menu(|menu, _, _| {
-                                menu.menu("检查更新…", Box::new(CheckForUpdates))
-                                    .separator()
-                                    .menu("设为默认资源管理器…", Box::new(SetDefaultExplorer))
-                                    .separator()
-                                    .menu(
-                                        "恢复之前的文件夹打开方式…",
-                                        Box::new(RestoreDefaultExplorer),
-                                    )
-                                    .separator()
-                                    .menu(
-                                        "创建开始菜单快捷方式…",
-                                        Box::new(CreateStartMenuShortcut),
-                                    )
-                            }),
-                    )
-                    .child(
-                        Button::new("theme")
-                            .ghost()
-                            .compact()
-                            .icon(if is_dark {
-                                IconName::Sun
-                            } else {
-                                IconName::Moon
-                            })
-                            .tooltip(if is_dark {
-                                "切换到浅色主题"
-                            } else {
-                                "切换到深色主题"
-                            })
-                            .on_click(cx.listener(Self::toggle_theme)),
-                    ),
-            )
+            .child(self.render_toolbar(cx))
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
                     .w_full()
                     .items_stretch()
+                    .gap_2()
                     .child(sidebar)
                     .child(
                         v_flex()
@@ -4957,6 +5009,11 @@ impl Render for KiteApp {
                             .h_full()
                             .min_w_0()
                             .min_h_0()
+                            .rounded_lg()
+                            .overflow_hidden()
+                            .bg(cx.theme().title_bar)
+                            .border_1()
+                            .border_color(cx.theme().border)
                             .child(if loading {
                                 div()
                                     .h(px(2.))
@@ -4974,18 +5031,18 @@ impl Render for KiteApp {
                             .child(div().flex_1().min_h_0().w_full().child(main_view)),
                     ),
             )
-            .when_some(path_bar, |this, path_bar| this.child(path_bar))
             .child(
                 h_flex()
-                    .h(px(28.))
+                    .h(px(30.))
                     .w_full()
                     .flex_shrink_0()
                     .px_3()
                     .gap_3()
                     .items_center()
                     .justify_between()
+                    .rounded_lg()
                     .bg(cx.theme().status_bar)
-                    .border_t_1()
+                    .border_1()
                     .border_color(cx.theme().status_bar_border)
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
