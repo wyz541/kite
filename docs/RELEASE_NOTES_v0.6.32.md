@@ -8,6 +8,9 @@ Kite v0.6.32 adds native file clipboard support, copy-to-directory actions, and 
 - Add a sidebar for locations, favorites, and Rust-enumerated volumes.
 - Add breadcrumb navigation and a path editor.
 - Add glass-selected rows, preview cards, and a floating status bar.
+- Add a current-folder favorite toggle to the toolbar.
+- Add add/remove favorite actions to file and directory context menus.
+- Add a settings menu at the bottom of the sidebar.
 - Keep the active directory column visible.
 - Keep short column sets aligned to the left.
 - Use localized macOS display names for tabs, columns, and status text.
