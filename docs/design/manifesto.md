@@ -1,8 +1,9 @@
-# Kite 设计宣言
+# Kite 项目宪法
 
 > 牵风，而不是看管数据。
 
 - 状态：长期设计原则
+- 文件性质：项目设计、交互和架构的最高约束
 - 适用范围：产品、交互、视觉、架构和验收
 
 ## 1. 起点：从柜子到风
@@ -190,10 +191,11 @@ Kite 的约束包括目标、范围、空间和平台能力。
 | 视角保留上下文 | 上级和当前层级同时可见 | 分栏持续显示路径位置 |
 | 可逆优先 | 探索后可以恢复控制 | 历史、废纸篓、会话恢复和确认 |
 | 原生是手 | 每端使用正确系统语言 | Windows GPUI，macOS SwiftUI + AppKit |
+| macOS 定义视觉基准 | 两端遵循同一套 Kite 视觉与交互规范 | Windows GPUI 向 macOS Kite UI 对齐 |
 
 ## 5. 反模式
 
-以下做法违背本宣言：
+以下做法违背本宪法：
 
 - 把 folder 当作仓库。
 - 把功能数量当作产品重量。
@@ -205,9 +207,46 @@ Kite 的约束包括目标、范围、空间和平台能力。
 - 用动画掩盖系统延迟。
 - 用不可逆动作换取表面速度。
 - 为统一界面破坏平台习惯。
+- 要求 macOS 放弃 SwiftUI 和 AppKit。
+- 把 GPUI 当作两端共享的 UI 渲染器。
+- 以 Windows 界面反推 macOS 界面。
+- 用平台差异解释本可避免的结构和交互偏差。
 - 把空、损坏和加载状态混为一谈。
 
 ## 6. 架构映射
+
+### UI 权威边界
+
+Kite 使用两个原生 UI 前端。
+两端共享 Rust Core。
+两端共享本宪法。
+两端不共享 UI 渲染器或 UI 组件代码。
+
+```text
+Kite Rust Core
+├── macOS：SwiftUI + AppKit
+│   └── 视觉与交互基准
+└── Windows：Rust + GPUI
+    └── 按 macOS Kite UI 实现
+```
+
+macOS 是 Kite 视觉与交互的第一权威。
+Windows 是同一产品语言在 GPUI 中的实现。
+
+以下规则具有最高优先级：
+
+1. macOS 保持 SwiftUI 和 AppKit。
+2. macOS 不使用 GPUI，也不使用 egui。
+3. Windows 保持 Rust 和 GPUI。
+4. Windows 不以另一套视觉语言重新设计 macOS 界面。
+5. Windows 对齐 macOS 的页面结构、工具栏分组、侧边栏组织、分栏关系、间距、圆角、字号层级和操作位置。
+6. Windows 保留标题栏、系统菜单、文件对话框、Shell 菜单和字体渲染等平台能力。
+7. Windows 可使用 GPUI 材质替代 Liquid Glass。
+8. 材质差异不构成改变布局和交互结构的理由。
+9. 新界面先由 macOS 定义产品和交互基准。
+10. 仅 Windows 支持的能力沿用同一视觉语言，并补充明确规范。
+11. 有意偏离 macOS 基准时，设计评审必须记录原因和影响。
+12. Rust Core 不依赖 GPUI、SwiftUI 或 AppKit。
 
 ### Rust Core
 
@@ -218,18 +257,25 @@ Core 不依赖 UI 渲染器。
 ### Windows
 
 Windows 使用 Rust 和 GPUI。
+Windows GPUI UI 以 macOS Kite UI 为实现基准。
+Windows 可以按平台能力调整标题栏、系统菜单和材质。
+Windows 不改变 macOS 定义的页面结构和交互层级。
 Windows Shell、Recycle Bin 和 WPD 由系统能力承担。
 列菜单和行菜单使用明确目标。
 
 ### macOS
 
 macOS 使用 SwiftUI 和 AppKit。
+macOS 原生 UI 是 Kite 的视觉与交互基准。
+macOS 不迁移到 GPUI。
 Window、Quick Look、Finder、Services 和 Trash 使用原生 API。
 macOS 26 使用 Liquid Glass。
 macOS 13 到 15 使用标准材质降级。
 
 平台不同。
+视觉基准相同。
 规则相同。
+UI 渲染器不合并。
 
 ## 7. 设计评审问题
 
@@ -243,6 +289,8 @@ macOS 13 到 15 使用标准材质降级。
 6. 加载、空状态、错误和不可用状态清楚吗？
 7. UI 在后台工作中保持响应吗？
 8. 该平台使用正确的原生中介吗？
+9. Windows 是否对齐了 macOS Kite UI 的结构和交互？
+10. 任何平台差异是否仅来自系统能力？
 
 任一问题没有明确答案时，设计未完成。
 
