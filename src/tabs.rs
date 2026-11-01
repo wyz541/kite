@@ -366,11 +366,11 @@ impl KiteWindow {
                 h_flex()
                     .id(format!("kite-tab-{index}"))
                     .relative()
-                    .w(px(188.))
-                    .h(px(30.))
+                    .w(px(174.))
+                    .h(px(28.))
                     .flex_shrink_0()
                     .items_center()
-                    .rounded_md()
+                    .rounded_lg()
                     .bg(if active {
                         active_background
                     } else {
@@ -395,9 +395,10 @@ impl KiteWindow {
             .px_2()
             .gap_2()
             .items_center()
+            .rounded_lg()
             .bg(cx.theme().title_bar)
-            .border_b_1()
-            .border_color(cx.theme().title_bar_border)
+            .border_1()
+            .border_color(cx.theme().border)
             .child(
                 h_flex()
                     .id("kite-tab-scroll")
@@ -473,6 +474,8 @@ impl Render for KiteWindow {
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
+            .p_2()
+            .gap_2()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(Self::on_new_tab))

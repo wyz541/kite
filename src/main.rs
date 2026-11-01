@@ -46,7 +46,7 @@ fn main() {
                     title: Some("Kite".into()),
                     ..Default::default()
                 }),
-                window_bounds: Some(WindowBounds::centered(size(px(1180.), px(760.)), cx)),
+                window_bounds: Some(WindowBounds::centered(size(px(1240.), px(800.)), cx)),
                 ..Default::default()
             };
 
