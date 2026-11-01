@@ -365,6 +365,18 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    func isFavorite(path: String) -> Bool {
+        favorite(at: path) != nil
+    }
+
+    func toggleFavorite(path: String, name: String, isDirectory: Bool) {
+        if let favorite = favorite(at: path) {
+            removeFavorite(favorite)
+        } else {
+            addFavorite(path: path, name: name, isDirectory: isDirectory)
+        }
+    }
+
     func removeFavorite(_ favorite: FavoriteEntryDto) {
         do {
             _ = try core.removeFavorite(path: favorite.path)
@@ -372,6 +384,13 @@ final class KiteModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func favorite(at path: String) -> FavoriteEntryDto? {
+        let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        return favorites.first {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path == normalizedPath
         }
     }
 
