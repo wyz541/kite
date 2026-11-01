@@ -14,9 +14,7 @@ struct ContentView: View {
             KiteGlassBackdrop()
 
             VStack(spacing: 0) {
-                Color.clear
-                    .frame(height: 28)
-                    .contentShape(Rectangle())
+                header
 
                 HStack(spacing: 10) {
                     if showsSidebar {
@@ -26,7 +24,6 @@ struct ContentView: View {
 
                     VStack(spacing: 10) {
                         tabBar
-                        toolbar
                         KiteColumnBrowser(model: model, showsPreview: $showsPreview)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         statusBar
@@ -38,11 +35,41 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 1000, minHeight: 660)
+        .ignoresSafeArea(.container, edges: .top)
         .background(KiteWindowConfigurator())
         .onChange(of: model.focusedAddressRequest) { _ in
             beginAddressEditing()
         }
         .animation(.snappy(duration: 0.22), value: showsSidebar)
+    }
+
+    private var header: some View {
+        KiteGlassEffectContainer(spacing: 9) {
+            HStack(spacing: 9) {
+                Color.clear
+                    .frame(width: 72, height: 44)
+                    .contentShape(Rectangle())
+
+                KiteToolbarIconButton(
+                    systemName: "sidebar.left",
+                    title: showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
+                    isActive: showsSidebar
+                ) {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showsSidebar.toggle()
+                    }
+                }
+                .padding(.horizontal, 4)
+                .frame(height: 40)
+                .kiteGlass(.panel, cornerRadius: 14)
+
+                navigationControls
+                addressBar
+                actionControls
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 52)
+        }
     }
 
     private var tabBar: some View {
@@ -75,16 +102,6 @@ struct ContentView: View {
                     .padding(.horizontal, 1)
 
                 KiteToolbarIconButton(
-                    systemName: "sidebar.left",
-                    title: showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
-                    isActive: showsSidebar
-                ) {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        showsSidebar.toggle()
-                    }
-                }
-
-                KiteToolbarIconButton(
                     systemName: "rectangle.righthalf.inset.filled",
                     title: showsPreview ? "隐藏预览" : "显示预览",
                     isActive: showsPreview
@@ -97,16 +114,6 @@ struct ContentView: View {
             .padding(.horizontal, 6)
             .frame(height: 38)
             .kiteGlass(.panel, cornerRadius: 14)
-        }
-    }
-
-    private var toolbar: some View {
-        KiteGlassEffectContainer(spacing: 9) {
-            HStack(spacing: 9) {
-                navigationControls
-                addressBar
-                actionControls
-            }
         }
     }
 
