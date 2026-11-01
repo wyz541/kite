@@ -95,16 +95,18 @@ Kite 在主菜单和工具栏中禁用这些操作。
 ## macOS 前端
 
 macOS 前端使用 SwiftUI 和 AppKit。
-macOS 26 或更新系统在功能层使用 Liquid Glass。
+macOS 26 或更新系统在导航外壳使用 Liquid Glass。
+玻璃表面覆盖页签栏、工具栏、侧边栏、选中行、预览栏和状态栏。
 macOS 13 到 15 使用标准材质降级。
 
 SwiftUI 负责以下能力：
 
-- Liquid Glass 工具栏和路径控件。
+- Liquid Glass 导航外壳、侧边栏、预览栏和状态栏。
 - 页签栏。
 - 窗口和工具栏。
+- 标准位置、收藏和 Rust 卷枚举侧边栏。
 - 分栏视图。
-- 路径输入。
+- 面包屑和路径输入。
 - 状态栏。
 - App commands。
 - 窗口关闭和退出时的会话保存。
@@ -179,12 +181,13 @@ Kite 只保留一个路径跳转入口。
 
 ## 默认文件夹打开方式
 
-Kite 支持将自身设为默认文件夹打开应用。
+Kite 支持将自身设为默认文件查看器。
 Windows 使用当前用户 `Folder\shell\open\command`。
-macOS 使用 LaunchServices `public.folder`。
+macOS 13 到 15 使用 LaunchServices `public.folder`。
+macOS 26 及更高版本使用全局 `NSFileViewer` 偏好。
 
 Windows 保存并恢复旧命令。
-macOS 将文件夹默认应用恢复为 Finder。
+macOS 将文件查看器恢复为 Finder。
 两端都不替换桌面、任务栏、Dock 或系统外壳。
 
 详细设计见 `docs/architecture/default-file-manager.md`。
@@ -233,8 +236,8 @@ macOS CI 执行以下检查：
 ## 当前边界
 
 - macOS 和 Windows 均支持页签和会话恢复。
-- macOS 26 使用 Liquid Glass 工具栏。
-- macOS 13 到 15 使用标准材质工具栏。
+- macOS 26 使用 Liquid Glass 导航外壳。
+- macOS 13 到 15 使用标准材质导航外壳。
 - macOS Git/SVN 完整菜单仍待接入共享命令模型。
 - macOS Finder Sync 扩展未实现。
 - macOS Universal Binary 未实现。

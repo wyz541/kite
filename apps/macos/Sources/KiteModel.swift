@@ -28,11 +28,14 @@ struct BrowserEntry: Identifiable, Hashable {
 struct BrowserColumn: Identifiable {
     let path: String
     let entries: [BrowserEntry]
+    let skipped: UInt64
+    let gitAvailable: Bool
+    let svnAvailable: Bool
     var selectedPath: String?
 
     var id: String { path }
     var title: String {
-        let name = URL(fileURLWithPath: path).lastPathComponent
+        let name = FileManager.default.displayName(atPath: path)
         return name.isEmpty ? path : name
     }
 }
@@ -44,7 +47,7 @@ struct BrowserTab: Identifiable {
 
     var currentPath: String { columns.last?.path ?? address }
     var title: String {
-        let name = URL(fileURLWithPath: currentPath).lastPathComponent
+        let name = FileManager.default.displayName(atPath: currentPath)
         return name.isEmpty ? currentPath : name
     }
 }
@@ -57,6 +60,7 @@ final class KiteModel: ObservableObject {
 
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var favorites: [FavoriteEntryDto] = []
+    @Published private(set) var volumes: [VolumeDto] = []
     @Published private(set) var activeTabID: UUID?
     @Published var errorMessage: String?
     @Published var focusedAddressRequest = 0
@@ -66,6 +70,7 @@ final class KiteModel: ObservableObject {
     init(core: KiteCore = KiteCore()) {
         self.core = core
         self.favorites = core.favorites()
+        self.volumes = core.devices().volumes
         restoreOrCreateTabs()
     }
 
@@ -203,6 +208,11 @@ final class KiteModel: ObservableObject {
 
     func refresh() {
         loadRoot(currentPath)
+        reloadVolumes()
+    }
+
+    func reloadVolumes() {
+        volumes = core.devices().volumes
     }
 
     func copyFile(_ path: String) {
@@ -396,18 +406,23 @@ final class KiteModel: ObservableObject {
         }
     }
 
-    func setAsDefaultFolderOpener() {
-        guard confirmFolderOpenerChange(
-            title: "设为默认文件夹打开方式？",
-            message: "Kite 将成为文件夹的默认应用。",
-            detail: "macOS 仍将 Finder 作为系统外壳。",
+    func setAsDefaultFileViewer() {
+        let canSetFolderHandler = KitePlatform.canSetDefaultFolderHandler
+        guard confirmFileViewerChange(
+            title: canSetFolderHandler ? "设为默认文件夹打开方式？" : "设为默认文件查看器？",
+            message: canSetFolderHandler
+                ? "Kite 将成为文件夹的默认应用。"
+                : "Kite 将处理“在 Finder 中显示”请求。",
+            detail: canSetFolderHandler
+                ? "Finder 仍将作为系统外壳。"
+                : "macOS 26 及更高版本保留 Finder 为默认文件夹应用。",
             action: "继续"
         ) else {
             return
         }
         Task {
             do {
-                try await KitePlatform.setKiteAsDefaultFolderOpener()
+                try await KitePlatform.setKiteAsDefaultFileViewer()
                 errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
@@ -415,18 +430,23 @@ final class KiteModel: ObservableObject {
         }
     }
 
-    func restoreFinderAsDefaultFolderOpener() {
-        guard confirmFolderOpenerChange(
+    func restoreFinderAsDefaultFileViewer() {
+        let canSetFolderHandler = KitePlatform.canSetDefaultFolderHandler
+        guard confirmFileViewerChange(
             title: "恢复 Finder？",
-            message: "Finder 将重新成为文件夹的默认应用。",
-            detail: "Kite 的其他文件和目录保持不变。",
+            message: canSetFolderHandler
+                ? "Finder 将重新成为文件夹的默认应用。"
+                : "Finder 将处理“在 Finder 中显示”请求。",
+            detail: canSetFolderHandler
+                ? "Kite 的其他文件和目录保持不变。"
+                : "文件夹双击仍由 Finder 处理。",
             action: "恢复"
         ) else {
             return
         }
         Task {
             do {
-                try await KitePlatform.restoreFinderAsDefaultFolderOpener()
+                try await KitePlatform.restoreFinderAsDefaultFileViewer()
                 errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
@@ -534,6 +554,34 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    func revealExternalItems(_ paths: [String]) {
+        for path in paths {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+                continue
+            }
+
+            if isDirectory.boolValue {
+                newTab(path: path)
+                continue
+            }
+
+            let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+            do {
+                let tab = try makeTab(path: parent)
+                tabs.append(tab)
+                activeTabID = tab.id
+                if let index = activeTabIndex,
+                   let columnIndex = tabs[index].columns.indices.last {
+                    tabs[index].columns[columnIndex].selectedPath = path
+                }
+                errorMessage = nil
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func saveSession() {
         guard !tabs.isEmpty else { return }
         let savedTabs = tabs.map { tab in
@@ -630,6 +678,9 @@ final class KiteModel: ObservableObject {
         BrowserColumn(
             path: listing.path,
             entries: listing.entries.map(BrowserEntry.init(dto:)),
+            skipped: listing.skipped,
+            gitAvailable: listing.gitAvailable,
+            svnAvailable: listing.svnAvailable,
             selectedPath: nil
         )
     }
@@ -661,7 +712,7 @@ final class KiteModel: ObservableObject {
         return removedURL.deletingLastPathComponent().path
     }
 
-    private func confirmFolderOpenerChange(
+    private func confirmFileViewerChange(
         title: String,
         message: String,
         detail: String,
