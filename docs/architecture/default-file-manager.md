@@ -2,8 +2,9 @@
 
 ## 结论
 
-Kite 支持接管文件夹打开操作。
-Windows 和 macOS 使用不同的原生机制。
+Kite 支持默认文件管理器集成。
+Windows 直接接管文件夹打开操作。
+macOS 使用系统允许的文件查看器机制。
 
 系统外壳保持不变。
 Windows 继续运行 Explorer。
@@ -24,9 +25,9 @@ Windows 没有公开的“默认文件管理器”用户设置。
 文件夹打开由 Shell 文件关联决定。
 
 macOS 没有公开的 Finder 替换机制。
-LaunchServices 只设置内容类型的默认应用。
+macOS 13 到 15 允许设置 `public.folder` 默认应用。
+macOS 26 及更高版本拒绝第三方应用接管文件夹双击。
 
-因此，两端只接管文件夹打开操作。
 两端不替换桌面、任务栏、Dock 或系统外壳。
 
 ## Windows
@@ -122,7 +123,7 @@ PowerToys Run 缓存应用列表。
 `Info.plist` 声明 `public.folder` 文档类型。
 `LSHandlerRank` 使用 `Alternate`。
 
-### 设置流程
+### 设置流程：macOS 13 到 15
 
 Kite 调用以下 AppKit API：
 
@@ -135,9 +136,29 @@ NSWorkspace.shared.setDefaultApplication(
 
 系统可以显示用户同意提示。
 
+### 设置流程：macOS 26 及更高版本
+
+Kite 写入当前用户的全局文件查看器偏好：
+
+```text
+NSFileViewer = com.wyz541.kite
+```
+
+macOS 将这些请求发送到 Kite：
+
+- 其他应用的“在 Finder 中显示”请求。
+- Finder 的 `show` Apple Event。
+- 系统文件查看请求。
+
+Kite 注册 `misc/mvis` 和 `FNDR/show` Apple Event 处理器。
+文件请求打开父目录并选中目标文件。
+文件夹请求打开新页签。
+Finder 继续处理文件夹双击、Dock 和桌面。
+
 ### 恢复流程
 
-Kite 将文件夹默认应用设置回 Finder。
+Kite 删除 `NSFileViewer` 偏好。
+macOS 13 到 15 还会将文件夹默认应用设置回 Finder。
 
 ```swift
 NSWorkspace.shared.setDefaultApplication(
@@ -149,8 +170,9 @@ NSWorkspace.shared.setDefaultApplication(
 ### 打开请求
 
 macOS 通过 AppDelegate 接收打开 URL。
-Kite 过滤文件夹 URL。
-每个文件夹打开一个新页签。
+文件夹打开新页签。
+文件打开父目录并选中文件。
+Apple Event 和普通打开请求共用同一个待处理队列。
 
 冷启动请求进入待处理队列。
 SwiftUI 内容视图出现后处理待处理队列。
@@ -160,7 +182,8 @@ SwiftUI 内容视图出现后处理待处理队列。
 - Finder 仍是系统外壳。
 - Finder 窗口仍由 Finder 管理。
 - Dock、桌面和系统文件面板仍由 macOS 管理。
-- LaunchServices 只改变文件夹默认打开应用。
+- macOS 26 及更高版本保留 Finder 的文件夹双击行为。
+- `NSFileViewer` 只改变其他应用的“在 Finder 中显示”目标。
 
 ## 安全要求
 
@@ -185,6 +208,6 @@ Windows 测试覆盖以下行为：
 macOS CI 覆盖以下检查：
 
 - SwiftUI 和 AppKit 编译。
-- LaunchServices API 使用当前 SDK。
+- 文件查看器偏好和 Apple Event 路由编译。
 - `public.folder` 声明有效。
 - 原生 UI 边界检查。

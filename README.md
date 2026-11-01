@@ -49,7 +49,7 @@ Kite 把界面当作一条可牵引的线。
 - Windows 双击文件调用 Shell 默认程序。
 - macOS 双击文件调用 `NSWorkspace`。
 - 在 Windows 中将 Kite 设为默认文件夹打开方式。
-- 在 macOS 中将 Kite 设为默认文件夹打开应用。
+- 在 macOS 中将 Kite 设为默认文件查看器。
 - 恢复设置前的文件夹打开方式。
 - 新建文件夹、新建文件、重命名和移到回收站。
 - 复制、剪切和粘贴文件或文件夹。
@@ -65,8 +65,8 @@ Kite 把界面当作一条可牵引的线。
 - 检查 GitHub Release，并更新本机 Kite。
 - 过滤 Windows 隐藏属性和系统属性的项目。
 - macOS 使用平台文件名规则和卷枚举。
-- macOS 26 工具栏使用 Liquid Glass。
-- macOS 13 到 15 工具栏使用标准材质。
+- macOS 26 导航外壳使用 Liquid Glass。
+- macOS 13 到 15 导航外壳使用标准材质。
 
 ## 软件更新
 
@@ -107,9 +107,12 @@ ZIP 便携版默认不进入 Windows Search 或 PowerToys Run。
 Kite 写入当前用户 `App Paths\Kite.exe`，并创建 `Kite.lnk`。
 重启 PowerToys Run 或重新加载应用列表后即可搜索 Kite。
 
-macOS 用户打开 `文件夹 > 设为默认文件夹打开方式…`。
+macOS 13 到 15 用户打开 `文件夹 > 设为默认文件夹打开方式…`。
 Kite 使用 LaunchServices 设置 `public.folder` 的默认应用。
-`文件夹 > 恢复 Finder 为默认…` 恢复 Finder。
+macOS 26 及更高版本不允许第三方应用接管文件夹双击。
+这些系统显示 `文件夹 > 设为默认文件查看器…`。
+Kite 使用 `NSFileViewer` 处理其他应用的“在 Finder 中显示”请求。
+`文件夹 > 恢复 Finder 为默认…` 恢复 Finder 行为。
 macOS 仍将 Finder 作为系统外壳。
 
 详细设计见 `docs/architecture/default-file-manager.md`。
@@ -218,7 +221,7 @@ TortoiseGit 和 TortoiseSVN 扩展也可出现在此菜单中。
 右键文件或文件夹可添加到收藏。
 收藏配置跨启动保留。
 Windows 收藏项显示在侧边栏。
-macOS 收藏项显示在工具栏下方。
+macOS 收藏项显示在侧边栏。
 详细设计见 `docs/architecture/favorites.md`。
 
 ## 分栏视图与路径栏
@@ -502,7 +505,11 @@ cargo clippy --all-targets --features windows-ui -- -D warnings
 - `src/favorites.rs`：跨平台收藏保存、去重和损坏回退。
 - `src/table.rs`：Windows 虚拟文件表格和列定义。
 - `src/main.rs`：Windows GPUI 前端入口。
-- `apps/macos/Sources`：SwiftUI 和 AppKit macOS 前端。
+- `apps/macos/Sources/ContentView.swift`：macOS 窗口、页签栏、工具栏和状态栏。
+- `apps/macos/Sources/KiteSidebar.swift`：macOS 位置、收藏和磁盘侧边栏。
+- `apps/macos/Sources/KiteColumnBrowser.swift`：macOS 分栏、文件行和右键菜单。
+- `apps/macos/Sources/KitePreviewPane.swift`：macOS Quick Look 预览和属性。
+- `apps/macos/Sources/GlassSurface.swift`：Liquid Glass 控件、降级材质和背景。
 - `build.rs`：Windows 图标和版本资源。
 - `assets/icon/kite-icon.svg`：矢量图标源文件。
 - `assets/icon/build_icons.py`：图标生成脚本。

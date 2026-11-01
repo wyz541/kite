@@ -1,6 +1,26 @@
 # Kite v0.6.32
 
-Kite v0.6.32 adds native file clipboard support and copy-to-directory actions.
+Kite v0.6.32 adds native file clipboard support, copy-to-directory actions, and a rebuilt macOS interface.
+
+## macOS Liquid Glass UI
+
+- Rebuild the macOS shell with Liquid Glass navigation surfaces.
+- Add a sidebar for locations, favorites, and Rust-enumerated volumes.
+- Add breadcrumb navigation and a path editor.
+- Add glass-selected rows, preview cards, and a floating status bar.
+- Keep the active directory column visible.
+- Keep short column sets aligned to the left.
+- Use localized macOS display names for tabs, columns, and status text.
+- Keep file listing, VCS state, volume discovery, sessions, and file operations in the Rust Core.
+
+## macOS default file viewer
+
+- Use LaunchServices folder association on macOS 13 through 15.
+- Use the global `NSFileViewer` preference on macOS 26 and later.
+- Handle Finder reveal requests through `misc/mvis` and `FNDR/show` Apple Events.
+- Open the parent directory and select the requested file.
+- Avoid the macOS error shown when a third-party folder association is rejected.
+- Restore Finder behavior without exposing a raw system error.
 
 ## File clipboard
 
@@ -35,7 +55,8 @@ Kite v0.6.32 adds native file clipboard support and copy-to-directory actions.
 
 - Add Finder-compatible `NSPasteboard` URL support.
 - Add copy, cut, paste, and “拷贝到…” context menu commands.
-- Add copy, cut, and paste toolbar buttons.
+- Add a Liquid Glass macOS application shell.
+- Add Finder reveal routing for the default file viewer.
 - Use Rust Core for file transfer and conflict naming.
 
 ## Safety
@@ -54,8 +75,10 @@ Kite v0.6.32 adds native file clipboard support and copy-to-directory actions.
 - Windows Clippy.
 - Windows release build.
 - macOS Core tests.
+- macOS 37 passed, 1 ignored, 0 failed.
 - macOS Clippy.
 - macOS SwiftUI and AppKit build.
+- macOS application launch and file-viewer routing smoke test.
 - Windows drop-files clipboard payload test.
 - Recursive folder copy test.
 - File and folder paste-target tests.

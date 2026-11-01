@@ -1,9 +1,12 @@
 import AppKit
-import QuickLookUI
 import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: KiteModel
+
+    @AppStorage("kite.macos.sidebar-visible") private var showsSidebar = true
+    @AppStorage("kite.macos.preview-visible") private var showsPreview = true
+    @State private var isEditingAddress = false
     @FocusState private var addressFocused: Bool
 
     var body: some View {
@@ -11,61 +14,529 @@ struct ContentView: View {
             KiteGlassBackdrop()
 
             VStack(spacing: 0) {
-                tabBar
-                toolbar
-                if !model.favorites.isEmpty {
-                    favoritesBar
+                Color.clear
+                    .frame(height: 28)
+                    .contentShape(Rectangle())
+
+                HStack(spacing: 10) {
+                    if showsSidebar {
+                        KiteSidebar(model: model)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+
+                    VStack(spacing: 10) {
+                        tabBar
+                        toolbar
+                        KiteColumnBrowser(model: model, showsPreview: $showsPreview)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        statusBar
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                columnBrowser
-                statusBar
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
             }
         }
-        .frame(minWidth: 900, minHeight: 620)
+        .frame(minWidth: 1000, minHeight: 660)
+        .background(KiteWindowConfigurator())
         .onChange(of: model.focusedAddressRequest) { _ in
+            beginAddressEditing()
+        }
+        .animation(.snappy(duration: 0.22), value: showsSidebar)
+    }
+
+    private var tabBar: some View {
+        KiteGlassEffectContainer(spacing: 7) {
+            HStack(spacing: 7) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 5) {
+                        ForEach(model.tabs) { tab in
+                            KiteTabItem(
+                                model: model,
+                                tab: tab,
+                                isActive: model.activeTabID == tab.id
+                            )
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+                .scrollIndicators(.hidden)
+
+                KiteToolbarIconButton(
+                    systemName: "plus",
+                    title: "新建页签"
+                ) {
+                    model.newTab()
+                }
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 0.5, height: 18)
+                    .padding(.horizontal, 1)
+
+                KiteToolbarIconButton(
+                    systemName: "sidebar.left",
+                    title: showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
+                    isActive: showsSidebar
+                ) {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showsSidebar.toggle()
+                    }
+                }
+
+                KiteToolbarIconButton(
+                    systemName: "rectangle.righthalf.inset.filled",
+                    title: showsPreview ? "隐藏预览" : "显示预览",
+                    isActive: showsPreview
+                ) {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showsPreview.toggle()
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 38)
+            .kiteGlass(.panel, cornerRadius: 14)
+        }
+    }
+
+    private var toolbar: some View {
+        KiteGlassEffectContainer(spacing: 9) {
+            HStack(spacing: 9) {
+                navigationControls
+                addressBar
+                actionControls
+            }
+        }
+    }
+
+    private var navigationControls: some View {
+        HStack(spacing: 2) {
+            KiteToolbarIconButton(
+                systemName: "arrow.up",
+                title: "上层文件夹 (Command+↑)",
+                isEnabled: canNavigateUp
+            ) {
+                model.navigateUp()
+            }
+
+            KiteToolbarIconButton(
+                systemName: "arrow.clockwise",
+                title: "刷新"
+            ) {
+                model.refresh()
+            }
+
+            if let selectedEntry = model.selectedColumnEntry {
+                KiteToolbarIconButton(
+                    systemName: selectedEntry.isDirectory
+                        ? "arrow.down.right"
+                        : "arrow.up.forward.app",
+                    title: selectedEntry.isDirectory ? "进入文件夹" : "打开文件"
+                ) {
+                    if selectedEntry.isDirectory {
+                        model.loadRoot(selectedEntry.path)
+                    } else {
+                        KitePlatform.open(selectedEntry.path)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 40)
+        .kiteGlass(.panel, cornerRadius: 14)
+    }
+
+    private var addressBar: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 7)
+
+            if isEditingAddress {
+                TextField("输入路径", text: $model.address)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .focused($addressFocused)
+                    .onSubmit {
+                        commitAddress()
+                    }
+                    .onExitCommand {
+                        cancelAddressEditing()
+                    }
+
+                Button("前往") {
+                    commitAddress()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .background(Color.accentColor.opacity(0.12), in: Capsule())
+            } else {
+                breadcrumbs
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                KiteToolbarIconButton(
+                    systemName: "pencil",
+                    title: "编辑路径 (Command+L)"
+                ) {
+                    beginAddressEditing()
+                }
+                .scaleEffect(0.88)
+            }
+        }
+        .padding(.horizontal, 5)
+        .frame(maxWidth: .infinity)
+        .frame(height: 40)
+        .kiteGlass(.panel, cornerRadius: 14)
+        .contextMenu {
+            Button("编辑路径") { beginAddressEditing() }
+            Button("拷贝当前路径") { KitePlatform.copyPath(model.currentPath) }
+            Button("在 Finder 中显示") { KitePlatform.revealInFinder(model.currentPath) }
+        }
+    }
+
+    private var breadcrumbs: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 2) {
+                ForEach(breadcrumbParts) { part in
+                    Button {
+                        model.loadRoot(part.path)
+                    } label: {
+                        Text(part.title)
+                            .font(.system(
+                                size: 11.5,
+                                weight: part.isCurrent ? .semibold : .regular
+                            ))
+                            .foregroundStyle(part.isCurrent ? Color.primary : Color.secondary)
+                            .lineLimit(1)
+                            .padding(.horizontal, 5)
+                            .frame(height: 24)
+                            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .background {
+                        if part.isCurrent {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.10))
+                        }
+                    }
+                    .help(part.path)
+                    .accessibilityLabel("打开 \(part.title)")
+
+                    if !part.isCurrent {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(.quaternary)
+                    }
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var actionControls: some View {
+        HStack(spacing: 2) {
+            KiteToolbarIconButton(
+                systemName: "doc.on.doc",
+                title: "拷贝选中项目",
+                isEnabled: model.selectedColumnEntry != nil
+            ) {
+                if let selectedEntry = model.selectedColumnEntry {
+                    model.copyFile(selectedEntry.path)
+                }
+            }
+
+            KiteToolbarIconButton(
+                systemName: "scissors",
+                title: "剪切选中项目",
+                isEnabled: model.selectedColumnEntry != nil
+            ) {
+                if let selectedEntry = model.selectedColumnEntry {
+                    model.cutFile(selectedEntry.path)
+                }
+            }
+
+            KiteToolbarIconButton(
+                systemName: "doc.on.clipboard",
+                title: "粘贴文件"
+            ) {
+                model.pasteFiles(into: model.currentPath)
+            }
+
+            KiteToolbarIconButton(
+                systemName: "folder.badge.plus",
+                title: "新建文件夹",
+                isEnabled: KitePlatform.canModify(model.currentPath)
+            ) {
+                model.createFolder(in: model.currentPath)
+            }
+
+            Menu {
+                Button {
+                    model.createFolder(in: model.currentPath)
+                } label: {
+                    Label("新建文件夹…", systemImage: "folder.badge.plus")
+                }
+
+                Button {
+                    model.createFile(in: model.currentPath)
+                } label: {
+                    Label("新建文件…", systemImage: "doc.badge.plus")
+                }
+
+                Divider()
+
+                Button {
+                    if let selectedEntry = model.selectedColumnEntry {
+                        model.copyFile(selectedEntry.path)
+                    }
+                } label: {
+                    Label("拷贝选中项目", systemImage: "doc.on.doc")
+                }
+                .disabled(model.selectedColumnEntry == nil)
+
+                Button {
+                    if let selectedEntry = model.selectedColumnEntry {
+                        model.cutFile(selectedEntry.path)
+                    }
+                } label: {
+                    Label("剪切选中项目", systemImage: "scissors")
+                }
+                .disabled(model.selectedColumnEntry == nil)
+
+                Button {
+                    model.pasteFiles(into: model.currentPath)
+                } label: {
+                    Label("粘贴文件", systemImage: "doc.on.clipboard")
+                }
+
+                Divider()
+
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showsSidebar.toggle()
+                    }
+                } label: {
+                    Label(
+                        showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
+                        systemImage: "sidebar.left"
+                    )
+                }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showsPreview.toggle()
+                    }
+                } label: {
+                    Label(
+                        showsPreview ? "隐藏预览" : "显示预览",
+                        systemImage: "rectangle.righthalf.inset.filled"
+                    )
+                }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+
+                Divider()
+
+                Button {
+                    model.checkForUpdates()
+                } label: {
+                    Label("检查更新…", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(model.updateInProgress)
+
+                Button {
+                    model.setAsDefaultFileViewer()
+                } label: {
+                    Label(
+                        KitePlatform.canSetDefaultFolderHandler
+                            ? "设为默认文件夹打开方式…"
+                            : "设为默认文件查看器…",
+                        systemImage: "folder.badge.gearshape"
+                    )
+                }
+
+                Button {
+                    model.restoreFinderAsDefaultFileViewer()
+                } label: {
+                    Label("恢复 Finder 为默认…", systemImage: "arrow.uturn.backward.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("更多操作")
+            .accessibilityLabel("更多操作")
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 40)
+        .fixedSize(horizontal: true, vertical: false)
+        .kiteGlass(.panel, cornerRadius: 14)
+    }
+
+    private var statusBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: statusSystemImage)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(statusAccent)
+
+            Text(statusText)
+                .font(.system(size: 10.5))
+                .foregroundStyle(statusAccent)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 8)
+
+            if let selectedEntry = model.selectedColumnEntry {
+                Text(selectedEntry.name)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Text("\(model.columns.last?.entries.count ?? 0) 个项目")
+                .font(.system(size: 10.5, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            if let skipped = model.columns.last?.skipped, skipped > 0 {
+                Text("已跳过 \(skipped)")
+                    .font(.system(size: 10.5, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            if model.columns.last?.gitAvailable == true {
+                KiteStatusBadge(title: "Git", systemImage: "arrow.triangle.branch")
+            }
+
+            if model.columns.last?.svnAvailable == true {
+                KiteStatusBadge(title: "SVN", systemImage: "arrow.triangle.branch")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .kiteGlass(.panel, cornerRadius: 12)
+    }
+
+    private var canNavigateUp: Bool {
+        URL(fileURLWithPath: model.currentPath).deletingLastPathComponent().path
+            != model.currentPath
+    }
+
+    private var statusText: String {
+        if let error = model.errorMessage {
+            return error
+        }
+        if let update = model.updateStatusMessage {
+            return update
+        }
+        if model.updateInProgress {
+            return "正在检查更新…"
+        }
+        let name = FileManager.default.displayName(atPath: model.currentPath)
+        return name.isEmpty ? model.currentPath : name
+    }
+
+    private var statusAccent: Color {
+        model.errorMessage == nil ? Color.secondary : Color.red
+    }
+
+    private var statusSystemImage: String {
+        if model.errorMessage != nil {
+            return "exclamationmark.triangle.fill"
+        }
+        if model.updateInProgress || model.updateStatusMessage != nil {
+            return "arrow.triangle.2.circlepath"
+        }
+        return "wind"
+    }
+
+    private var breadcrumbParts: [KiteBreadcrumbPart] {
+        let url = URL(fileURLWithPath: model.currentPath).standardizedFileURL
+        let components = url.pathComponents
+        guard !components.isEmpty else { return [] }
+
+        var current = URL(fileURLWithPath: "/", isDirectory: true)
+        var parts: [KiteBreadcrumbPart] = []
+
+        for component in components {
+            if component == "/" {
+                let title = FileManager.default.displayName(atPath: "/")
+                parts.append(KiteBreadcrumbPart(title: title, path: "/"))
+                continue
+            }
+
+            current.appendPathComponent(component, isDirectory: true)
+            parts.append(
+                KiteBreadcrumbPart(
+                    title: FileManager.default.displayName(atPath: current.path),
+                    path: current.path
+                )
+            )
+        }
+
+        guard let last = parts.indices.last else { return parts }
+        for index in parts.indices {
+            parts[index].isCurrent = index == last
+        }
+        return parts
+    }
+
+    private func beginAddressEditing() {
+        model.address = model.currentPath
+        isEditingAddress = true
+        DispatchQueue.main.async {
             addressFocused = true
         }
     }
 
-    private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(model.tabs) { tab in
-                    tabItem(tab)
-                }
-
-                Button {
-                    model.newTab()
-                } label: {
-                    Image(systemName: "plus")
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.borderless)
-                .help("新建页签")
-                .accessibilityLabel("新建页签")
-            }
-            .padding(.horizontal, 12)
-        }
-        .frame(height: 36)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
+    private func commitAddress() {
+        model.loadRoot(model.address)
+        isEditingAddress = false
+        addressFocused = false
     }
 
-    private func tabItem(_ tab: BrowserTab) -> some View {
-        let active = model.activeTabID == tab.id
-        return HStack(spacing: 3) {
+    private func cancelAddressEditing() {
+        model.address = model.currentPath
+        isEditingAddress = false
+        addressFocused = false
+    }
+}
+
+private struct KiteTabItem: View {
+    @ObservedObject var model: KiteModel
+    let tab: BrowserTab
+    let isActive: Bool
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 4) {
             Button {
                 model.activateTab(id: tab.id)
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
                     Image(systemName: "folder.fill")
-                        .foregroundStyle(active ? Color.accentColor : Color.orange)
+                        .font(.system(size: 11, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+
                     Text(tab.title)
+                        .font(.system(size: 11.5, weight: isActive ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -76,563 +547,57 @@ struct ContentView: View {
                     model.closeTab(id: tab.id)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 20, height: 20)
+                        .font(.system(size: 8, weight: .bold))
+                        .frame(width: 18, height: 18)
+                        .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
                 .help("关闭页签")
                 .accessibilityLabel("关闭页签")
             }
         }
-        .padding(.leading, 9)
+        .padding(.leading, 10)
         .padding(.trailing, 5)
-        .frame(width: 176, height: 28)
-        .background(
-            active ? Color.accentColor.opacity(0.18) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(
-                    active ? Color.accentColor.opacity(0.30) : Color.clear,
-                    lineWidth: 0.5
-                )
-        }
-    }
-
-    private var toolbar: some View {
-        KiteGlassEffectContainer(spacing: 8) {
-            toolbarContent
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-    }
-
-    private var toolbarContent: some View {
-        HStack(spacing: 10) {
-            navigationControls
-                .kiteGlassGroup()
-
-            pathControls
-                .frame(maxWidth: .infinity)
-                .kiteGlassGroup()
-        }
-    }
-
-    private var navigationControls: some View {
-        HStack(spacing: 4) {
-            Button {
-                model.navigateUp()
-            } label: {
-                Image(systemName: "arrow.up")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .keyboardShortcut(.upArrow, modifiers: [.command])
-            .help("上层文件夹 (Command+↑)")
-            .accessibilityLabel("上层文件夹")
-
-            Button {
-                model.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .help("刷新")
-            .accessibilityLabel("刷新")
-
-            Divider()
-                .frame(height: 18)
-
-            Button {
-                if let entry = model.selectedColumnEntry {
-                    model.copyFile(entry.path)
-                }
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .disabled(model.selectedColumnEntry == nil)
-            .help("拷贝选中项目")
-            .accessibilityLabel("拷贝选中项目")
-
-            Button {
-                if let entry = model.selectedColumnEntry {
-                    model.cutFile(entry.path)
-                }
-            } label: {
-                Image(systemName: "scissors")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .disabled(model.selectedColumnEntry == nil)
-            .help("剪切选中项目")
-            .accessibilityLabel("剪切选中项目")
-
-            Button {
-                model.pasteFiles(into: model.currentPath)
-            } label: {
-                Image(systemName: "doc.on.clipboard")
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .help("粘贴文件")
-            .accessibilityLabel("粘贴文件")
-        }
-        .padding(.horizontal, 4)
-        .frame(height: 34)
-    }
-
-    private var pathControls: some View {
-        HStack(spacing: 8) {
-            TextField("路径", text: $model.address)
-                .textFieldStyle(.plain)
-                .focused($addressFocused)
-                .onSubmit {
-                    model.loadRoot(model.address)
-                }
-                .padding(.horizontal, 8)
-                .frame(minHeight: 28)
-
-            Button("打开") {
-                model.loadRoot(model.address)
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help("打开输入的路径")
-            .accessibilityLabel("打开输入的路径")
-            .frame(minHeight: 28)
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 34)
-    }
-
-    private var favoritesBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Label("收藏", systemImage: "star.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 4)
-
-                ForEach(model.favorites, id: \.path) { favorite in
-                    Button {
-                        model.openFavorite(favorite)
-                    } label: {
-                        Label(
-                            favorite.name,
-                            systemImage: favorite.isDirectory ? "folder.fill" : "doc.fill"
-                        )
-                        .font(.caption)
-                        .lineLimit(1)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.thinMaterial, in: Capsule())
-                    .help(favorite.path)
-                    .accessibilityLabel("打开收藏 \(favorite.name)")
-                    .contextMenu {
-                        Button("从收藏移除") {
-                            model.removeFavorite(favorite)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-        }
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-    }
-
-    private var columnBrowser: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 1) {
-                ForEach(Array(model.columns.enumerated()), id: \.element.id) { index, column in
-                    browserColumn(column, index: index)
-                }
-                if let selectedFile = model.selectedColumnFile {
-                    previewColumn(selectedFile)
-                }
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
-        }
-        .background(.clear)
-    }
-
-    private func browserColumn(_ column: BrowserColumn, index: Int) -> some View {
-        VStack(spacing: 0) {
-            Text(column.title)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .frame(height: 30)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.90))
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(column.entries) { entry in
-                        entryRow(entry, columnIndex: index)
-                    }
-                }
+        .frame(width: 174, height: 28)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .kiteGlass(.selection, cornerRadius: 9)
+            } else if isHovering {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(0.055))
             }
         }
-        .frame(width: 260)
-        .frame(maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.84))
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.75))
-                .frame(width: 1)
-        }
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onHover { isHovering = $0 }
         .contextMenu {
-            directoryContextMenu(column)
-        }
-    }
-
-    @ViewBuilder
-    private func directoryContextMenu(_ column: BrowserColumn) -> some View {
-        Button("打开") { KitePlatform.open(column.path) }
-        Button("在 Finder 中显示") { KitePlatform.revealInFinder(column.path) }
-        Button("快速查看") { KitePlatform.quickLook(column.path) }
-        Button("拷贝路径") { KitePlatform.copyPath(column.path) }
-        Divider()
-        Button("拷贝") { model.copyFile(column.path) }
-        Button("粘贴") { model.pasteFiles(into: column.path) }
-        Button("拷贝到…") { model.copyTo(path: column.path) }
-        Divider()
-        Button("新建文件夹…") { model.createFolder(in: column.path) }
-            .disabled(!KitePlatform.canModify(column.path))
-        Button("新建文件…") { model.createFile(in: column.path) }
-            .disabled(!KitePlatform.canModify(column.path))
-        Button("添加到收藏") {
-            model.addFavorite(
-                path: column.path,
-                name: URL(fileURLWithPath: column.path).lastPathComponent,
-                isDirectory: true
-            )
-        }
-        Button("重命名…") { model.rename(column.path) }
-            .disabled(!KitePlatform.canModify(column.path))
-        Divider()
-        Button("分享…") { KitePlatform.share(column.path) }
-        Divider()
-        Button("移到废纸篓") { model.moveToTrash(path: column.path) }
-            .disabled(!KitePlatform.canModify(column.path))
-    }
-
-    private func previewColumn(_ entry: BrowserEntry) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("预览")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if KitePlatform.isEditableTextFile(entry.path) {
-                    Button {
-                        KitePlatform.openTextEditor(entry.path)
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.caption)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("在 Kite 编辑器中打开")
-                    .accessibilityLabel("在 Kite 编辑器中打开")
-                }
-                Button {
-                    KitePlatform.copyText(previewInfoText(entry))
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.caption)
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.borderless)
-                .help("复制预览信息")
-                .accessibilityLabel("复制预览信息")
-            }
-                .padding(.horizontal, 10)
-                .frame(height: 30)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.90))
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    QuickLookPreviewView(url: URL(fileURLWithPath: entry.path))
-                        .frame(height: 220)
-                        .background(Color(nsColor: .controlBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                    Text(entry.name)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        previewProperty("类型", entry.kindLabel)
-                        previewProperty("大小", formattedSize(entry.size))
-                        previewProperty("修改日期", formattedDate(entry.modifiedUnixMs))
-                        previewProperty("位置", entry.path)
-                        if let git = entry.gitStatus {
-                            previewProperty("Git", git)
-                        }
-                        if let svn = entry.svnStatus {
-                            previewProperty("SVN", svn)
-                        }
-                    }
-                }
-                .padding(12)
-                .textSelection(.enabled)
-            }
-        }
-        .frame(width: 300)
-        .frame(maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.84))
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.75))
-                .frame(width: 1)
-        }
-    }
-
-    private func previewProperty(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            Text(value)
-                .font(.caption)
-                .textSelection(.enabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func previewInfoText(_ entry: BrowserEntry) -> String {
-        var lines = [
-            "名称：\(entry.name)",
-            "类型：\(entry.kindLabel)",
-            "大小：\(formattedSize(entry.size))",
-            "修改日期：\(formattedDate(entry.modifiedUnixMs))",
-            "位置：\(entry.path)",
-        ]
-        if let git = entry.gitStatus {
-            lines.append("Git：\(git)")
-        }
-        if let svn = entry.svnStatus {
-            lines.append("SVN：\(svn)")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private func formattedSize(_ bytes: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-    }
-
-    private func formattedDate(_ unixMs: Int64?) -> String {
-        guard let unixMs else { return "未知" }
-        let date = Date(timeIntervalSince1970: TimeInterval(unixMs) / 1_000)
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-    private func entryRow(_ entry: BrowserEntry, columnIndex: Int) -> some View {
-        let selected = model.columns[columnIndex].selectedPath == entry.path
-        let pasteDirectory = entry.isDirectory
-            ? entry.path
-            : URL(fileURLWithPath: entry.path).deletingLastPathComponent().path
-        return Button {
-            model.select(column: columnIndex, entry: entry)
-        } label: {
-            HStack(spacing: 7) {
-                entryIcon(entry)
-                Text(entry.name)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 4)
-                if entry.isDirectory {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .background(selected ? Color.accentColor.opacity(0.35) : Color.clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(entryAccessibilityLabel(entry))
-        .contextMenu {
-            Button("打开") { KitePlatform.open(entry.path) }
-            if KitePlatform.isEditableTextFile(entry.path) {
-                Button("在 Kite 编辑器中打开") { KitePlatform.openTextEditor(entry.path) }
-            }
-            Button("在 Finder 中显示") { KitePlatform.revealInFinder(entry.path) }
-            Button("快速查看") { KitePlatform.quickLook(entry.path) }
-            Button("拷贝路径") { KitePlatform.copyPath(entry.path) }
-            Divider()
-            Button("拷贝") { model.copyFile(entry.path) }
-            Button("剪切") { model.cutFile(entry.path) }
-            Button("粘贴") { model.pasteFiles(into: pasteDirectory) }
-            Button("拷贝到…") { model.copyTo(path: entry.path) }
-            Divider()
-            Button("新建文件夹…") {
-                model.createFolder(in: URL(fileURLWithPath: entry.path).deletingLastPathComponent().path)
-            }
-            Button("新建文件…") {
-                model.createFile(in: URL(fileURLWithPath: entry.path).deletingLastPathComponent().path)
-            }
-            Button("添加到收藏") {
-                model.addFavorite(
-                    path: entry.path,
-                    name: entry.name,
-                    isDirectory: entry.isDirectory
-                )
-            }
-            Divider()
-            Button("分享…") { KitePlatform.share(entry.path) }
-            Divider()
-            Button("重命名…") { model.rename(entry.path) }
-            Button("移到废纸篓") { model.moveToTrash(entry) }
-        }
-    }
-
-    private func entryAccessibilityLabel(_ entry: BrowserEntry) -> String {
-        var parts = [entry.name]
-        if let git = entry.gitStatus {
-            parts.append("Git \(git)")
-        }
-        if let svn = entry.svnStatus {
-            parts.append("SVN \(svn)")
-        }
-        return parts.joined(separator: "，")
-    }
-    private func entryIcon(_ entry: BrowserEntry) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            Image(systemName: entry.isDirectory ? "folder.fill" : "doc")
-                .foregroundStyle(entry.isDirectory ? Color.orange : Color.secondary)
-                .frame(width: 18, height: 18)
-
-            if let badge = vcsBadge(for: entry) {
-                let radius: CGFloat = badge.isSvn ? 3 : 6
-                Text(badge.code)
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(badge.color)
-                    .frame(width: 12, height: 12)
-                    .background(
-                        Color(nsColor: .windowBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: radius, style: .continuous)
-                            .strokeBorder(badge.color.opacity(0.9), lineWidth: 0.75)
-                    }
-                    .offset(x: 2, y: 2)
-            }
-        }
-        .frame(width: 20, height: 20)
-        .accessibilityHidden(true)
-    }
-
-    private struct VcsIconBadge {
-        let code: String
-        let color: Color
-        let isSvn: Bool
-        let rank: Int
-    }
-
-    private func vcsBadge(for entry: BrowserEntry) -> VcsIconBadge? {
-        let git = vcsBadge(from: entry.gitStatus, isSvn: false)
-        let svn = vcsBadge(from: entry.svnStatus, isSvn: true)
-        if let git, let svn {
-            return svn.rank > git.rank ? svn : git
-        }
-        return git ?? svn
-    }
-
-    private func vcsBadge(from value: String?, isSvn: Bool) -> VcsIconBadge? {
-        guard let value else { return nil }
-        let code: String
-        if let open = value.lastIndex(of: "("),
-           let close = value.lastIndex(of: ")"),
-           open < close {
-            code = String(value[value.index(after: open)..<close])
-        } else {
-            code = String(value.prefix(1))
-        }
-
-        let color: Color
-        let rank: Int
-        switch code {
-        case "C":
-            color = .red
-            rank = 10
-        case "!":
-            color = .red
-            rank = 9
-        case "D":
-            color = .red
-            rank = 8
-        case "R":
-            color = .green
-            rank = 7
-        case "A":
-            color = .green
-            rank = 6
-        case "P":
-            color = .orange
-            rank = 5
-        case "M":
-            color = .orange
-            rank = 4
-        case "?":
-            color = .cyan
-            rank = 3
-        case "X":
-            color = .gray
-            rank = 2
-        default:
-            color = .gray
-            rank = 1
-        }
-        return VcsIconBadge(code: code, color: color, isSvn: isSvn, rank: rank)
-    }
-    private var statusBar: some View {
-        HStack {
-            if let error = model.errorMessage {
-                Text(error).foregroundStyle(.red)
-            } else if let update = model.updateStatusMessage {
-                Text(update).foregroundStyle(.secondary)
-            } else {
-                Text(model.currentPath).lineLimit(1).truncationMode(.middle)
-            }
-            Spacer()
-            Text("\(model.columns.last?.entries.count ?? 0) 个项目")
-                .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-        .padding(.horizontal, 12)
-        .frame(height: 28)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) {
-            Divider()
+            Button("关闭页签") { model.closeTab(id: tab.id) }
+                .disabled(!model.canCloseTab)
+            Button("新建页签") { model.newTab() }
         }
     }
 }
 
-private struct QuickLookPreviewView: NSViewRepresentable {
-    let url: URL
+private struct KiteBreadcrumbPart: Identifiable {
+    let title: String
+    let path: String
+    var isCurrent = false
 
-    func makeNSView(context: Context) -> QLPreviewView {
-        let view = QLPreviewView(frame: .zero, style: .normal)!
-        view.previewItem = url as NSURL
-        return view
-    }
+    var id: String { path }
+}
 
-    func updateNSView(_ view: QLPreviewView, context: Context) {
-        view.previewItem = url as NSURL
+private struct KiteStatusBadge: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.primary.opacity(0.045), in: Capsule())
     }
 }

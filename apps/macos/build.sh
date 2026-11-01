@@ -39,6 +39,12 @@ cp "$ROOT/apps/macos/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/assets/kite.icns" "$CONTENTS/Resources/AppIcon.icns"
 cp "$ROOT/target/release/libkite_core.dylib" "$CONTENTS/Frameworks/"
 install_name_tool -id @rpath/libkite_core.dylib "$CONTENTS/Frameworks/libkite_core.dylib"
+
+CORE_LINK="$(otool -L "$CONTENTS/MacOS/Kite" | awk '/libkite_core\.dylib/ { print $1; exit }')"
+if [ -n "$CORE_LINK" ] && [ "$CORE_LINK" != "@rpath/libkite_core.dylib" ]; then
+    install_name_tool -change "$CORE_LINK" @rpath/libkite_core.dylib "$CONTENTS/MacOS/Kite"
+fi
+
 codesign --force --deep --sign - "$APP_DIR"
 
 echo "$APP_DIR"
