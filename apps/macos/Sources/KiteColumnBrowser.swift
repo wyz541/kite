@@ -459,9 +459,16 @@ private struct KiteEntryMenu: View {
         }
 
         Button {
-            model.addFavorite(path: entry.path, name: entry.name, isDirectory: entry.isDirectory)
+            model.toggleFavorite(
+                path: entry.path,
+                name: entry.name,
+                isDirectory: entry.isDirectory
+            )
         } label: {
-            Label("添加到收藏", systemImage: "star.badge.plus")
+            Label(
+                isFavorite ? "从收藏移除" : "添加到收藏",
+                systemImage: isFavorite ? "star.slash" : "star.badge.plus"
+            )
         }
 
         Divider()
@@ -495,6 +502,10 @@ private struct KiteEntryMenu: View {
 
     private var pasteDirectory: String {
         entry.isDirectory ? entry.path : parentDirectory
+    }
+
+    private var isFavorite: Bool {
+        model.isFavorite(path: entry.path)
     }
 }
 
@@ -564,13 +575,16 @@ private struct KiteDirectoryMenu: View {
         .disabled(!KitePlatform.canModify(column.path))
 
         Button {
-            model.addFavorite(
+            model.toggleFavorite(
                 path: column.path,
-                name: URL(fileURLWithPath: column.path).lastPathComponent,
+                name: column.title,
                 isDirectory: true
             )
         } label: {
-            Label("添加到收藏", systemImage: "star.badge.plus")
+            Label(
+                isFavorite ? "从收藏移除" : "添加到收藏",
+                systemImage: isFavorite ? "star.slash" : "star.badge.plus"
+            )
         }
 
         Divider()
@@ -596,5 +610,9 @@ private struct KiteDirectoryMenu: View {
             Label("移到废纸篓", systemImage: "trash")
         }
         .disabled(!KitePlatform.canModify(column.path))
+    }
+
+    private var isFavorite: Bool {
+        model.isFavorite(path: column.path)
     }
 }
