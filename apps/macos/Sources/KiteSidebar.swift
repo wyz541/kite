@@ -50,27 +50,11 @@ struct KiteSidebar: View {
 
             Spacer(minLength: 0)
 
-            Button {
-                model.addFavorite(
-                    path: model.currentPath,
-                    name: URL(fileURLWithPath: model.currentPath).lastPathComponent,
-                    isDirectory: true
-                )
-            } label: {
-                Label("收藏当前文件夹", systemImage: "star.badge.plus")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .frame(height: 32)
-                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.045))
-            }
-            .help("将当前文件夹添加到收藏")
+            Divider()
+                .opacity(0.35)
+                .padding(.horizontal, 4)
+
+            settingsBar
         }
         .padding(.horizontal, 10)
         .padding(.top, 10)
@@ -113,7 +97,7 @@ struct KiteSidebar: View {
             }
 
             if model.favorites.isEmpty {
-                Text("右键文件或文件夹即可收藏。")
+                Text("点击工具栏星标或右键菜单添加收藏。")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 8)
@@ -147,6 +131,66 @@ struct KiteSidebar: View {
                 }
             }
         }
+    }
+
+    private var settingsBar: some View {
+        Menu {
+            Button {
+                model.checkForUpdates()
+            } label: {
+                Label("检查更新…", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(model.updateInProgress)
+
+            Divider()
+
+            Button {
+                model.setAsDefaultFileViewer()
+            } label: {
+                Label(
+                    KitePlatform.canSetDefaultFolderHandler
+                        ? "设为默认文件夹打开方式…"
+                        : "设为默认文件查看器…",
+                    systemImage: "folder.badge.gearshape"
+                )
+            }
+
+            Button {
+                model.restoreFinderAsDefaultFileViewer()
+            } label: {
+                Label("恢复 Finder 为默认…", systemImage: "arrow.uturn.backward.circle")
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 18)
+
+                Text("设置")
+                    .font(.system(size: 12, weight: .medium))
+
+                Spacer(minLength: 0)
+
+                if model.updateInProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 34)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.primary.opacity(0.045))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Kite 设置")
+        .accessibilityLabel("Kite 设置")
     }
 
     @ViewBuilder

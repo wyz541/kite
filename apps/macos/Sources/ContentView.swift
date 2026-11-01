@@ -242,6 +242,18 @@ struct ContentView: View {
     private var actionControls: some View {
         HStack(spacing: 2) {
             KiteToolbarIconButton(
+                systemName: currentFolderIsFavorite ? "star.fill" : "star",
+                title: currentFolderIsFavorite ? "取消收藏当前文件夹" : "收藏当前文件夹",
+                isActive: currentFolderIsFavorite
+            ) {
+                model.toggleFavorite(
+                    path: model.currentPath,
+                    name: currentFolderName,
+                    isDirectory: true
+                )
+            }
+
+            KiteToolbarIconButton(
                 systemName: "doc.on.doc",
                 title: "拷贝选中项目",
                 isEnabled: model.selectedColumnEntry != nil
@@ -275,112 +287,24 @@ struct ContentView: View {
             ) {
                 model.createFolder(in: model.currentPath)
             }
-
-            Menu {
-                Button {
-                    model.createFolder(in: model.currentPath)
-                } label: {
-                    Label("新建文件夹…", systemImage: "folder.badge.plus")
-                }
-
-                Button {
-                    model.createFile(in: model.currentPath)
-                } label: {
-                    Label("新建文件…", systemImage: "doc.badge.plus")
-                }
-
-                Divider()
-
-                Button {
-                    if let selectedEntry = model.selectedColumnEntry {
-                        model.copyFile(selectedEntry.path)
-                    }
-                } label: {
-                    Label("拷贝选中项目", systemImage: "doc.on.doc")
-                }
-                .disabled(model.selectedColumnEntry == nil)
-
-                Button {
-                    if let selectedEntry = model.selectedColumnEntry {
-                        model.cutFile(selectedEntry.path)
-                    }
-                } label: {
-                    Label("剪切选中项目", systemImage: "scissors")
-                }
-                .disabled(model.selectedColumnEntry == nil)
-
-                Button {
-                    model.pasteFiles(into: model.currentPath)
-                } label: {
-                    Label("粘贴文件", systemImage: "doc.on.clipboard")
-                }
-
-                Divider()
-
-                Button {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        showsSidebar.toggle()
-                    }
-                } label: {
-                    Label(
-                        showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
-                        systemImage: "sidebar.left"
-                    )
-                }
-                .keyboardShortcut("s", modifiers: [.command, .option])
-
-                Button {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        showsPreview.toggle()
-                    }
-                } label: {
-                    Label(
-                        showsPreview ? "隐藏预览" : "显示预览",
-                        systemImage: "rectangle.righthalf.inset.filled"
-                    )
-                }
-                .keyboardShortcut("p", modifiers: [.command, .option])
-
-                Divider()
-
-                Button {
-                    model.checkForUpdates()
-                } label: {
-                    Label("检查更新…", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .disabled(model.updateInProgress)
-
-                Button {
-                    model.setAsDefaultFileViewer()
-                } label: {
-                    Label(
-                        KitePlatform.canSetDefaultFolderHandler
-                            ? "设为默认文件夹打开方式…"
-                            : "设为默认文件查看器…",
-                        systemImage: "folder.badge.gearshape"
-                    )
-                }
-
-                Button {
-                    model.restoreFinderAsDefaultFileViewer()
-                } label: {
-                    Label("恢复 Finder 为默认…", systemImage: "arrow.uturn.backward.circle")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 30, height: 30)
-                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .help("更多操作")
-            .accessibilityLabel("更多操作")
         }
         .padding(.horizontal, 4)
         .frame(height: 40)
         .fixedSize(horizontal: true, vertical: false)
         .kiteGlass(.panel, cornerRadius: 14)
+    }
+
+    private var currentFolderIsFavorite: Bool {
+        model.isFavorite(path: model.currentPath)
+    }
+
+    private var currentFolderName: String {
+        let displayName = FileManager.default.displayName(atPath: model.currentPath)
+        if !displayName.isEmpty {
+            return displayName
+        }
+        let lastName = URL(fileURLWithPath: model.currentPath).lastPathComponent
+        return lastName.isEmpty ? model.currentPath : lastName
     }
 
     private var statusBar: some View {
