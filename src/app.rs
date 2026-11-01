@@ -2827,11 +2827,13 @@ impl KiteApp {
                     .gap_2()
                     .items_center()
                     .child(navigation_group)
-                    .child(div().flex_1().min_w(px(180.)).child(
-                        Input::new(&self.address_input)
-                            .aria_label("地址")
-                            .prefix(Icon::new(IconName::Folder).size_4()),
-                    ))
+                    .child(
+                        div().flex_1().min_w(px(180.)).child(
+                            Input::new(&self.address_input)
+                                .aria_label("地址")
+                                .prefix(Icon::new(IconName::Folder).size_4()),
+                        ),
+                    )
                     .child(
                         Input::new(&self.search_input)
                             .aria_label("搜索")
