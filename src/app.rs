@@ -1511,6 +1511,25 @@ impl KiteApp {
             return;
         }
 
+        if let Err(error) = crate::updater::windows_update_target() {
+            self.notice = None;
+            self.error = Some(error.clone().into());
+            cx.notify();
+            let answers = [PromptButton::ok("确定")];
+            let answer = window.prompt(
+                PromptLevel::Warning,
+                "无法自动更新 Kite",
+                Some(&error),
+                &answers,
+                cx,
+            );
+            cx.spawn_in(window, async move |_, _| {
+                let _ = answer.await;
+            })
+            .detach();
+            return;
+        }
+
         let message = format!("发现 Kite {}", update.latest_version);
         let notes = update_notes_summary(&update.release_notes);
         let detail = format!(
