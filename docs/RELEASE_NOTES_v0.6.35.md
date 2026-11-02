@@ -13,7 +13,9 @@ Kite v0.6.35 improves column navigation and adds optional detailed metadata to t
 
 - Add a metadata toggle to the active column header.
 - Show date, type, and size columns when metadata is visible.
-- Widen the active column to keep metadata readable.
+- Expand the active column to fit its longest file name.
+- Keep names complete up to the width limit and use middle truncation beyond it.
+- Keep date, type, and size columns readable beside long names.
 - Persist the metadata visibility preference across launches.
 - Keep size values visible at the trailing edge.
 
