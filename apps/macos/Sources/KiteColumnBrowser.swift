@@ -5,6 +5,7 @@ struct KiteColumnBrowser: View {
     @ObservedObject var model: KiteModel
     @Binding var showsPreview: Bool
     @AppStorage("kite.macos.column-details-visible") private var showsColumnDetails = false
+    @State private var detailedColumnWidth = KiteTheme.detailedColumnWidth
 
     var body: some View {
         HStack(spacing: showsColumnDetails ? 8 : 10) {
@@ -20,6 +21,9 @@ struct KiteColumnBrowser: View {
                                     index: index,
                                     isActive: isActive,
                                     showsDetails: showsColumnDetails && isActive,
+                                    columnWidth: showsColumnDetails && isActive
+                                        ? detailedColumnWidth
+                                        : KiteTheme.columnWidth,
                                     onToggleDetails: {
                                         withAnimation(.snappy(duration: 0.22)) {
                                             showsColumnDetails.toggle()
@@ -36,19 +40,46 @@ struct KiteColumnBrowser: View {
                     .scrollIndicators(.hidden)
                     .kiteDefaultTrailingAnchor()
                     .onAppear {
-                        scrollToActiveColumn(proxy, animated: false)
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: viewport.size.width,
+                            animated: false
+                        )
                     }
                     .onChange(of: model.columns.map(\.id)) { _ in
-                        scrollToActiveColumn(proxy, animated: true)
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: viewport.size.width,
+                            animated: true
+                        )
                     }
                     .onChange(of: showsPreview) { _ in
-                        scrollToActiveColumn(proxy, animated: true)
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: viewport.size.width,
+                            animated: true
+                        )
                     }
                     .onChange(of: model.selectedColumnEntry?.path) { _ in
-                        scrollToActiveColumn(proxy, animated: true)
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: viewport.size.width,
+                            animated: true
+                        )
                     }
                     .onChange(of: showsColumnDetails) { _ in
-                        scrollToActiveColumn(proxy, animated: true)
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: viewport.size.width,
+                            animated: true
+                        )
+                    }
+                    .onChange(of: detailedColumnWidth) { _ in
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: viewport.size.width,
+                            animated: true
+                        )
                     }
                 }
             }
@@ -65,20 +96,61 @@ struct KiteColumnBrowser: View {
         }
         .animation(.snappy(duration: 0.22), value: showsPreview)
         .animation(.snappy(duration: 0.22), value: showsColumnDetails)
+        .animation(.snappy(duration: 0.22), value: detailedColumnWidth)
+        .task(id: detailsMeasurementKey) {
+            await measureDetailedColumnWidth()
+        }
     }
 
-    private func scrollToActiveColumn(_ proxy: ScrollViewProxy, animated: Bool) {
+    private var detailsMeasurementKey: ColumnDetailsMeasurementKey {
+        ColumnDetailsMeasurementKey(
+            showsDetails: showsColumnDetails,
+            columnID: model.columns.last?.id,
+            entries: model.columns.last?.entries ?? []
+        )
+    }
+
+    private func measureDetailedColumnWidth() async {
+        guard showsColumnDetails,
+              let entries = model.columns.last?.entries else {
+            detailedColumnWidth = KiteTheme.detailedColumnWidth
+            return
+        }
+
+        let names = entries.map(\.name)
+        let measuredWidth = await Task.detached(priority: .userInitiated) {
+            KiteColumnDetailsLayout.columnWidth(for: names)
+        }.value
+        guard !Task.isCancelled else { return }
+        detailedColumnWidth = measuredWidth
+    }
+
+    private func scrollToActiveColumn(
+        _ proxy: ScrollViewProxy,
+        viewportWidth: CGFloat,
+        animated: Bool
+    ) {
         guard let activeColumnID = model.columns.last?.id else { return }
+        let activeColumnWidth = showsColumnDetails
+            ? detailedColumnWidth
+            : KiteTheme.columnWidth
+        let anchor: UnitPoint = activeColumnWidth > viewportWidth ? .leading : .trailing
         DispatchQueue.main.async {
             if animated {
                 withAnimation(.snappy(duration: 0.22)) {
-                    proxy.scrollTo(activeColumnID, anchor: .trailing)
+                    proxy.scrollTo(activeColumnID, anchor: anchor)
                 }
             } else {
-                proxy.scrollTo(activeColumnID, anchor: .trailing)
+                proxy.scrollTo(activeColumnID, anchor: anchor)
             }
         }
     }
+}
+
+private struct ColumnDetailsMeasurementKey: Equatable {
+    let showsDetails: Bool
+    let columnID: String?
+    let entries: [BrowserEntry]
 }
 
 private struct KiteShiftWheelHorizontalScroller: NSViewRepresentable {
@@ -177,6 +249,17 @@ private enum KiteColumnDetailsLayout {
     static let dateWidth: CGFloat = 84
     static let kindWidth: CGFloat = 70
     static let sizeWidth: CGFloat = 64
+    private static let nameFontSize: CGFloat = 12.5
+    private static let rowFixedWidth: CGFloat = 360
+
+    static func columnWidth(for names: [String]) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: nameFontSize, weight: .medium)
+        let textWidth = names.reduce(CGFloat.zero) { width, name in
+            let nameWidth = (name as NSString).size(withAttributes: [.font: font]).width
+            return max(width, ceil(nameWidth))
+        }
+        return max(KiteTheme.detailedColumnWidth, ceil(rowFixedWidth + textWidth))
+    }
 }
 
 private struct KiteBrowserColumn: View {
@@ -185,6 +268,7 @@ private struct KiteBrowserColumn: View {
     let index: Int
     let isActive: Bool
     let showsDetails: Bool
+    let columnWidth: CGFloat
     let onToggleDetails: () -> Void
 
     var body: some View {
@@ -221,7 +305,7 @@ private struct KiteBrowserColumn: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .frame(width: showsDetails ? KiteTheme.detailedColumnWidth : KiteTheme.columnWidth)
+        .frame(width: columnWidth)
         .frame(maxHeight: .infinity)
         .background(
             Color(nsColor: .controlBackgroundColor).opacity(0.42),
@@ -470,6 +554,7 @@ private struct KiteBrowserRow: View {
                 .font(.system(size: 12.5, weight: isSelected ? .medium : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .fixedSize(horizontal: showsDetails, vertical: false)
                 .layoutPriority(1)
 
             Spacer(minLength: 4)
