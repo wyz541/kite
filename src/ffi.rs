@@ -70,6 +70,13 @@ pub struct UpdateInfoDto {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct UpdateDownloadProgressDto {
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct TextDocumentDto {
     pub path: String,
     pub text: String,
@@ -112,6 +119,10 @@ impl KiteCore {
         updater::check_for_update()
             .map(update_info_dto)
             .map_err(KiteError::operation)
+    }
+
+    pub fn download_progress(&self) -> UpdateDownloadProgressDto {
+        update_download_progress_dto(updater::download_progress())
     }
 
     pub fn download_update(&self, update: UpdateInfoDto) -> Result<String, KiteError> {
@@ -272,6 +283,16 @@ fn update_info_dto(info: UpdateInfo) -> UpdateInfoDto {
     }
 }
 
+fn update_download_progress_dto(
+    progress: updater::UpdateDownloadProgress,
+) -> UpdateDownloadProgressDto {
+    UpdateDownloadProgressDto {
+        downloaded_bytes: progress.downloaded_bytes,
+        total_bytes: progress.total_bytes,
+        active: progress.active,
+    }
+}
+
 fn update_info_from_dto(info: UpdateInfoDto) -> UpdateInfo {
     UpdateInfo {
         current_version: info.current_version,
@@ -368,5 +389,14 @@ mod tests {
             core.platform().as_str(),
             "windows" | "macos" | "other"
         ));
+    }
+
+    #[test]
+    fn core_exposes_download_progress() {
+        let progress = KiteCore::new().download_progress();
+
+        assert_eq!(progress.downloaded_bytes, 0);
+        assert_eq!(progress.total_bytes, 0);
+        assert!(!progress.active);
     }
 }

@@ -52,6 +52,28 @@ struct BrowserTab: Identifiable {
     }
 }
 
+struct UpdateDownloadState: Equatable {
+    let downloadedBytes: UInt64
+    let totalBytes: UInt64
+
+    var fraction: Double? {
+        guard totalBytes > 0 else { return nil }
+        return min(max(Double(downloadedBytes) / Double(totalBytes), 0), 1)
+    }
+
+    var summaryText: String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        let downloaded = formatter.string(fromByteCount: Int64(clamping: downloadedBytes))
+        guard totalBytes > 0 else { return downloaded }
+
+        let total = formatter.string(fromByteCount: Int64(clamping: totalBytes))
+        guard let fraction else { return "\(downloaded) / \(total)" }
+        let percent = Int((fraction * 100).rounded())
+        return "\(percent)% · \(downloaded) / \(total)"
+    }
+}
+
 @MainActor
 final class KiteModel: ObservableObject {
     private static let sessionSchemaVersion: UInt32 = 1
@@ -66,6 +88,7 @@ final class KiteModel: ObservableObject {
     @Published var focusedAddressRequest = 0
     @Published private(set) var updateInProgress = false
     @Published private(set) var updateStatusMessage: String?
+    @Published private(set) var updateDownload: UpdateDownloadState?
 
     init(core: KiteCore = KiteCore()) {
         self.core = core
@@ -477,6 +500,7 @@ final class KiteModel: ObservableObject {
         guard !updateInProgress else { return }
         updateInProgress = true
         updateStatusMessage = "正在检查 Kite 更新…"
+        updateDownload = nil
         errorMessage = nil
 
         Task {
@@ -498,7 +522,15 @@ final class KiteModel: ObservableObject {
                 }
 
                 updateStatusMessage = "正在下载 Kite \(update.latestVersion)…"
-                let archive = try await Self.downloadUpdate(update)
+                let archive: String
+                do {
+                    let progressTask = startUpdateDownloadMonitor(initialTotal: update.assetSize)
+                    defer {
+                        progressTask.cancel()
+                        updateDownload = nil
+                    }
+                    archive = try await Self.downloadUpdate(update)
+                }
                 updateStatusMessage = "正在安装 Kite \(update.latestVersion)…"
                 try KitePlatform.installUpdate(
                     archivePath: archive,
@@ -523,6 +555,28 @@ final class KiteModel: ObservableObject {
 
     nonisolated private static func downloadUpdate(_ update: UpdateInfoDto) async throws -> String {
         try KiteCore().downloadUpdate(update: update)
+    }
+
+    @MainActor
+    private func startUpdateDownloadMonitor(initialTotal: UInt64) -> Task<Void, Never> {
+        updateDownload = UpdateDownloadState(
+            downloadedBytes: 0,
+            totalBytes: initialTotal
+        )
+
+        return Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let progress = self.core.downloadProgress()
+                if progress.active || progress.downloadedBytes == 0 {
+                    self.updateDownload = UpdateDownloadState(
+                        downloadedBytes: progress.downloadedBytes,
+                        totalBytes: progress.totalBytes
+                    )
+                }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+        }
     }
 
     private func confirmUpdate(_ update: UpdateInfoDto) -> Bool {
