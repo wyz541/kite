@@ -175,8 +175,8 @@ private extension View {
 private enum KiteColumnDetailsLayout {
     static let spacing: CGFloat = 8
     static let dateWidth: CGFloat = 84
-    static let kindWidth: CGFloat = 72
-    static let sizeWidth: CGFloat = 54
+    static let kindWidth: CGFloat = 70
+    static let sizeWidth: CGFloat = 64
 }
 
 private struct KiteBrowserColumn: View {
