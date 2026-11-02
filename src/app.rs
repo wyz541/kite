@@ -25,6 +25,7 @@ use crate::preview_window::PreviewWindow;
 use crate::shell_fs;
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
 use crate::text_editor;
+use crate::ui_preferences;
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
     run_vcs_operation, run_vcs_query,
@@ -48,6 +49,13 @@ use gpui_kit::*;
 
 const SIDEBAR_WIDTH: f32 = 218.;
 const TOOLBAR_CONTROL_HEIGHT: f32 = 40.;
+const COLUMN_WIDTH: f32 = 274.;
+const DETAILED_COLUMN_MIN_WIDTH: f32 = 416.;
+const DETAILED_COLUMN_MAX_WIDTH: f32 = 640.;
+const DETAILED_COLUMN_NAME_OVERHEAD: f32 = 360.;
+const DETAILED_DATE_WIDTH: f32 = 84.;
+const DETAILED_KIND_WIDTH: f32 = 70.;
+const DETAILED_SIZE_WIDTH: f32 = 64.;
 
 #[derive(Clone, Copy, Debug)]
 enum NavigationIntent {
@@ -222,6 +230,7 @@ pub struct KiteApp {
     address_editing: bool,
     search_visible: bool,
     show_preview: bool,
+    show_column_details: bool,
     column_panes: Vec<ColumnPane>,
     column_selected_path: Option<PathBuf>,
     column_scroll: ScrollHandle,
@@ -438,6 +447,7 @@ impl KiteApp {
             address_editing: false,
             search_visible: false,
             show_preview: true,
+            show_column_details: ui_preferences::load_ui_preferences().column_details_visible,
             column_panes: Vec::new(),
             column_selected_path: None,
             column_scroll: ScrollHandle::new(),
@@ -485,6 +495,15 @@ impl KiteApp {
             }
         } else {
             self.clear_column_preview();
+        }
+        cx.notify();
+    }
+
+    fn toggle_column_details(&mut self, cx: &mut Context<Self>) {
+        self.show_column_details = !self.show_column_details;
+        self.column_scroll_pending = true;
+        if let Err(error) = ui_preferences::save_column_details_visible(self.show_column_details) {
+            self.notice = Some(error.into());
         }
         cx.notify();
     }
@@ -3826,7 +3845,7 @@ impl KiteApp {
     fn render_column(
         &mut self,
         index: usize,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(pane) = self.column_panes.get(index) else {
@@ -3841,6 +3860,13 @@ impl KiteApp {
             .map(|state| state.handle.clone())
             .unwrap_or_default();
         let active = same_path(&path, &self.current_dir);
+        let details_visible =
+            active && self.show_column_details && index + 1 == self.column_panes.len();
+        let column_width = if details_visible {
+            detailed_column_width(&pane.entries, window)
+        } else {
+            COLUMN_WIDTH
+        };
         let title = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -3874,7 +3900,7 @@ impl KiteApp {
                 SharedString::from(format!("column-list-{index}-{}", path.display())),
                 count,
                 cx.processor(move |this, range, window, cx| {
-                    this.render_column_rows(index, range, window, cx)
+                    this.render_column_rows(index, range, details_visible, window, cx)
                 }),
             )
             .flex_1()
@@ -3883,9 +3909,102 @@ impl KiteApp {
             .track_scroll(&vertical_scroll)
             .into_any_element()
         };
-        v_flex()
+        let header_menu_target = column_menu_target.clone();
+        let header_action_context = action_context.clone();
+        let mut header = h_flex()
+            .h(px(36.))
+            .w_full()
+            .px_2()
+            .gap_2()
+            .items_center()
+            .border_b_1()
+            .border_color(border)
+            .when(active, |this| this.bg(accent.opacity(0.5)))
+            .child(Icon::new(IconName::Folder).size_4().text_color(if active {
+                accent
+            } else {
+                muted
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(if active { cx.theme().foreground } else { muted })
+                    .child(title),
+            )
+            .child(
+                div()
+                    .px_1()
+                    .py_0p5()
+                    .rounded_md()
+                    .bg(muted.opacity(0.14))
+                    .text_xs()
+                    .text_color(muted)
+                    .child(count.to_string()),
+            );
+        if active {
+            header = header
+                .child(
+                    Button::new(("toggle-column-details", index))
+                        .ghost()
+                        .compact()
+                        .icon(IconName::Grid2x2)
+                        .tooltip(if details_visible {
+                            "隐藏详细信息"
+                        } else {
+                            "显示详细信息"
+                        })
+                        .accessibility_label(if details_visible {
+                            "隐藏详细信息"
+                        } else {
+                            "显示详细信息"
+                        })
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.toggle_column_details(cx)
+                        })),
+                )
+                .child(
+                    Button::new(("column-more", index))
+                        .ghost()
+                        .compact()
+                        .icon(IconName::Ellipsis)
+                        .tooltip("文件夹操作")
+                        .accessibility_label("文件夹操作")
+                        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+                            render_context_menu(
+                                menu,
+                                &header_menu_target,
+                                header_action_context.clone(),
+                                window,
+                                cx,
+                            )
+                        }),
+                );
+        }
+        let details_header = details_visible.then(|| {
+            h_flex()
+                .h(px(24.))
+                .w_full()
+                .px_2()
+                .gap_2()
+                .items_center()
+                .border_b_1()
+                .border_color(border)
+                .bg(muted.opacity(0.08))
+                .text_xs()
+                .font_medium()
+                .text_color(muted)
+                .child(div().flex_1().min_w_0().pl(px(24.)).child("名称"))
+                .child(div().w(px(DETAILED_DATE_WIDTH)).child("日期"))
+                .child(div().w(px(DETAILED_KIND_WIDTH)).child("类型"))
+                .child(div().w(px(DETAILED_SIZE_WIDTH)).text_right().child("大小"))
+        });
+        let mut column = v_flex()
             .id(("column", index))
-            .w(px(274.))
+            .w(px(column_width))
             .h_full()
             .flex_shrink_0()
             .rounded_lg()
@@ -3893,27 +4012,11 @@ impl KiteApp {
             .bg(cx.theme().title_bar)
             .border_1()
             .border_color(border)
-            .child(
-                h_flex()
-                    .h(px(34.))
-                    .w_full()
-                    .px_3()
-                    .gap_2()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(border)
-                    .when(active, |this| this.bg(accent.opacity(0.5)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(if active { cx.theme().foreground } else { muted })
-                            .child(title),
-                    ),
-            )
+            .child(header);
+        if let Some(details_header) = details_header {
+            column = column.child(details_header);
+        }
+        column
             .child(
                 v_flex()
                     .flex_1()
@@ -4012,6 +4115,7 @@ impl KiteApp {
         &mut self,
         column: usize,
         range: Range<usize>,
+        details_visible: bool,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -4026,6 +4130,7 @@ impl KiteApp {
         let git_available = pane.git_available;
         let svn_available = pane.svn_available;
         let accent = cx.theme().accent;
+        let accent_foreground = cx.theme().accent_foreground;
         let hover = cx.theme().muted;
         let muted = cx.theme().muted_foreground;
         let action_context = self.focus_handle.clone();
@@ -4037,6 +4142,10 @@ impl KiteApp {
             let selected = selected_path
                 .as_ref()
                 .is_some_and(|path| same_path(path, &entry.path));
+            let metadata_color = if selected { accent_foreground } else { muted };
+            let modified_label = column_modified_label(&entry);
+            let kind_label = entry.type_label();
+            let size_label = column_size_label(&entry);
             let row_column_path = column_path.clone();
             let menu_entry = entry.clone();
             let row_action_context = action_context.clone();
@@ -4048,7 +4157,7 @@ impl KiteApp {
                 (None, Some(_)) => true,
                 _ => false,
             };
-            let row = h_flex()
+            let mut row = h_flex()
                 .id(("column-row", column * 100_000 + row_ix))
                 .h(px(30.))
                 .w_full()
@@ -4078,12 +4187,47 @@ impl KiteApp {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .truncate()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis_middle()
                         .child(entry.name.clone()),
-                )
-                .when(entry.is_dir(), |this| {
-                    this.child(Icon::new(IconName::ChevronRight).size_3().text_color(muted))
-                })
+                );
+            if entry.is_dir() {
+                row = row.child(
+                    Icon::new(IconName::ChevronRight)
+                        .size_3()
+                        .text_color(metadata_color),
+                );
+            }
+            if details_visible {
+                row = row
+                    .child(
+                        div()
+                            .w(px(DETAILED_DATE_WIDTH))
+                            .truncate()
+                            .text_xs()
+                            .text_color(metadata_color)
+                            .child(modified_label),
+                    )
+                    .child(
+                        div()
+                            .w(px(DETAILED_KIND_WIDTH))
+                            .truncate()
+                            .text_xs()
+                            .text_color(metadata_color)
+                            .child(kind_label),
+                    )
+                    .child(
+                        div()
+                            .w(px(DETAILED_SIZE_WIDTH))
+                            .truncate()
+                            .text_right()
+                            .text_xs()
+                            .text_color(metadata_color)
+                            .child(size_label),
+                    );
+            }
+            let row = row
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     this.activate_column_entry(column, row_ix, event, window, cx)
                 }))
@@ -4438,6 +4582,46 @@ fn horizontal_wheel_delta(shift: bool, delta_x: f32, delta_y: f32) -> Option<f32
         Some(delta_y)
     } else {
         None
+    }
+}
+
+fn detailed_column_width(entries: &[FileEntry], window: &Window) -> f32 {
+    let text_style = window.text_style();
+    let text_system = window.text_system();
+    let font_id = text_system.resolve_font(&text_style.font());
+    let font_size = px(14.);
+    let max_name_width = entries
+        .iter()
+        .map(|entry| {
+            entry
+                .name
+                .chars()
+                .map(|character| text_system.layout_width(font_id, font_size, character).0)
+                .sum::<f32>()
+        })
+        .fold(0.0, f32::max);
+    detailed_column_width_for_name_width(max_name_width)
+}
+
+fn detailed_column_width_for_name_width(name_width: f32) -> f32 {
+    (DETAILED_COLUMN_NAME_OVERHEAD + name_width.ceil())
+        .clamp(DETAILED_COLUMN_MIN_WIDTH, DETAILED_COLUMN_MAX_WIDTH)
+}
+
+fn column_modified_label(entry: &FileEntry) -> String {
+    entry
+        .modified_label()
+        .split_whitespace()
+        .next()
+        .unwrap_or("未知")
+        .to_string()
+}
+
+fn column_size_label(entry: &FileEntry) -> String {
+    if entry.is_dir() {
+        "—".to_string()
+    } else {
+        format!("{:.2} MB", entry.size as f64 / 1_000_000.0)
     }
 }
 
@@ -5517,6 +5701,58 @@ otes.{extension}"
         assert!(!is_text_preview_entry(&make_entry("txt")));
     }
 }
+#[cfg(test)]
+mod column_details_tests {
+    use super::{
+        DETAILED_COLUMN_MAX_WIDTH, DETAILED_COLUMN_MIN_WIDTH, column_modified_label,
+        column_size_label, detailed_column_width_for_name_width,
+    };
+    use crate::fs::{EntryKind, FileEntry};
+    use std::path::PathBuf;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    fn entry(is_dir: bool, size: u64) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from(r"C:\demo\example.mp4"),
+            name: "example.mp4".to_string(),
+            kind: if is_dir {
+                EntryKind::Directory
+            } else {
+                EntryKind::File
+            },
+            size,
+            modified: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
+            extension: "mp4".to_string(),
+            git_status: None,
+            svn_status: None,
+        }
+    }
+
+    #[test]
+    fn detailed_column_width_is_clamped() {
+        assert_eq!(
+            detailed_column_width_for_name_width(0.0),
+            DETAILED_COLUMN_MIN_WIDTH
+        );
+        assert_eq!(
+            detailed_column_width_for_name_width(10_000.0),
+            DETAILED_COLUMN_MAX_WIDTH
+        );
+    }
+
+    #[test]
+    fn detailed_size_uses_megabytes() {
+        assert_eq!(column_size_label(&entry(false, 157_286_400)), "157.29 MB");
+        assert_eq!(column_size_label(&entry(true, 157_286_400)), "—");
+    }
+
+    #[test]
+    fn detailed_date_omits_time() {
+        let label = column_modified_label(&entry(false, 0));
+        assert!(!label.contains(':'));
+    }
+}
+
 #[cfg(test)]
 mod scroll_routing_tests {
     use super::{
