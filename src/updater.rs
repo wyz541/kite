@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use semver::Version;
@@ -33,9 +34,59 @@ pub struct UpdateInfo {
     pub asset_size: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpdateDownloadProgress {
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub active: bool,
+}
+
+impl UpdateDownloadProgress {
+    pub fn fraction(&self) -> Option<f64> {
+        if self.total_bytes == 0 {
+            return None;
+        }
+        Some(
+            (self.downloaded_bytes.min(self.total_bytes) as f64 / self.total_bytes as f64)
+                .clamp(0.0, 1.0),
+        )
+    }
+}
+
 impl UpdateInfo {
     pub fn download(&self) -> Result<PathBuf, String> {
         download_update(self)
+    }
+}
+
+static DOWNLOAD_PROGRESS_ACTIVE: AtomicBool = AtomicBool::new(false);
+static DOWNLOAD_PROGRESS_DOWNLOADED: AtomicU64 = AtomicU64::new(0);
+static DOWNLOAD_PROGRESS_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+struct DownloadProgressGuard;
+
+impl Drop for DownloadProgressGuard {
+    fn drop(&mut self) {
+        DOWNLOAD_PROGRESS_ACTIVE.store(false, Ordering::Relaxed);
+    }
+}
+
+fn start_download_progress(total_bytes: u64) {
+    DOWNLOAD_PROGRESS_TOTAL.store(total_bytes, Ordering::Relaxed);
+    DOWNLOAD_PROGRESS_DOWNLOADED.store(0, Ordering::Relaxed);
+    DOWNLOAD_PROGRESS_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+fn publish_download_progress(downloaded_bytes: u64, total_bytes: u64) {
+    DOWNLOAD_PROGRESS_TOTAL.store(total_bytes, Ordering::Relaxed);
+    DOWNLOAD_PROGRESS_DOWNLOADED.store(downloaded_bytes, Ordering::Relaxed);
+}
+
+pub fn download_progress() -> UpdateDownloadProgress {
+    UpdateDownloadProgress {
+        downloaded_bytes: DOWNLOAD_PROGRESS_DOWNLOADED.load(Ordering::Relaxed),
+        total_bytes: DOWNLOAD_PROGRESS_TOTAL.load(Ordering::Relaxed),
+        active: DOWNLOAD_PROGRESS_ACTIVE.load(Ordering::Relaxed),
     }
 }
 
@@ -309,6 +360,9 @@ pub fn download_update(info: &UpdateInfo) -> Result<PathBuf, String> {
         return Err("更新包大小无效".to_string());
     }
 
+    start_download_progress(info.asset_size);
+    let _progress_guard = DownloadProgressGuard;
+
     let version = parse_release_version(&info.latest_version)?.to_string();
     let directory = dirs::data_local_dir()
         .or_else(dirs::cache_dir)
@@ -322,6 +376,7 @@ pub fn download_update(info: &UpdateInfo) -> Result<PathBuf, String> {
         && destination.metadata().map(|meta| meta.len()).ok() == Some(info.asset_size)
         && sha256_file(&destination)? == expected_hash
     {
+        publish_download_progress(info.asset_size, info.asset_size);
         return Ok(destination);
     }
 
@@ -333,6 +388,15 @@ pub fn download_update(info: &UpdateInfo) -> Result<PathBuf, String> {
         .set("User-Agent", USER_AGENT)
         .call()
         .map_err(|error| format!("无法下载 Kite 更新：{error}"))?;
+    let total_bytes = if info.asset_size > 0 {
+        info.asset_size
+    } else {
+        response
+            .header("Content-Length")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default()
+    };
+    start_download_progress(total_bytes);
     let mut reader = response.into_reader().take(MAX_UPDATE_BYTES + 1);
     let mut file = File::create(&partial).map_err(|error| format!("无法创建更新文件：{error}"))?;
     let mut hasher = Sha256::new();
@@ -354,12 +418,14 @@ pub fn download_update(info: &UpdateInfo) -> Result<PathBuf, String> {
         hasher.update(&buffer[..count]);
         file.write_all(&buffer[..count])
             .map_err(|error| format!("无法写入更新文件：{error}"))?;
+        publish_download_progress(total, total_bytes);
     }
     file.flush()
         .map_err(|error| format!("无法写入更新文件：{error}"))?;
     file.sync_all()
         .map_err(|error| format!("无法保存更新文件：{error}"))?;
     drop(file);
+    publish_download_progress(total, total_bytes);
 
     if info.asset_size > 0 && total != info.asset_size {
         let _ = fs::remove_file(&partial);
@@ -544,6 +610,29 @@ mod tests {
 
     fn parse(json: &str) -> GithubRelease {
         serde_json::from_str(json).expect("parse release fixture")
+    }
+
+    #[test]
+    fn download_progress_reports_a_bounded_fraction() {
+        let half = UpdateDownloadProgress {
+            downloaded_bytes: 512,
+            total_bytes: 1024,
+            active: true,
+        };
+        let overflow = UpdateDownloadProgress {
+            downloaded_bytes: 2048,
+            total_bytes: 1024,
+            active: true,
+        };
+        let unknown = UpdateDownloadProgress {
+            downloaded_bytes: 512,
+            total_bytes: 0,
+            active: true,
+        };
+
+        assert_eq!(half.fraction(), Some(0.5));
+        assert_eq!(overflow.fraction(), Some(1.0));
+        assert_eq!(unknown.fraction(), None);
     }
 
     #[test]

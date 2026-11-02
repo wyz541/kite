@@ -172,7 +172,12 @@ struct KiteSidebar: View {
 
                 Spacer(minLength: 0)
 
-                if model.updateInProgress {
+                if let download = model.updateDownload,
+                   let fraction = download.fraction {
+                    ProgressView(value: fraction)
+                        .progressViewStyle(.linear)
+                        .frame(width: 54)
+                } else if model.updateInProgress {
                     ProgressView()
                         .controlSize(.mini)
                 }

@@ -81,6 +81,8 @@ Windows 更新包为 `Kite.exe`。
 macOS 更新包为 `Kite-vX.Y.Z-macOS-arm64.zip`。
 Kite 下载后校验 SHA-256。
 校验失败时，Kite 不安装更新包。
+
+下载更新时，Kite 显示百分比、已下载大小、总大小和进度条。
 Windows 安装器等待当前进程退出。
 Windows 安装器备份当前 EXE，替换 EXE，然后重启 Kite。
 macOS 安装器等待当前进程退出。

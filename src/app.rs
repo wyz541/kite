@@ -215,6 +215,7 @@ pub struct KiteApp {
     error: Option<SharedString>,
     notice: Option<SharedString>,
     update_in_progress: bool,
+    update_download_progress: Option<crate::updater::UpdateDownloadProgress>,
     modal: Option<ModalState>,
     clipboard: SharedClipboard,
     load_generation: u64,
@@ -407,6 +408,7 @@ impl KiteApp {
             error: None,
             notice: None,
             update_in_progress: false,
+            update_download_progress: None,
             modal: None,
             clipboard,
             load_generation: 0,
@@ -1526,15 +1528,50 @@ impl KiteApp {
             if choice != 0 {
                 return;
             }
+            let version = update.latest_version.clone();
+            let initial_progress = crate::updater::UpdateDownloadProgress {
+                downloaded_bytes: 0,
+                total_bytes: update.asset_size,
+                active: true,
+            };
             let _ = this.update_in(cx, |this, _, cx| {
                 this.update_in_progress = true;
                 this.error = None;
-                this.notice = Some("正在下载 Kite 更新…".into());
+                this.update_download_progress = Some(initial_progress);
+                this.notice = Some(update_download_notice(&version, initial_progress).into());
                 cx.notify();
             });
+
+            let download_finished = Arc::new(AtomicBool::new(false));
+            let observed_download_finished = download_finished.clone();
+            let progress_version = update.latest_version.clone();
+            let progress_entity = this.clone();
+            let progress_task = cx.spawn(async move |cx| {
+                loop {
+                    let progress = crate::updater::download_progress();
+                    if progress.active || progress.downloaded_bytes == 0 {
+                        let _ = progress_entity.update(cx, |this, cx| {
+                            this.update_download_progress = Some(progress);
+                            this.notice =
+                                Some(update_download_notice(&progress_version, progress).into());
+                            cx.notify();
+                        });
+                    }
+                    if observed_download_finished.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    cx.background_executor()
+                        .timer(Duration::from_millis(120))
+                        .await;
+                }
+            });
+
+            let download_finished_for_task = download_finished.clone();
             let result = cx
                 .background_spawn(async move {
-                    let downloaded = update.download()?;
+                    let download_result = update.download();
+                    download_finished_for_task.store(true, Ordering::Relaxed);
+                    let downloaded = download_result?;
                     crate::updater::install_windows_update(
                         &downloaded,
                         &update.asset_sha256,
@@ -1543,8 +1580,11 @@ impl KiteApp {
                     Ok::<String, String>(update.latest_version)
                 })
                 .await;
+            download_finished.store(true, Ordering::Relaxed);
+            let _ = progress_task.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.update_in_progress = false;
+                this.update_download_progress = None;
                 match result {
                     Ok(version) => {
                         this.error = None;
@@ -4309,6 +4349,19 @@ fn same_quick_links(left: &[QuickLink], right: &[QuickLink]) -> bool {
         })
 }
 
+fn update_download_notice(
+    version: &str,
+    progress: crate::updater::UpdateDownloadProgress,
+) -> String {
+    let downloaded = format_size(progress.downloaded_bytes);
+    let Some(fraction) = progress.fraction() else {
+        return format!("正在下载 Kite {version}… {downloaded}");
+    };
+    let percent = (fraction * 100.0).round() as u32;
+    let total = format_size(progress.total_bytes);
+    format!("正在下载 Kite {version}… {percent}% · {downloaded} / {total}")
+}
+
 fn update_notes_summary(notes: &str) -> String {
     let normalized = notes
         .lines()
@@ -4817,6 +4870,10 @@ impl Render for KiteApp {
             .unwrap_or_default();
         let error = self.error.clone();
         let notice = self.notice.clone();
+        let update_download_fraction = self
+            .update_download_progress
+            .and_then(|progress| progress.fraction())
+            .map(|fraction| fraction as f32);
         let loading = self.loading;
         let active_search = self.active_search.clone();
         let search_truncated = self.search_truncated;
@@ -5053,7 +5110,29 @@ impl Render for KiteApp {
                             .when(error.is_some(), |this| this.text_color(cx.theme().danger))
                             .child(footer_left),
                     )
-                    .child(div().max_w(px(520.)).truncate().child(footer_right)),
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .when_some(update_download_fraction, |this, fraction| {
+                                this.child(
+                                    div()
+                                        .w(px(64.))
+                                        .h(px(4.))
+                                        .rounded_md()
+                                        .overflow_hidden()
+                                        .bg(cx.theme().border)
+                                        .child(
+                                            div()
+                                                .h_full()
+                                                .w(px((64. * fraction).max(2.)))
+                                                .rounded_md()
+                                                .bg(cx.theme().primary),
+                                        ),
+                                )
+                            })
+                            .child(div().max_w(px(500.)).truncate().child(footer_right)),
+                    ),
             )
             .child(self.render_modal(cx))
     }
@@ -5116,7 +5195,8 @@ mod clipboard_tests {
 
 #[cfg(test)]
 mod update_ui_tests {
-    use super::update_notes_summary;
+    use super::{update_download_notice, update_notes_summary};
+    use crate::updater::UpdateDownloadProgress;
 
     #[test]
     fn empty_release_notes_have_a_fallback() {
@@ -5130,6 +5210,36 @@ mod update_ui_tests {
 
         assert!(summary.ends_with('…'));
         assert!(summary.chars().count() < 1_810);
+    }
+
+    #[test]
+    fn download_notice_includes_percent_and_size() {
+        let notice = update_download_notice(
+            "0.6.34",
+            UpdateDownloadProgress {
+                downloaded_bytes: 1024 * 1024,
+                total_bytes: 2 * 1024 * 1024,
+                active: true,
+            },
+        );
+
+        assert!(notice.contains("50%"));
+        assert!(notice.contains("1.0 MB / 2.0 MB"));
+    }
+
+    #[test]
+    fn download_notice_handles_unknown_total_size() {
+        let notice = update_download_notice(
+            "0.6.34",
+            UpdateDownloadProgress {
+                downloaded_bytes: 1024,
+                total_bytes: 0,
+                active: true,
+            },
+        );
+
+        assert!(!notice.contains('%'));
+        assert!(notice.contains("1.0 KB"));
     }
 }
 

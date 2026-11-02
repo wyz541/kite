@@ -143,6 +143,8 @@ macOS 入口位于应用菜单 `检查更新…`。
 Windows 在状态栏显示检查、下载和安装状态。
 macOS 在状态栏显示检查、下载和安装状态。
 更新可用时，平台 UI 显示版本和 Release 说明。
+下载时，平台 UI 显示百分比、已下载大小、总大小和进度条。
+总大小未知时，平台 UI 显示已下载大小。
 下载前必须得到用户确认。
 
 ## UniFFI
@@ -157,8 +159,11 @@ UpdateInfoDto
 
 ```text
 KiteCore::check_for_update()
+KiteCore::download_progress()
 KiteCore::download_update(update)
 ```
+
+共享下载进度记录为 `UpdateDownloadProgressDto`。该记录包含已下载字节数、总字节数和下载活动状态。
 
 `UpdateInfoDto` 包含：
 
@@ -216,8 +221,7 @@ macOS 不实现第二套版本比较或资产选择逻辑。
 ## 后续阶段
 
 1. 增加可配置的自动检查周期。
-2. 增加下载进度条。
-3. 增加跳过指定版本。
-4. 增加更新渠道：稳定版和预览版。
-5. 增加 Windows 代码签名验证。
-6. 增加 macOS 公证和团队签名验证。
+2. 增加跳过指定版本。
+3. 增加更新渠道：稳定版和预览版。
+4. 增加 Windows 代码签名验证。
+5. 增加 macOS 公证和团队签名验证。

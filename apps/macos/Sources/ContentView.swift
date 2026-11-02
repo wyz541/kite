@@ -326,6 +326,19 @@ struct ContentView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
+            if let download = model.updateDownload {
+                if let fraction = download.fraction {
+                    ProgressView(value: fraction)
+                        .progressViewStyle(.linear)
+                        .frame(width: 96)
+                }
+
+                Text(download.summaryText)
+                    .font(.system(size: 10.5, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
             Spacer(minLength: 8)
 
             if let selectedEntry = model.selectedColumnEntry {
