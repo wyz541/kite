@@ -6,6 +6,7 @@ use crate::actions::{CloseTab, NewTab, NextTab, PreviousTab};
 use crate::app::{AppLaunchTarget, KiteApp, SharedClipboard, TabRequest};
 use crate::session::{self, SessionStateDto, SessionTabDto};
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -297,9 +298,25 @@ impl KiteWindow {
         self.on_new_tab(&NewTab, window, cx);
     }
 
+    fn toggle_preview_clicked(
+        &mut self,
+        _: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.active_view() else {
+            return;
+        };
+        view.update(cx, |view, cx| view.toggle_preview(cx));
+        cx.notify();
+    }
+
     fn render_tab_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let tab_count = self.tabs.len();
         let active_index = self.active_index;
+        let preview_visible = self
+            .active_view()
+            .is_some_and(|view| view.read(cx).preview_visible());
         let hover_color = cx.theme().muted_foreground.opacity(0.12);
         let active_background = cx.theme().background;
         let inactive_foreground = cx.theme().muted_foreground;
@@ -423,6 +440,23 @@ impl KiteWindow {
                     .hover(move |style| style.bg(hover_color))
                     .on_click(cx.listener(Self::new_tab_clicked))
                     .child(Icon::new(IconName::Plus).size_4()),
+            )
+            .child(div().h(px(18.)).w(px(0.5)).bg(cx.theme().border))
+            .child(
+                Button::new("toggle-preview")
+                    .ghost()
+                    .compact()
+                    .icon(if preview_visible {
+                        IconName::PanelRightClose
+                    } else {
+                        IconName::PanelRightOpen
+                    })
+                    .tooltip(if preview_visible {
+                        "隐藏预览"
+                    } else {
+                        "显示预览"
+                    })
+                    .on_click(cx.listener(Self::toggle_preview_clicked)),
             )
             .into_any_element()
     }
