@@ -46,6 +46,9 @@ use gpui_kit::component::{
 use gpui_kit::prelude::{FluentBuilder as _, StatefulInteractiveElement as _};
 use gpui_kit::*;
 
+const SIDEBAR_WIDTH: f32 = 218.;
+const TOOLBAR_CONTROL_HEIGHT: f32 = 40.;
+
 #[derive(Clone, Copy, Debug)]
 enum NavigationIntent {
     Initial,
@@ -2794,7 +2797,7 @@ impl KiteApp {
             (!self.address_editing && self.show_path_bar).then(|| self.render_path_bar(cx));
 
         let navigation_group = h_flex()
-            .h(px(34.))
+            .h(px(TOOLBAR_CONTROL_HEIGHT))
             .gap_0p5()
             .px_1()
             .items_center()
@@ -2836,8 +2839,15 @@ impl KiteApp {
                     .on_click(cx.listener(Self::refresh_clicked)),
             );
 
+        let navigation_slot = h_flex()
+            .w(px(SIDEBAR_WIDTH))
+            .h(px(TOOLBAR_CONTROL_HEIGHT))
+            .flex_shrink_0()
+            .items_center()
+            .child(navigation_group);
+
         let actions = h_flex()
-            .h(px(34.))
+            .h(px(TOOLBAR_CONTROL_HEIGHT))
             .gap_0p5()
             .px_1()
             .items_center()
@@ -2916,7 +2926,7 @@ impl KiteApp {
             h_flex()
                 .flex_1()
                 .min_w(px(180.))
-                .h(px(34.))
+                .h(px(TOOLBAR_CONTROL_HEIGHT))
                 .gap_1()
                 .px_1()
                 .items_center()
@@ -2964,18 +2974,19 @@ impl KiteApp {
             .w_full()
             .flex_shrink_0()
             .gap_1()
-            .p_2()
+            .px(px(0.))
+            .py(px(6.))
             .rounded_lg()
             .bg(cx.theme().title_bar)
             .border_1()
             .border_color(cx.theme().border)
             .child(
                 h_flex()
-                    .h(px(36.))
+                    .h(px(TOOLBAR_CONTROL_HEIGHT))
                     .w_full()
                     .gap_2()
                     .items_center()
-                    .child(navigation_group)
+                    .child(navigation_slot)
                     .child(address_control)
                     .when_some(search_input, |this, input| this.child(input))
                     .child(actions),
@@ -3296,7 +3307,7 @@ impl KiteApp {
         };
 
         v_flex()
-            .w(px(218.))
+            .w(px(SIDEBAR_WIDTH))
             .h_full()
             .flex_shrink_0()
             .gap_1()
@@ -3947,14 +3958,18 @@ impl KiteApp {
         let delta_y = delta.y.as_f32();
         let current = base.offset();
 
-        if wheel_scrolls_columns(delta_x, delta_y) {
+        if let Some(horizontal_delta) =
+            horizontal_wheel_delta(event.modifiers.shift, delta_x, delta_y)
+        {
             // The list maps one-axis gestures to its vertical offset. Restore it
             // before the column strip receives this horizontal gesture.
             let applied_y = if delta.y.is_zero() { delta_x } else { delta_y };
             let max_y = base.max_offset().y.as_f32().max(0.0);
             let restored_y = (current.y.as_f32() - applied_y).clamp(-max_y, 0.0);
             base.set_offset(point(current.x, px(restored_y)));
+            self.scroll_columns_by(horizontal_delta, cx);
             cx.notify();
+            cx.stop_propagation();
             return;
         }
 
@@ -4415,6 +4430,16 @@ fn open_vcs_query_text(tool: VcsTool, query: VcsQuery, path: &Path) -> Result<St
 
 fn wheel_scrolls_columns(delta_x: f32, delta_y: f32) -> bool {
     delta_x != 0.0 && delta_x.abs() > delta_y.abs()
+}
+
+fn horizontal_wheel_delta(shift: bool, delta_x: f32, delta_y: f32) -> Option<f32> {
+    if wheel_scrolls_columns(delta_x, delta_y) {
+        Some(delta_x)
+    } else if shift && delta_y != 0.0 {
+        Some(delta_y)
+    } else {
+        None
+    }
 }
 
 fn route_directory_scroll(offset_after_scroll: f32, max_offset: f32) -> DirectoryScrollRoute {
@@ -5495,7 +5520,9 @@ otes.{extension}"
 }
 #[cfg(test)]
 mod scroll_routing_tests {
-    use super::{DirectoryScrollRoute, route_directory_scroll, wheel_scrolls_columns};
+    use super::{
+        DirectoryScrollRoute, horizontal_wheel_delta, route_directory_scroll, wheel_scrolls_columns,
+    };
 
     #[test]
     fn horizontal_gesture_takes_priority_over_vertical_noise() {
@@ -5503,6 +5530,18 @@ mod scroll_routing_tests {
         assert!(wheel_scrolls_columns(8.0, 7.0));
         assert!(!wheel_scrolls_columns(3.0, 18.0));
         assert!(!wheel_scrolls_columns(0.0, 18.0));
+    }
+
+    #[test]
+    fn shift_vertical_wheel_scrolls_columns() {
+        assert_eq!(horizontal_wheel_delta(true, 0.0, -90.0), Some(-90.0));
+        assert_eq!(horizontal_wheel_delta(true, 0.0, 90.0), Some(90.0));
+        assert_eq!(horizontal_wheel_delta(false, 0.0, -90.0), None);
+    }
+
+    #[test]
+    fn horizontal_wheel_does_not_require_shift() {
+        assert_eq!(horizontal_wheel_delta(false, 18.0, 3.0), Some(18.0));
     }
 
     #[test]
