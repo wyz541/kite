@@ -462,6 +462,58 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn ensure_update_target_writable(target: &Path) -> Result<(), String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let metadata = fs::metadata(target)
+        .map_err(|error| format!("无法读取当前 Kite.exe：{}：{error}", target.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("更新目标不是文件：{}", target.display()));
+    }
+    if metadata.permissions().readonly() {
+        return Err(format!(
+            "当前 Kite.exe 是只读文件，无法自动更新。请复制到可写目录后重试：{}",
+            target.display()
+        ));
+    }
+
+    let directory = target
+        .parent()
+        .ok_or_else(|| format!("无法定位 Kite.exe 所在目录：{}", target.display()))?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let probe = directory.join(format!(
+        ".kite-update-write-test-{}-{nonce}.tmp",
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)?;
+        file.write_all(b"Kite update write test")?;
+        file.sync_all()
+    })();
+    let _ = fs::remove_file(&probe);
+    result.map_err(|error| {
+        format!(
+            "当前 Kite.exe 所在目录不可写，无法自动更新。请先将 Kite.exe 复制到可写目录再重试：{}。错误：{error}",
+            directory.display()
+        )
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_update_target() -> Result<PathBuf, String> {
+    let target =
+        std::env::current_exe().map_err(|error| format!("无法定位当前 Kite.exe：{error}"))?;
+    ensure_update_target_writable(&target)?;
+    Ok(target)
+}
+
 #[cfg(target_os = "windows")]
 pub fn install_windows_update(
     downloaded: &Path,
@@ -474,8 +526,7 @@ pub fn install_windows_update(
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let version = parse_release_version(version)?.to_string();
 
-    let target =
-        std::env::current_exe().map_err(|error| format!("无法定位当前 Kite.exe：{error}"))?;
+    let target = windows_update_target()?;
     let updates = dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("Kite")
@@ -533,9 +584,22 @@ function Write-UpdateLog([string]$Message) {
     $line = "$(Get-Date -Format o) $Message"
     Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
 }
+function Show-UpdateError([string]$Message) {
+    try {
+        Add-Type -AssemblyName PresentationFramework
+        [System.Windows.MessageBox]::Show(
+            "$Message`n`n更新日志：$LogPath",
+            "Kite 更新失败",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Error
+        ) | Out-Null
+    } catch {
+    }
+}
 $backup = "$Target.old"
 $targetDirectory = Split-Path -Parent $Target
 try {
+    Write-UpdateLog "Starting update from $Source to $Target"
     $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($process) { $process.WaitForExit(60000) | Out-Null }
     $stream = $null
@@ -562,11 +626,13 @@ try {
     if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
     Remove-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
 } catch {
+    $failure = $_.Exception.Message
     Write-UpdateLog "Update failed: $($_.Exception.ToString())"
     if (Test-Path -LiteralPath $backup) {
         if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Force }
         Move-Item -LiteralPath $backup -Destination $Target -Force
     }
+    Show-UpdateError $failure
     if (Test-Path -LiteralPath $Target) {
         Start-Process -FilePath $Target -WorkingDirectory $targetDirectory
     }
@@ -580,6 +646,7 @@ try {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn release_json(version: &str, digest: &str) -> String {
         json!({
@@ -633,6 +700,53 @@ mod tests {
         assert_eq!(half.fraction(), Some(0.5));
         assert_eq!(overflow.fraction(), Some(1.0));
         assert_eq!(unknown.fraction(), None);
+    }
+
+    #[test]
+    fn writable_update_target_accepts_a_writable_directory() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-update-target-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create update target test directory");
+        let target = directory.join("Kite.exe");
+        fs::write(&target, b"old executable").expect("write update target fixture");
+
+        let result = ensure_update_target_writable(&target);
+        let _ = fs::remove_dir_all(&directory);
+
+        assert!(result.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_update_target_directory_is_rejected() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = std::env::temp_dir().join(format!(
+            "kite-read-only-update-target-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create read-only update target test directory");
+        let target = directory.join("Kite.exe");
+        fs::write(&target, b"old executable").expect("write update target fixture");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o555))
+            .expect("make update target directory read-only");
+
+        let result = ensure_update_target_writable(&target);
+
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755))
+            .expect("restore update target directory permissions");
+        let _ = fs::remove_dir_all(&directory);
+        assert!(result.is_err());
     }
 
     #[test]
