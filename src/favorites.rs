@@ -208,16 +208,20 @@ fn backup_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
 
     fn test_path() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "kite-favorites-{}-{}.json",
+            "kite-favorites-{}-{}-{}.json",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed)
         ))
     }
 

@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -70,21 +69,13 @@ struct QuickLink {
 }
 
 #[derive(Clone)]
-enum SidebarChildrenState {
-    Loading,
-    Loaded(Vec<FileEntry>),
-    Failed(SharedString),
-}
-
-#[derive(Clone)]
-struct SidebarTreeItem {
+struct SidebarItem {
     id: SharedString,
     label: SharedString,
     path: PathBuf,
     icon: IconName,
     detail: Option<SharedString>,
     active: bool,
-    depth: usize,
     is_directory: bool,
     favorite: bool,
 }
@@ -199,8 +190,6 @@ pub struct KiteApp {
     history_index: usize,
     quick_links: Vec<QuickLink>,
     favorites: Vec<FavoriteEntryDto>,
-    sidebar_expanded: HashSet<PathBuf>,
-    sidebar_children: HashMap<PathBuf, SidebarChildrenState>,
     connected_devices: Vec<QuickLink>,
     drives: Vec<QuickLink>,
     portable_devices: Vec<PortableDevice>,
@@ -227,6 +216,9 @@ pub struct KiteApp {
     _vcs_task: Task<()>,
     view_mode: ViewMode,
     show_path_bar: bool,
+    address_editing: bool,
+    search_visible: bool,
+    show_preview: bool,
     column_panes: Vec<ColumnPane>,
     column_selected_path: Option<PathBuf>,
     column_scroll: ScrollHandle,
@@ -367,21 +359,43 @@ impl KiteApp {
         let address_subscription = cx.subscribe_in(
             &address_input,
             window,
-            |this: &mut Self, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
+            |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => {
                     let value = this.address_input.read(cx).value().to_string();
                     this.navigate_from_text(value, window, cx);
                 }
+                InputEvent::Focus => {
+                    this.address_editing = true;
+                    cx.notify();
+                }
+                InputEvent::Blur => {
+                    this.address_editing = false;
+                    cx.notify();
+                }
+                InputEvent::Change => {}
             },
         );
         let search_subscription = cx.subscribe_in(
             &search_input,
             window,
-            |this: &mut Self, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
+            |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => {
                     let value = this.search_input.read(cx).value().to_string();
+                    this.search_visible = true;
                     this.submit_search(value, window, cx);
                 }
+                InputEvent::Focus => {
+                    this.search_visible = true;
+                    cx.notify();
+                }
+                InputEvent::Blur => {
+                    if this.active_search.is_none() && this.search_input.read(cx).value().is_empty()
+                    {
+                        this.search_visible = false;
+                        cx.notify();
+                    }
+                }
+                InputEvent::Change => {}
             },
         );
         let table_subscription = cx.subscribe_in(&table, window, Self::on_table_event);
@@ -392,8 +406,6 @@ impl KiteApp {
             history_index: 0,
             quick_links,
             favorites,
-            sidebar_expanded: HashSet::new(),
-            sidebar_children: HashMap::new(),
             connected_devices,
             drives,
             portable_devices,
@@ -420,6 +432,9 @@ impl KiteApp {
             _vcs_task: Task::ready(()),
             view_mode,
             show_path_bar,
+            address_editing: false,
+            search_visible: false,
+            show_preview: true,
             column_panes: Vec::new(),
             column_selected_path: None,
             column_scroll: ScrollHandle::new(),
@@ -453,6 +468,22 @@ impl KiteApp {
 
     pub(crate) fn current_dir(&self) -> &Path {
         &self.current_dir
+    }
+
+    pub(crate) fn preview_visible(&self) -> bool {
+        self.show_preview
+    }
+
+    pub(crate) fn toggle_preview(&mut self, cx: &mut Context<Self>) {
+        self.show_preview = !self.show_preview;
+        if self.show_preview {
+            if let Some(entry) = self.selected_last_column_file() {
+                self.start_column_preview(entry, cx);
+            }
+        } else {
+            self.clear_column_preview();
+        }
+        cx.notify();
     }
 
     fn start_device_watcher(&mut self, cx: &mut Context<Self>) {
@@ -579,6 +610,8 @@ impl KiteApp {
         self.error = None;
         self.active_search = None;
         self.search_truncated = false;
+        self.address_editing = false;
+        self.search_visible = false;
         self.table.update(cx, |state, cx| {
             state.delegate_mut().set_loading(true);
             state.refresh(cx);
@@ -611,6 +644,8 @@ impl KiteApp {
                         this.current_dir = snapshot.path.clone();
                         this.skipped = snapshot.skipped;
                         this.error = None;
+                        this.address_editing = false;
+                        this.search_visible = false;
                         this.address_input.update(cx, |input, cx| {
                             input.set_value(path_text(&snapshot.path), window, cx);
                         });
@@ -756,6 +791,8 @@ impl KiteApp {
         self.notice = None;
         self.active_search = None;
         self.search_truncated = false;
+        self.address_editing = false;
+        self.search_visible = false;
         self.skipped = skipped;
         self.apply_history(path.clone(), NavigationIntent::Push);
         let table_directory = path.clone();
@@ -1083,13 +1120,6 @@ impl KiteApp {
         self.path_bar_scroll_pending = self.show_path_bar;
         cx.notify();
     }
-    fn toggle_view_clicked(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match self.view_mode {
-            ViewMode::Columns => self.show_list_view(&ShowListView, window, cx),
-            ViewMode::List => self.show_columns_view(&ShowColumnsView, window, cx),
-        }
-    }
-
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
         let query = query.trim().to_string();
         if query.is_empty() {
@@ -1199,6 +1229,7 @@ impl KiteApp {
         });
         self.active_search = None;
         self.search_truncated = false;
+        self.search_visible = false;
         self.request_load(
             self.current_dir.clone(),
             NavigationIntent::Refresh,
@@ -1208,17 +1239,21 @@ impl KiteApp {
     }
 
     fn focus_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.address_editing = true;
         self.address_input.update(cx, |input, cx| {
             input.select_all(window, cx);
             input.focus(window, cx);
         });
+        cx.notify();
     }
 
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_visible = true;
         self.search_input.update(cx, |input, cx| {
             input.select_all(window, cx);
             input.focus(window, cx);
         });
+        cx.notify();
     }
 
     fn focus_table(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2064,7 +2099,11 @@ impl KiteApp {
                     column,
                     self.column_panes.len(),
                 ));
-            self.start_column_preview(entry, cx);
+            if self.show_preview {
+                self.start_column_preview(entry, cx);
+            } else {
+                self.clear_column_preview();
+            }
             self.column_scroll_pending = true;
         } else {
             self.clear_column_preview();
@@ -2715,10 +2754,24 @@ impl KiteApp {
     }
 
     fn clear_search_or_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.modal.is_some() {
+        if self.address_editing {
+            self.address_editing = false;
+            self.address_input.update(cx, |input, cx| {
+                input.set_value(path_text(&self.current_dir), window, cx);
+            });
+            self.focus_table(window, cx);
+            cx.notify();
+        } else if self.modal.is_some() {
             self.close_modal(window, cx);
         } else if self.active_search.is_some() {
             self.clear_search(window, cx);
+        } else if self.search_visible {
+            self.search_visible = false;
+            self.search_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+            self.focus_table(window, cx);
+            cx.notify();
         }
     }
 
@@ -2733,9 +2786,12 @@ impl KiteApp {
         let current_local = !shell_fs::is_shell_namespace_path(&self.current_dir);
         let has_clipboard = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let current_favorite = self.current_dir_is_favorite();
-        let view_mode = self.view_mode;
         let loading = self.loading;
-        let path_bar = self.show_path_bar.then(|| self.render_path_bar(cx));
+        let search_expanded = self.search_visible
+            || self.active_search.is_some()
+            || !self.search_input.read(cx).value().is_empty();
+        let breadcrumbs =
+            (!self.address_editing && self.show_path_bar).then(|| self.render_path_bar(cx));
 
         let navigation_group = h_flex()
             .h(px(34.))
@@ -2843,34 +2899,68 @@ impl KiteApp {
                         this.begin_new_folder(window, cx)
                     })),
             )
-            .child(
-                Button::new("toggle-view")
-                    .ghost()
-                    .compact()
-                    .icon(if view_mode == ViewMode::Columns {
-                        IconName::List
-                    } else {
-                        IconName::Columns3
-                    })
-                    .tooltip(if view_mode == ViewMode::Columns {
-                        "切换到列表视图 (Ctrl+1)"
-                    } else {
-                        "切换到分栏视图 (Ctrl+2)"
-                    })
-                    .on_click(cx.listener(Self::toggle_view_clicked)),
-            )
-            .child(
-                Button::new("toggle-path-bar")
-                    .ghost()
-                    .compact()
-                    .icon(IconName::PanelBottom)
-                    .tooltip("显示或隐藏路径栏 (Alt+P)")
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.toggle_path_bar(&TogglePathBar, window, cx);
-                    })),
-            );
+            .when(!search_expanded, |this| {
+                this.child(
+                    Button::new("show-search")
+                        .ghost()
+                        .compact()
+                        .icon(IconName::Search)
+                        .tooltip("搜索当前文件夹 (Ctrl+F)")
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.focus_search(window, cx)
+                        })),
+                )
+            });
 
-        let mut toolbar = v_flex()
+        let address_control = if let Some(breadcrumbs) = breadcrumbs {
+            h_flex()
+                .flex_1()
+                .min_w(px(180.))
+                .h(px(34.))
+                .gap_1()
+                .px_1()
+                .items_center()
+                .rounded_md()
+                .bg(cx.theme().background.opacity(0.42))
+                .child(
+                    Icon::new(IconName::Folder)
+                        .size_4()
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(div().flex_1().min_w_0().child(breadcrumbs))
+                .child(
+                    Button::new("edit-address")
+                        .ghost()
+                        .compact()
+                        .icon(IconName::Pencil)
+                        .tooltip("编辑路径 (Ctrl+L)")
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.focus_address(window, cx)
+                        })),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .min_w(px(180.))
+                .child(
+                    Input::new(&self.address_input)
+                        .aria_label("地址")
+                        .prefix(Icon::new(IconName::Folder).size_4()),
+                )
+                .into_any_element()
+        };
+
+        let search_input = search_expanded.then(|| {
+            Input::new(&self.search_input)
+                .aria_label("搜索")
+                .prefix(Icon::new(IconName::Search).size_4())
+                .cleanable(true)
+                .w(px(220.))
+                .into_any_element()
+        });
+
+        let toolbar = v_flex()
             .w_full()
             .flex_shrink_0()
             .gap_1()
@@ -2886,25 +2976,10 @@ impl KiteApp {
                     .gap_2()
                     .items_center()
                     .child(navigation_group)
-                    .child(
-                        div().flex_1().min_w(px(180.)).child(
-                            Input::new(&self.address_input)
-                                .aria_label("地址")
-                                .prefix(Icon::new(IconName::Folder).size_4()),
-                        ),
-                    )
-                    .child(
-                        Input::new(&self.search_input)
-                            .aria_label("搜索")
-                            .prefix(Icon::new(IconName::Search).size_4())
-                            .cleanable(true)
-                            .w(px(168.)),
-                    )
+                    .child(address_control)
+                    .when_some(search_input, |this, input| this.child(input))
                     .child(actions),
             );
-        if let Some(path_bar) = path_bar {
-            toolbar = toolbar.child(path_bar);
-        }
         toolbar.into_any_element()
     }
 
@@ -2916,21 +2991,15 @@ impl KiteApp {
         };
         Theme::change(mode, Some(window), cx);
     }
-    fn sidebar_tree_item(&self, item: SidebarTreeItem, cx: &mut Context<Self>) -> AnyElement {
+    fn sidebar_item(&self, item: SidebarItem, cx: &mut Context<Self>) -> AnyElement {
         let accent = cx.theme().accent;
         let active_fg = cx.theme().accent_foreground;
         let fg = cx.theme().sidebar_foreground;
         let muted = cx.theme().muted_foreground;
         let row_id = item.id.clone();
-        let group_id = item.id.clone();
         let navigation_path = item.path.clone();
-        let chevron_path = item.path.clone();
         let is_directory = item.is_directory;
         let is_favorite = item.favorite;
-        let depth = item.depth;
-        let expanded = is_directory && self.sidebar_expanded.contains(&item.path);
-        let children_state = self.sidebar_children.get(&item.path).cloned();
-        let has_chevron = is_directory;
         let action_context = self.focus_handle.clone();
         let remove_action = is_favorite.then(|| ContextMenuAction {
             target: item.path.clone(),
@@ -2938,29 +3007,6 @@ impl KiteApp {
             command: ContextMenuCommand::RemoveFavorite,
         });
         let remove_context = action_context.clone();
-
-        let chevron_id = SharedString::from(format!("chevron-{}", item.id));
-        let chevron = div()
-            .w(px(16.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(has_chevron, |this| {
-                this.child(
-                    Button::new(chevron_id)
-                        .ghost()
-                        .compact()
-                        .icon(if expanded {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            cx.stop_propagation();
-                            this.toggle_sidebar_directory(chevron_path.clone(), window, cx);
-                        })),
-                )
-            });
 
         let row = div()
             .id(row_id)
@@ -2978,8 +3024,6 @@ impl KiteApp {
             .when(!item.active, |this| {
                 this.hover(move |style| style.bg(muted.opacity(0.12)))
             })
-            .child(div().w(px((depth as f32) * 14.)))
-            .child(chevron)
             .child(Icon::new(item.icon).size_4().text_color(if item.active {
                 active_fg
             } else {
@@ -2997,9 +3041,6 @@ impl KiteApp {
             })
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 if is_directory {
-                    if !expanded {
-                        this.toggle_sidebar_directory(navigation_path.clone(), window, cx);
-                    }
                     this.navigate_to(navigation_path.clone(), NavigationIntent::Push, window, cx);
                 } else {
                     this.open_path(navigation_path.clone(), window, cx);
@@ -3019,114 +3060,8 @@ impl KiteApp {
         } else {
             container = container.child(row);
         }
-        if expanded {
-            match children_state {
-                Some(SidebarChildrenState::Loading) => {
-                    container = container.child(
-                        div()
-                            .h(px(24.))
-                            .pl(px(((depth + 1) as f32) * 14. + 22.))
-                            .text_xs()
-                            .text_color(muted)
-                            .child("正在读取…"),
-                    );
-                }
-                Some(SidebarChildrenState::Failed(error)) => {
-                    container = container.child(
-                        div()
-                            .h(px(24.))
-                            .pl(px(((depth + 1) as f32) * 14. + 22.))
-                            .text_xs()
-                            .text_color(cx.theme().danger)
-                            .child(error),
-                    );
-                }
-                Some(SidebarChildrenState::Loaded(children)) => {
-                    if children.is_empty() {
-                        container = container.child(
-                            div()
-                                .h(px(24.))
-                                .pl(px(((depth + 1) as f32) * 14. + 22.))
-                                .text_xs()
-                                .text_color(muted)
-                                .child("没有项目"),
-                        );
-                    } else {
-                        for entry in children {
-                            let child_path = entry.path.clone();
-                            let is_directory = entry.is_dir();
-                            let child_id = SharedString::from(format!(
-                                "{}/{}",
-                                group_id,
-                                child_path.to_string_lossy()
-                            ));
-                            container = container.child(self.sidebar_tree_item(
-                                SidebarTreeItem {
-                                    id: child_id,
-                                    label: entry.name.clone().into(),
-                                    path: child_path.clone(),
-                                    icon: icon_for(&entry),
-                                    detail: None,
-                                    active: is_directory
-                                        && same_path(&child_path, &self.current_dir),
-                                    depth: depth + 1,
-                                    is_directory,
-                                    favorite: false,
-                                },
-                                cx,
-                            ));
-                        }
-                    }
-                }
-                None => {}
-            }
-        }
 
         container.into_any_element()
-    }
-
-    fn toggle_sidebar_directory(
-        &mut self,
-        path: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !path.is_dir() {
-            return;
-        }
-        if self.sidebar_expanded.remove(&path) {
-            cx.notify();
-            return;
-        }
-
-        self.sidebar_expanded.insert(path.clone());
-        let should_load = matches!(
-            self.sidebar_children.get(&path),
-            None | Some(SidebarChildrenState::Failed(_))
-        );
-        if !should_load {
-            cx.notify();
-            return;
-        }
-
-        self.sidebar_children
-            .insert(path.clone(), SidebarChildrenState::Loading);
-        cx.notify();
-        let load_path = path.clone();
-        cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { load_sidebar_children(&load_path) })
-                .await;
-            let _ = this.update_in(cx, |this, _, cx| {
-                let state = match result {
-                    Ok(children) => SidebarChildrenState::Loaded(children),
-                    Err(error) => SidebarChildrenState::Failed(error.into()),
-                };
-                this.sidebar_children.insert(path, state);
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn favorite_item(
@@ -3136,8 +3071,8 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let path = PathBuf::from(&favorite.path);
-        self.sidebar_tree_item(
-            SidebarTreeItem {
+        self.sidebar_item(
+            SidebarItem {
                 id: SharedString::from(format!("favorite-{}", favorite.path)),
                 label: favorite.name.into(),
                 path,
@@ -3148,7 +3083,6 @@ impl KiteApp {
                 },
                 detail: None,
                 active,
-                depth: 0,
                 is_directory: favorite.is_directory,
                 favorite: true,
             },
@@ -3230,15 +3164,14 @@ impl KiteApp {
         );
         for link in self.quick_links.clone() {
             let active = same_path(&link.path, &self.current_dir);
-            content = content.child(self.sidebar_tree_item(
-                SidebarTreeItem {
+            content = content.child(self.sidebar_item(
+                SidebarItem {
                     id: SharedString::from(format!("quick-{}", link.path.display())),
                     label: link.label,
                     path: link.path,
                     icon: link.icon,
                     detail: link.detail,
                     active,
-                    depth: 0,
                     is_directory: true,
                     favorite: false,
                 },
@@ -3284,15 +3217,14 @@ impl KiteApp {
             );
             for device in self.connected_devices.clone() {
                 let active = same_path(&device.path, &self.current_dir);
-                content = content.child(self.sidebar_tree_item(
-                    SidebarTreeItem {
+                content = content.child(self.sidebar_item(
+                    SidebarItem {
                         id: SharedString::from(format!("device-{}", device.path.display())),
                         label: device.label,
                         path: device.path,
                         icon: device.icon,
                         detail: device.detail,
                         active,
-                        depth: 0,
                         is_directory: true,
                         favorite: false,
                     },
@@ -3315,15 +3247,14 @@ impl KiteApp {
         );
         for drive in self.drives.clone() {
             let active = same_path(&drive.path, &self.current_dir);
-            content = content.child(self.sidebar_tree_item(
-                SidebarTreeItem {
+            content = content.child(self.sidebar_item(
+                SidebarItem {
                     id: SharedString::from(format!("drive-{}", drive.path.display())),
                     label: drive.label,
                     path: drive.path,
                     icon: drive.icon,
                     detail: drive.detail,
                     active,
-                    depth: 0,
                     is_directory: true,
                     favorite: false,
                 },
@@ -3403,24 +3334,16 @@ impl KiteApp {
             .into_any_element()
     }
     fn render_path_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let selected = self.selected_entry(cx);
-        let (path, final_is_file) = selected
-            .as_ref()
-            .map(|entry| (entry.path.clone(), !entry.is_dir()))
-            .unwrap_or_else(|| (self.current_dir.clone(), false));
-        let segments = path_segments(&path, final_is_file);
+        let segments = path_segments(&self.current_dir, false);
         let scroll_handle = self.path_bar_scroll.clone();
         let mut bar = h_flex()
             .id("path-bar")
-            .h(px(28.))
+            .h(px(30.))
             .w_full()
-            .px_2()
             .gap_1()
             .items_center()
-            .rounded_md()
             .overflow_x_scroll()
-            .track_scroll(&scroll_handle)
-            .bg(cx.theme().background.opacity(0.32));
+            .track_scroll(&scroll_handle);
         let count = segments.len();
         for (index, segment) in segments.into_iter().enumerate() {
             if segment.clickable {
@@ -3490,7 +3413,9 @@ impl KiteApp {
         for index in 0..self.column_panes.len() {
             strip = strip.child(self.render_column(index, window, cx));
         }
-        if let Some(entry) = self.selected_last_column_file() {
+        if self.show_preview
+            && let Some(entry) = self.selected_last_column_file()
+        {
             strip = strip.child(self.render_column_preview(&entry, cx));
         }
         div()
@@ -4404,11 +4329,6 @@ fn update_notes_summary(notes: &str) -> String {
     }
 }
 
-fn load_sidebar_children(path: &Path) -> Result<Vec<FileEntry>, String> {
-    load_directory(path, SortSpec::default())
-        .map(|snapshot| snapshot.entries.into_iter().take(256).collect())
-}
-
 fn load_directory_snapshot(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
     if shell_fs::is_shell_namespace_path(path) {
         shell_fs::load_directory(path, sort)
@@ -4904,7 +4824,7 @@ impl Render for KiteApp {
                 handle.set_offset(point(-handle.max_offset().x, handle.offset().y));
             });
         }
-        if self.show_path_bar && self.path_bar_scroll_pending {
+        if self.show_path_bar && !self.address_editing && self.path_bar_scroll_pending {
             self.path_bar_scroll_pending = false;
             let handle = self.path_bar_scroll.clone();
             window.defer(cx, move |_, _| {
@@ -5627,35 +5547,5 @@ mod scroll_routing_tests {
                 column_delta: -90.0,
             }
         );
-    }
-}
-
-#[cfg(test)]
-mod sidebar_tree_tests {
-    use super::load_sidebar_children;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn sidebar_children_include_folders_before_files() {
-        let root = std::env::temp_dir().join(format!(
-            "kite-sidebar-tree-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(root.join("folder")).expect("create child directory");
-        fs::write(root.join("file.txt"), b"file").expect("create child file");
-
-        let children = load_sidebar_children(&root).expect("load sidebar children");
-        assert_eq!(children.len(), 2);
-        assert!(children[0].is_dir());
-        assert_eq!(children[0].name, "folder");
-        assert!(!children[1].is_dir());
-        assert_eq!(children[1].name, "file.txt");
-
-        fs::remove_dir_all(root).expect("clean sidebar tree test");
     }
 }
