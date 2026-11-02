@@ -1551,7 +1551,9 @@ impl KiteApp {
     ) {
         if !update.update_available {
             self.error = None;
-            self.notice = Some(format!("Kite {} 已是最新版本", update.current_version).into());
+            let notice =
+                SharedString::from(format!("Kite {} 已是最新版本", update.current_version));
+            self.notice = Some(notice.clone());
             cx.notify();
             let message = "Kite 已是最新版本";
             let detail = format!(
@@ -1561,8 +1563,13 @@ impl KiteApp {
             );
             let answers = [PromptButton::ok("确定")];
             let answer = window.prompt(PromptLevel::Info, message, Some(&detail), &answers, cx);
-            cx.spawn_in(window, async move |_, _| {
+            cx.spawn_in(window, async move |this, cx| {
                 let _ = answer.await;
+                let _ = this.update(cx, |this, cx| {
+                    if clear_notice_if_matches(&mut this.notice, notice.as_ref()) {
+                        cx.notify();
+                    }
+                });
             })
             .detach();
             return;
@@ -1588,6 +1595,9 @@ impl KiteApp {
         }
 
         let message = format!("发现 Kite {}", update.latest_version);
+        let notice = SharedString::from(format!("发现 Kite {} 新版本", update.latest_version));
+        self.notice = Some(notice.clone());
+        cx.notify();
         let notes = update_notes_summary(&update.release_notes);
         let detail = format!(
             "当前版本：{}
@@ -1599,9 +1609,19 @@ impl KiteApp {
         let answer = window.prompt(PromptLevel::Info, &message, Some(&detail), &answers, cx);
         cx.spawn_in(window, async move |this, cx| {
             let Ok(choice) = answer.await else {
+                let _ = this.update(cx, |this, cx| {
+                    if clear_notice_if_matches(&mut this.notice, notice.as_ref()) {
+                        cx.notify();
+                    }
+                });
                 return;
             };
             if choice != 0 {
+                let _ = this.update(cx, |this, cx| {
+                    if clear_notice_if_matches(&mut this.notice, notice.as_ref()) {
+                        cx.notify();
+                    }
+                });
                 return;
             }
             let version = update.latest_version.clone();
@@ -4462,6 +4482,15 @@ fn update_download_notice(
     let percent = (fraction * 100.0).round() as u32;
     let total = format_size(progress.total_bytes);
     format!("正在下载 Kite {version}… {percent}% · {downloaded} / {total}")
+}
+
+fn clear_notice_if_matches(notice: &mut Option<SharedString>, expected: &str) -> bool {
+    if notice.as_ref().is_some_and(|value| value == expected) {
+        *notice = None;
+        true
+    } else {
+        false
+    }
 }
 
 fn update_notes_summary(notes: &str) -> String {
