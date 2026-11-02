@@ -4,25 +4,34 @@ import SwiftUI
 struct KiteColumnBrowser: View {
     @ObservedObject var model: KiteModel
     @Binding var showsPreview: Bool
+    @AppStorage("kite.macos.column-details-visible") private var showsColumnDetails = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: showsColumnDetails ? 8 : 10) {
             GeometryReader { viewport in
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
                         HStack(alignment: .top, spacing: 8) {
                             ForEach(Array(model.columns.enumerated()), id: \.element.id) { index, column in
+                                let isActive = index == model.columns.count - 1
                                 KiteBrowserColumn(
                                     model: model,
                                     column: column,
                                     index: index,
-                                    isActive: index == model.columns.count - 1
+                                    isActive: isActive,
+                                    showsDetails: showsColumnDetails && isActive,
+                                    onToggleDetails: {
+                                        withAnimation(.snappy(duration: 0.22)) {
+                                            showsColumnDetails.toggle()
+                                        }
+                                    }
                                 )
                             }
                         }
                         .padding(.vertical, 1)
                         // Keep short column sets at the leading edge instead of the trailing anchor.
                         .frame(minWidth: viewport.size.width, alignment: .leading)
+                        .background(KiteShiftWheelHorizontalScroller())
                     }
                     .scrollIndicators(.hidden)
                     .kiteDefaultTrailingAnchor()
@@ -36,6 +45,9 @@ struct KiteColumnBrowser: View {
                         scrollToActiveColumn(proxy, animated: true)
                     }
                     .onChange(of: model.selectedColumnEntry?.path) { _ in
+                        scrollToActiveColumn(proxy, animated: true)
+                    }
+                    .onChange(of: showsColumnDetails) { _ in
                         scrollToActiveColumn(proxy, animated: true)
                     }
                 }
@@ -52,6 +64,7 @@ struct KiteColumnBrowser: View {
             }
         }
         .animation(.snappy(duration: 0.22), value: showsPreview)
+        .animation(.snappy(duration: 0.22), value: showsColumnDetails)
     }
 
     private func scrollToActiveColumn(_ proxy: ScrollViewProxy, animated: Bool) {
@@ -65,6 +78,83 @@ struct KiteColumnBrowser: View {
                 proxy.scrollTo(activeColumnID, anchor: .trailing)
             }
         }
+    }
+}
+
+private struct KiteShiftWheelHorizontalScroller: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        KiteShiftWheelHorizontalScrollerView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class KiteShiftWheelHorizontalScrollerView: NSView {
+    private weak var scrollView: NSScrollView?
+    private var eventMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        removeEventMonitor()
+        scrollView = nil
+
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.installEventMonitorIfNeeded()
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    deinit {
+        removeEventMonitor()
+    }
+
+    private func installEventMonitorIfNeeded() {
+        guard eventMonitor == nil,
+              let enclosingScrollView = enclosingScrollView else { return }
+        scrollView = enclosingScrollView
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+            [weak self] event in
+            self?.handleShiftWheel(event) ?? event
+        }
+    }
+
+    private func removeEventMonitor() {
+        guard let eventMonitor else { return }
+        NSEvent.removeMonitor(eventMonitor)
+        self.eventMonitor = nil
+    }
+
+    private func handleShiftWheel(_ event: NSEvent) -> NSEvent? {
+        guard event.modifierFlags.contains(.shift),
+              let scrollView,
+              event.window === scrollView.window else { return event }
+
+        let location = scrollView.convert(event.locationInWindow, from: nil)
+        guard scrollView.bounds.contains(location),
+              abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
+              event.scrollingDeltaY != 0 else { return event }
+
+        let clipView = scrollView.contentView
+        let documentWidth = scrollView.documentView?.frame.width ?? 0
+        let maxX = max(0, documentWidth - clipView.bounds.width)
+        let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 24
+        let targetX = (clipView.bounds.origin.x - event.scrollingDeltaY * scale)
+            .clamped(to: 0...maxX)
+        guard targetX != clipView.bounds.origin.x else { return nil }
+
+        clipView.scroll(to: NSPoint(x: targetX, y: clipView.bounds.origin.y))
+        scrollView.reflectScrolledClipView(clipView)
+        return nil
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 
@@ -82,11 +172,20 @@ private extension View {
     }
 }
 
+private enum KiteColumnDetailsLayout {
+    static let spacing: CGFloat = 8
+    static let dateWidth: CGFloat = 84
+    static let kindWidth: CGFloat = 72
+    static let sizeWidth: CGFloat = 54
+}
+
 private struct KiteBrowserColumn: View {
     @ObservedObject var model: KiteModel
     let column: BrowserColumn
     let index: Int
     let isActive: Bool
+    let showsDetails: Bool
+    let onToggleDetails: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -95,6 +194,11 @@ private struct KiteBrowserColumn: View {
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 0.5)
                 .padding(.horizontal, 10)
+
+            if showsDetails {
+                detailsHeader
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
 
             if column.entries.isEmpty {
                 emptyState
@@ -106,7 +210,8 @@ private struct KiteBrowserColumn: View {
                                 model: model,
                                 entry: entry,
                                 columnIndex: index,
-                                isSelected: column.selectedPath == entry.path
+                                isSelected: column.selectedPath == entry.path,
+                                showsDetails: showsDetails
                             )
                         }
                     }
@@ -116,7 +221,7 @@ private struct KiteBrowserColumn: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .frame(width: KiteTheme.columnWidth)
+        .frame(width: showsDetails ? KiteTheme.detailedColumnWidth : KiteTheme.columnWidth)
         .frame(maxHeight: .infinity)
         .background(
             Color(nsColor: .controlBackgroundColor).opacity(0.42),
@@ -134,6 +239,7 @@ private struct KiteBrowserColumn: View {
                 )
         }
         .shadow(color: .black.opacity(0.08), radius: 12, y: 3)
+        .animation(.snappy(duration: 0.22), value: showsDetails)
         .contextMenu {
             KiteDirectoryMenu(model: model, column: column)
         }
@@ -161,6 +267,19 @@ private struct KiteBrowserColumn: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.055), in: Capsule())
+
+            if isActive {
+                Button(action: onToggleDetails) {
+                    Image(systemName: showsDetails ? "rectangle.grid.2x2.fill" : "rectangle.grid.2x2")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(showsDetails ? Color.accentColor : Color.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help(showsDetails ? "隐藏详细信息" : "显示详细信息")
+                .accessibilityLabel(showsDetails ? "隐藏详细信息" : "显示详细信息")
+            }
 
             Menu {
                 KiteDirectoryMenu(model: model, column: column)
@@ -192,6 +311,33 @@ private struct KiteBrowserColumn: View {
                     .padding(.leading, 13)
                     .padding(.bottom, -1)
             }
+        }
+    }
+
+    private var detailsHeader: some View {
+        HStack(spacing: KiteColumnDetailsLayout.spacing) {
+            Text("名称")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 29)
+
+            Text("日期")
+                .frame(width: KiteColumnDetailsLayout.dateWidth, alignment: .leading)
+
+            Text("类型")
+                .frame(width: KiteColumnDetailsLayout.kindWidth, alignment: .leading)
+
+            Text("大小")
+                .frame(width: KiteColumnDetailsLayout.sizeWidth, alignment: .trailing)
+        }
+        .font(.system(size: 9.5, weight: .semibold))
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(Color.primary.opacity(0.025))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.045))
+                .frame(height: 0.5)
         }
     }
 
@@ -228,6 +374,7 @@ private struct KiteBrowserRow: View {
     let entry: BrowserEntry
     let columnIndex: Int
     let isSelected: Bool
+    let showsDetails: Bool
 
     @State private var isHovering = false
 
@@ -235,52 +382,29 @@ private struct KiteBrowserRow: View {
         Button {
             model.select(column: columnIndex, entry: entry)
         } label: {
-            HStack(spacing: 9) {
-                ZStack(alignment: .bottomTrailing) {
-                    KiteFileIcon(path: entry.path, isDirectory: entry.isDirectory, size: 20)
+            HStack(spacing: showsDetails ? KiteColumnDetailsLayout.spacing : 9) {
+                nameCell
 
-                    if let badge = vcsBadge {
-                        Text(badge.code)
-                            .font(.system(size: 7.5, weight: .bold, design: .rounded))
-                            .foregroundStyle(badge.color)
-                            .frame(width: 11, height: 11)
-                            .background(
-                                Color(nsColor: .windowBackgroundColor),
-                                in: RoundedRectangle(
-                                    cornerRadius: badge.isSvn ? 3 : 5,
-                                    style: .continuous
-                                )
-                            )
-                            .overlay {
-                                RoundedRectangle(
-                                    cornerRadius: badge.isSvn ? 3 : 5,
-                                    style: .continuous
-                                )
-                                .strokeBorder(badge.color.opacity(0.85), lineWidth: 0.7)
-                            }
-                            .offset(x: 2, y: 2)
-                    }
-                }
-                .frame(width: 22, height: 22)
-                .accessibilityHidden(true)
+                if showsDetails {
+                    Text(metadataDate)
+                        .font(.system(size: 10.5, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(width: KiteColumnDetailsLayout.dateWidth, alignment: .leading)
 
-                Text(entry.name)
-                    .font(.system(size: 12.5, weight: isSelected ? .medium : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    Text(metadataKind)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(width: KiteColumnDetailsLayout.kindWidth, alignment: .leading)
 
-                Spacer(minLength: 4)
-
-                if entry.isDirectory {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(.trailing, 3)
-                } else if isHovering {
-                    Image(systemName: "arrow.up.forward")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(.trailing, 3)
+                    Text(metadataSize)
+                        .font(.system(size: 10.5, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .monospacedDigit()
+                        .frame(width: KiteColumnDetailsLayout.sizeWidth, alignment: .trailing)
                 }
             }
             .padding(.horizontal, 8)
@@ -310,6 +434,75 @@ private struct KiteBrowserRow: View {
         }
         .help(entry.path)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var nameCell: some View {
+        HStack(spacing: 9) {
+            ZStack(alignment: .bottomTrailing) {
+                KiteFileIcon(path: entry.path, isDirectory: entry.isDirectory, size: 20)
+
+                if let badge = vcsBadge {
+                    Text(badge.code)
+                        .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(badge.color)
+                        .frame(width: 11, height: 11)
+                        .background(
+                            Color(nsColor: .windowBackgroundColor),
+                            in: RoundedRectangle(
+                                cornerRadius: badge.isSvn ? 3 : 5,
+                                style: .continuous
+                            )
+                        )
+                        .overlay {
+                            RoundedRectangle(
+                                cornerRadius: badge.isSvn ? 3 : 5,
+                                style: .continuous
+                            )
+                            .strokeBorder(badge.color.opacity(0.85), lineWidth: 0.7)
+                        }
+                        .offset(x: 2, y: 2)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
+
+            Text(entry.name)
+                .font(.system(size: 12.5, weight: isSelected ? .medium : .regular))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+
+            Spacer(minLength: 4)
+
+            if entry.isDirectory {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.trailing, 3)
+            } else if isHovering {
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.trailing, 3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var metadataDate: String {
+        guard let modifiedUnixMs = entry.modifiedUnixMs else { return "—" }
+        let date = Date(timeIntervalSince1970: TimeInterval(modifiedUnixMs) / 1_000)
+        return date.formatted(date: .numeric, time: .omitted)
+    }
+
+    private var metadataKind: String {
+        entry.isDirectory ? "文件夹" : entry.kindLabel
+    }
+
+    private var metadataSize: String {
+        guard !entry.isDirectory else { return "—" }
+        let megabytes = Double(entry.size) / 1_000_000
+        return String(format: "%.2f MB", megabytes)
     }
 
     private var accessibilityLabel: String {

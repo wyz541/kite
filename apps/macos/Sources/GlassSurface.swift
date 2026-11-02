@@ -309,7 +309,15 @@ enum KiteTheme {
     static let brandNavy = Color(red: 0.05, green: 0.19, blue: 0.34)
     static let sidebarWidth: CGFloat = 218
     static let columnWidth: CGFloat = 274
+    static let detailedColumnWidth: CGFloat = 408
     static let previewWidth: CGFloat = 316
     static let panelRadius: CGFloat = 24
     static let controlRadius: CGFloat = 14
+    static let contentGap: CGFloat = 10
+    static let windowContentInset: CGFloat = 12
+    static let trafficLightInset: CGFloat = 72
+    static let toolbarGap: CGFloat = 9
+    static let toolbarControlHeight: CGFloat = 40
+    static let windowChromeHeight: CGFloat = 52
+    static let toolbarLeadingWidth: CGFloat = sidebarWidth + contentGap - toolbarGap
 }
