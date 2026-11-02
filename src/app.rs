@@ -2974,7 +2974,6 @@ impl KiteApp {
             .w_full()
             .flex_shrink_0()
             .gap_1()
-            .px(px(0.))
             .py(px(6.))
             .rounded_lg()
             .bg(cx.theme().title_bar)
