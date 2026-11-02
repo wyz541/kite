@@ -251,6 +251,7 @@ private enum KiteColumnDetailsLayout {
     static let sizeWidth: CGFloat = 64
     private static let nameFontSize: CGFloat = 12.5
     private static let rowFixedWidth: CGFloat = 360
+    private static let maximumColumnWidth: CGFloat = 640
 
     static func columnWidth(for names: [String]) -> CGFloat {
         let font = NSFont.systemFont(ofSize: nameFontSize, weight: .medium)
@@ -258,7 +259,11 @@ private enum KiteColumnDetailsLayout {
             let nameWidth = (name as NSString).size(withAttributes: [.font: font]).width
             return max(width, ceil(nameWidth))
         }
-        return max(KiteTheme.detailedColumnWidth, ceil(rowFixedWidth + textWidth))
+        let desiredWidth = max(
+            KiteTheme.detailedColumnWidth,
+            ceil(rowFixedWidth + textWidth)
+        )
+        return min(desiredWidth, maximumColumnWidth)
     }
 }
 
@@ -554,7 +559,6 @@ private struct KiteBrowserRow: View {
                 .font(.system(size: 12.5, weight: isSelected ? .medium : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .fixedSize(horizontal: showsDetails, vertical: false)
                 .layoutPriority(1)
 
             Spacer(minLength: 4)
