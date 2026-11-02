@@ -17,20 +17,20 @@ struct ContentView: View {
                 tabBarHeader
                 header
 
-                HStack(spacing: 10) {
+                HStack(spacing: KiteTheme.contentGap) {
                     if showsSidebar {
                         KiteSidebar(model: model)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     }
 
-                    VStack(spacing: 10) {
+                    VStack(spacing: KiteTheme.contentGap) {
                         KiteColumnBrowser(model: model, showsPreview: $showsPreview)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         statusBar
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, KiteTheme.windowContentInset)
                 .padding(.bottom, 12)
             }
         }
@@ -46,43 +46,55 @@ struct ContentView: View {
     private var tabBarHeader: some View {
         HStack(spacing: 0) {
             Color.clear
-                .frame(width: 72, height: 38)
+                .frame(width: KiteTheme.trafficLightInset, height: 38)
                 .contentShape(Rectangle())
 
             tabBar
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, KiteTheme.windowContentInset)
         .padding(.bottom, 8)
-        .frame(height: 52)
+        .frame(height: KiteTheme.windowChromeHeight)
     }
 
     private var header: some View {
-        KiteGlassEffectContainer(spacing: 9) {
-            HStack(spacing: 9) {
-                Color.clear
-                    .frame(width: 72, height: 44)
-                    .contentShape(Rectangle())
-
-                KiteToolbarIconButton(
-                    systemName: "sidebar.left",
-                    title: showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
-                    isActive: showsSidebar
-                ) {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        showsSidebar.toggle()
-                    }
-                }
-                .padding(.horizontal, 4)
-                .frame(height: 40)
-                .kiteGlass(.panel, cornerRadius: 14)
-
-                navigationControls
+        KiteGlassEffectContainer(spacing: KiteTheme.toolbarGap) {
+            HStack(spacing: KiteTheme.toolbarGap) {
+                toolbarLeadingControls
                 addressBar
                 actionControls
             }
-            .padding(.horizontal, 12)
-            .frame(height: 52)
+            .padding(.horizontal, KiteTheme.windowContentInset)
+            .frame(height: KiteTheme.windowChromeHeight)
         }
+    }
+
+    private var toolbarLeadingControls: some View {
+        HStack(spacing: KiteTheme.toolbarGap) {
+            Color.clear
+                .frame(
+                    width: KiteTheme.trafficLightInset,
+                    height: KiteTheme.toolbarControlHeight
+                )
+                .contentShape(Rectangle())
+
+            KiteToolbarIconButton(
+                systemName: "sidebar.left",
+                title: showsSidebar ? "隐藏侧边栏" : "显示侧边栏",
+                isActive: showsSidebar
+            ) {
+                withAnimation(.snappy(duration: 0.22)) {
+                    showsSidebar.toggle()
+                }
+            }
+            .padding(.horizontal, 4)
+            .frame(width: 38, height: KiteTheme.toolbarControlHeight)
+            .kiteGlass(.panel, cornerRadius: KiteTheme.controlRadius)
+
+            navigationControls
+            Spacer(minLength: 0)
+        }
+        .frame(width: KiteTheme.toolbarLeadingWidth)
+        .frame(height: KiteTheme.toolbarControlHeight)
     }
 
     private var tabBar: some View {
@@ -146,25 +158,10 @@ struct ContentView: View {
             ) {
                 model.refresh()
             }
-
-            if let selectedEntry = model.selectedColumnEntry {
-                KiteToolbarIconButton(
-                    systemName: selectedEntry.isDirectory
-                        ? "arrow.down.right"
-                        : "arrow.up.forward.app",
-                    title: selectedEntry.isDirectory ? "进入文件夹" : "打开文件"
-                ) {
-                    if selectedEntry.isDirectory {
-                        model.loadRoot(selectedEntry.path)
-                    } else {
-                        KitePlatform.open(selectedEntry.path)
-                    }
-                }
-            }
         }
         .padding(.horizontal, 4)
-        .frame(height: 40)
-        .kiteGlass(.panel, cornerRadius: 14)
+        .frame(height: KiteTheme.toolbarControlHeight)
+        .kiteGlass(.panel, cornerRadius: KiteTheme.controlRadius)
     }
 
     private var addressBar: some View {
@@ -210,8 +207,8 @@ struct ContentView: View {
         }
         .padding(.horizontal, 5)
         .frame(maxWidth: .infinity)
-        .frame(height: 40)
-        .kiteGlass(.panel, cornerRadius: 14)
+        .frame(height: KiteTheme.toolbarControlHeight)
+        .kiteGlass(.panel, cornerRadius: KiteTheme.controlRadius)
         .contextMenu {
             Button("编辑路径") { beginAddressEditing() }
             Button("拷贝当前路径") { KitePlatform.copyPath(model.currentPath) }
@@ -273,6 +270,21 @@ struct ContentView: View {
                 )
             }
 
+            if let selectedEntry = model.selectedColumnEntry {
+                KiteToolbarIconButton(
+                    systemName: selectedEntry.isDirectory
+                        ? "arrow.down.right"
+                        : "arrow.up.forward.app",
+                    title: selectedEntry.isDirectory ? "进入文件夹" : "打开文件"
+                ) {
+                    if selectedEntry.isDirectory {
+                        model.loadRoot(selectedEntry.path)
+                    } else {
+                        KitePlatform.open(selectedEntry.path)
+                    }
+                }
+            }
+
             KiteToolbarIconButton(
                 systemName: "doc.on.doc",
                 title: "拷贝选中项目",
@@ -309,9 +321,9 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 4)
-        .frame(height: 40)
+        .frame(height: KiteTheme.toolbarControlHeight)
         .fixedSize(horizontal: true, vertical: false)
-        .kiteGlass(.panel, cornerRadius: 14)
+        .kiteGlass(.panel, cornerRadius: KiteTheme.controlRadius)
     }
 
     private var currentFolderIsFavorite: Bool {
