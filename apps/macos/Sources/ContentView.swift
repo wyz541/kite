@@ -14,6 +14,7 @@ struct ContentView: View {
             KiteGlassBackdrop()
 
             VStack(spacing: 0) {
+                tabBarHeader
                 header
 
                 HStack(spacing: 10) {
@@ -23,7 +24,6 @@ struct ContentView: View {
                     }
 
                     VStack(spacing: 10) {
-                        tabBar
                         KiteColumnBrowser(model: model, showsPreview: $showsPreview)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         statusBar
@@ -41,6 +41,19 @@ struct ContentView: View {
             beginAddressEditing()
         }
         .animation(.snappy(duration: 0.22), value: showsSidebar)
+    }
+
+    private var tabBarHeader: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: 72, height: 38)
+                .contentShape(Rectangle())
+
+            tabBar
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .frame(height: 52)
     }
 
     private var header: some View {
