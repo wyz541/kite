@@ -4596,7 +4596,11 @@ fn detailed_column_width(entries: &[FileEntry], window: &Window) -> f32 {
             entry
                 .name
                 .chars()
-                .map(|character| text_system.layout_width(font_id, font_size, character).0)
+                .map(|character| {
+                    text_system
+                        .layout_width(font_id, font_size, character)
+                        .as_f32()
+                })
                 .sum::<f32>()
         })
         .fold(0.0, f32::max);
