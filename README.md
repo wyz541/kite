@@ -89,6 +89,7 @@ macOS 可与 Finder 共享文件剪贴板。
 - macOS 和 Windows 支持分栏排序方向切换。
 - 支持按名称、修改日期、类型和大小排序。
 - 支持文件类型筛选、分组和显示规则重置。
+- macOS 和 Windows 支持分栏递归搜索。
 
 ### 文件管理
 
@@ -134,7 +135,8 @@ macOS 可与 Finder 共享文件剪贴板。
 | 详细信息列 | 已支持 | 已支持 |
 | 分栏排序方向 | 已支持 | 已支持 |
 | 分栏排序字段、筛选和分组 | 已支持 | 已支持 |
-| 全局搜索与分栏搜索 | 已支持 | 开发中 |
+| 分栏递归搜索 | 已支持 | 已支持 |
+| 全局工具栏搜索 | 已支持 | 开发中 |
 | 文件预览 | GPUI 预览 | Quick Look |
 | 文本编辑器 | GPUI 编辑器 | 原生 AppKit 编辑器 |
 | 文件剪贴板 | Explorer | Finder |
@@ -150,15 +152,15 @@ Kite 仍处于 `0.6.x` 活跃开发阶段。
 
 - Windows 提供 x64 构建，macOS 提供 Apple Silicon 构建。
 - 文件列表当前只支持单选。
-- 分栏搜索暂未同步到 macOS。
-- Windows 搜索只匹配项目名称，最多显示 1000 个结果。
+- macOS 全局工具栏搜索暂未同步。
+- 搜索只匹配项目名称，最多显示 1000 个结果。
 - WPD/MTP 设备当前支持浏览，不支持写入操作。
 - 复制操作不支持符号链接。
 - 当前版本不提供自定义列布局。
 
 ## 后续方向
 
-- 对齐 macOS 分栏搜索。
+- 对齐 macOS 全局工具栏搜索。
 - 增加批量选择与批量文件操作。
 - 增加便携设备写入能力。
 - 增加自定义列和布局配置。
@@ -254,6 +256,7 @@ cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 - [更新器架构](docs/architecture/updater.md)
 - [收藏架构](docs/architecture/favorites.md)
 - [macOS 分栏显示规则](docs/architecture/macos-column-rules.md)
+- [macOS 分栏搜索](docs/architecture/macos-column-search.md)
 - [图标系统](docs/design/icon-system.md)
 - [搜索实现调研](docs/RUST_SEARCH_ENGINE_RESEARCH.md)
 - [文本编辑器调研](docs/TEXT_EDITOR_RESEARCH.md)
