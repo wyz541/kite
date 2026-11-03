@@ -115,7 +115,8 @@ Kite 只在完整校验后把临时文件改名。
 Windows Core 创建隐藏 PowerShell 助手。
 Windows Core 在下载前检查当前 EXE 文件及所在目录是否可写。
 检查失败时，Kite 不下载、不退出，并提示用户复制到可写目录。
-助手等待当前 Kite PID 退出。
+助手最多等待当前 Kite PID 10 秒。
+助手强制结束同名 Kite 进程。
 助手等待目标 EXE 文件锁释放。
 助手把当前 EXE 移动为 `Kite.exe.old`。
 助手复制已经校验的新 EXE。
