@@ -2,11 +2,13 @@ use std::cmp::Ordering;
 use std::fs::{self, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Local};
-use walkdir::WalkDir;
+use ignore::{WalkBuilder, WalkState};
 
 pub const SEARCH_RESULT_LIMIT: usize = 1_000;
 
@@ -245,69 +247,83 @@ pub fn search_directory(
         return Ok(None);
     }
     let query_lower = query.to_lowercase();
-    let mut entries = Vec::new();
-    let mut truncated = false;
+    let entries = Arc::new(Mutex::new(Vec::<FileEntry>::new()));
+    let truncated = Arc::new(AtomicBool::new(false));
 
-    let walker = WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            if entry.depth() == 0 {
-                return true;
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .standard_filters(false)
+        .hidden(true)
+        .follow_links(false);
+
+    builder.build_parallel().run(|| {
+        let entries = Arc::clone(&entries);
+        let truncated = Arc::clone(&truncated);
+        let query_lower = query_lower.clone();
+        Box::new(move |result| {
+            if cancel.load(AtomicOrdering::Relaxed) || truncated.load(AtomicOrdering::Relaxed) {
+                return WalkState::Quit;
             }
-            let name = entry.file_name().to_string_lossy();
-            if is_hidden_name(&name) {
-                return false;
+            let Ok(item) = result else {
+                return WalkState::Continue;
+            };
+            if item.depth() == 0 {
+                return WalkState::Continue;
             }
-            entry
-                .metadata()
-                .map(|metadata| !is_hidden(&metadata, &name))
-                .unwrap_or(false)
-        });
-    for item in walker {
-        if cancel.load(AtomicOrdering::Relaxed) {
-            return Ok(None);
-        }
-        let Ok(item) = item else {
-            continue;
-        };
-        if item.depth() == 0 {
-            continue;
-        }
-        let name = item.file_name().to_string_lossy().into_owned();
-        if is_hidden_name(&name) {
-            if item.file_type().is_dir() {
-                // WalkDir cannot prune from this loop form. Hidden folders are
-                // rare and preserving correctness is safer than a second walk.
+            let name = item.file_name().to_string_lossy().into_owned();
+            let is_dir = item.file_type().is_some_and(|file_type| file_type.is_dir());
+            let Ok(metadata) = item.metadata() else {
+                return if is_dir {
+                    WalkState::Skip
+                } else {
+                    WalkState::Continue
+                };
+            };
+            if is_hidden_name(&name) || is_hidden(&metadata, &name) {
+                return if is_dir {
+                    WalkState::Skip
+                } else {
+                    WalkState::Continue
+                };
             }
-            continue;
-        }
-        if !name.to_lowercase().contains(&query_lower) {
-            continue;
-        }
-        let Ok(metadata) = item.metadata() else {
-            continue;
-        };
-        if is_hidden(&metadata, &name) {
-            continue;
-        }
-        entries.push(file_entry_from_metadata(
-            item.path().to_path_buf(),
-            name,
-            &metadata,
-        ));
-        if entries.len() >= SEARCH_RESULT_LIMIT {
-            truncated = true;
-            break;
-        }
+            if !name.to_lowercase().contains(&query_lower) {
+                return WalkState::Continue;
+            }
+
+            let Ok(mut entries) = entries.lock() else {
+                return WalkState::Quit;
+            };
+            if entries.len() >= SEARCH_RESULT_LIMIT {
+                truncated.store(true, AtomicOrdering::Relaxed);
+                return WalkState::Quit;
+            }
+            entries.push(file_entry_from_metadata(
+                item.path().to_path_buf(),
+                name,
+                &metadata,
+            ));
+            if entries.len() >= SEARCH_RESULT_LIMIT {
+                truncated.store(true, AtomicOrdering::Relaxed);
+                WalkState::Quit
+            } else {
+                WalkState::Continue
+            }
+        })
+    });
+
+    if cancel.load(AtomicOrdering::Relaxed) {
+        return Ok(None);
     }
-
+    let mut entries = Arc::try_unwrap(entries)
+        .map_err(|_| "搜索任务未正确结束".to_string())?
+        .into_inner()
+        .map_err(|_| "搜索结果锁损坏".to_string())?;
     sort_entries(&mut entries, sort);
     Ok(Some(SearchSnapshot {
         root: root.to_path_buf(),
         query: query.to_string(),
         entries,
-        truncated,
+        truncated: truncated.load(AtomicOrdering::Relaxed),
     }))
 }
 
@@ -669,8 +685,12 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(root.join("nested")).expect("create nested test folder");
+        fs::create_dir_all(root.join(".hidden")).expect("create hidden test folder");
         fs::write(root.join("hello.txt"), b"hello").expect("write test file");
+        fs::write(root.join("another-target.md"), b"markdown").expect("write matching file");
         fs::write(root.join("nested").join("target.log"), b"log").expect("write nested test file");
+        fs::write(root.join(".hidden").join("target-secret.txt"), b"secret")
+            .expect("write hidden matching file");
 
         let snapshot = load_directory(&root, SortSpec::default()).expect("load directory");
         assert!(snapshot.entries.iter().any(|item| item.name == "hello.txt"));
@@ -680,8 +700,9 @@ mod tests {
         let result = search_directory(&root, "target", SortSpec::default(), &cancel)
             .expect("search directory")
             .expect("non-empty search");
-        assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.entries[0].name, "target.log");
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].name, "another-target.md");
+        assert_eq!(result.entries[1].name, "target.log");
 
         let cancelled = AtomicBool::new(true);
         let cancelled_result = search_directory(&root, "target", SortSpec::default(), &cancelled)
