@@ -8,9 +8,25 @@ use serde::{Deserialize, Serialize};
 const UI_PREFERENCES_SCHEMA_VERSION: u32 = 1;
 const MAX_UI_PREFERENCES_BYTES: u64 = 64 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UiPreferences {
     pub column_details_visible: bool,
+    pub date_column_visible: bool,
+    pub kind_column_visible: bool,
+    pub size_column_visible: bool,
+    pub column_width: u16,
+}
+
+impl Default for UiPreferences {
+    fn default() -> Self {
+        Self {
+            column_details_visible: false,
+            date_column_visible: true,
+            kind_column_visible: true,
+            size_column_visible: true,
+            column_width: 320,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -18,6 +34,14 @@ struct UiPreferencesFile {
     schema_version: u32,
     #[serde(default)]
     column_details_visible: bool,
+    #[serde(default = "default_true")]
+    date_column_visible: bool,
+    #[serde(default = "default_true")]
+    kind_column_visible: bool,
+    #[serde(default = "default_true")]
+    size_column_visible: bool,
+    #[serde(default = "default_column_width")]
+    column_width: u16,
 }
 
 pub fn load_ui_preferences() -> UiPreferences {
@@ -26,14 +50,9 @@ pub fn load_ui_preferences() -> UiPreferences {
         .unwrap_or_default()
 }
 
-pub fn save_column_details_visible(visible: bool) -> Result<(), String> {
+pub fn save_ui_preferences(preferences: UiPreferences) -> Result<(), String> {
     let path = ui_preferences_path().ok_or_else(|| "无法确定界面配置目录".to_string())?;
-    save_ui_preferences_at(
-        &path,
-        UiPreferences {
-            column_details_visible: visible,
-        },
-    )
+    save_ui_preferences_at(&path, preferences)
 }
 
 fn ui_preferences_path() -> Option<PathBuf> {
@@ -54,6 +73,10 @@ fn load_ui_preferences_at(path: &Path) -> Option<UiPreferences> {
     let file = serde_json::from_slice::<UiPreferencesFile>(&bytes).ok()?;
     (file.schema_version == UI_PREFERENCES_SCHEMA_VERSION).then_some(UiPreferences {
         column_details_visible: file.column_details_visible,
+        date_column_visible: file.date_column_visible,
+        kind_column_visible: file.kind_column_visible,
+        size_column_visible: file.size_column_visible,
+        column_width: file.column_width.clamp(240, 480),
     })
 }
 
@@ -61,6 +84,10 @@ fn save_ui_preferences_at(path: &Path, preferences: UiPreferences) -> Result<(),
     let file = UiPreferencesFile {
         schema_version: UI_PREFERENCES_SCHEMA_VERSION,
         column_details_visible: preferences.column_details_visible,
+        date_column_visible: preferences.date_column_visible,
+        kind_column_visible: preferences.kind_column_visible,
+        size_column_visible: preferences.size_column_visible,
+        column_width: preferences.column_width.clamp(240, 480),
     };
     let bytes =
         serde_json::to_vec_pretty(&file).map_err(|error| format!("无法序列化界面配置：{error}"))?;
@@ -73,6 +100,14 @@ fn save_ui_preferences_at(path: &Path, preferences: UiPreferences) -> Result<(),
     AtomicFile::new(path, AllowOverwrite)
         .write(|file| file.write_all(&bytes))
         .map_err(|error| format!("无法保存界面配置：{error}"))
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_column_width() -> u16 {
+    320
 }
 
 #[cfg(test)]
@@ -102,6 +137,7 @@ mod tests {
             &path,
             UiPreferences {
                 column_details_visible: true,
+                ..UiPreferences::default()
             },
         )
         .expect("save preferences");
@@ -110,6 +146,7 @@ mod tests {
             load_ui_preferences_at(&path),
             Some(UiPreferences {
                 column_details_visible: true,
+                ..UiPreferences::default()
             })
         );
 
@@ -122,6 +159,26 @@ mod tests {
         fs::write(&path, b"not json").expect("write corrupt preferences");
 
         assert_eq!(load_ui_preferences_at(&path), None);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn loads_legacy_preferences_with_default_columns() {
+        let path = test_path();
+        fs::write(
+            &path,
+            br#"{"schema_version":1,"column_details_visible":true}"#,
+        )
+        .expect("write legacy preferences");
+
+        assert_eq!(
+            load_ui_preferences_at(&path),
+            Some(UiPreferences {
+                column_details_visible: true,
+                ..UiPreferences::default()
+            })
+        );
 
         let _ = fs::remove_file(path);
     }

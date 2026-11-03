@@ -108,6 +108,22 @@ enum BrowserColumnRow: Identifiable {
     }
 }
 
+enum BrowserSelectionMode: Equatable {
+    case replace
+    case toggle
+    case range
+
+    init(modifiers: NSEvent.ModifierFlags) {
+        if modifiers.contains(.shift) {
+            self = .range
+        } else if modifiers.contains(.command) {
+            self = .toggle
+        } else {
+            self = .replace
+        }
+    }
+}
+
 private enum BrowserFileKind {
     static let mediaExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico",
@@ -136,6 +152,8 @@ struct BrowserColumn: Identifiable {
     let gitAvailable: Bool
     let svnAvailable: Bool
     var selectedPath: String?
+    var selectedPaths: Set<String>
+    var selectionAnchorPath: String?
     var sortKey: BrowserColumnSortKey
     var sortAscending: Bool
     var filter: BrowserColumnFilter
@@ -159,6 +177,8 @@ struct BrowserColumn: Identifiable {
         self.gitAvailable = gitAvailable
         self.svnAvailable = svnAvailable
         self.selectedPath = selectedPath
+        self.selectedPaths = selectedPath.map { [$0] } ?? []
+        self.selectionAnchorPath = selectedPath
         self.sortKey = .name
         self.sortAscending = true
         self.filter = .all
@@ -255,6 +275,47 @@ struct BrowserColumn: Identifiable {
         refreshView()
     }
 
+    mutating func select(path: String, mode: BrowserSelectionMode) {
+        switch mode {
+        case .replace:
+            selectedPaths = [path]
+            selectedPath = path
+            selectionAnchorPath = path
+        case .toggle:
+            if selectedPaths.contains(path) {
+                selectedPaths.remove(path)
+                selectedPath = selectedPaths.min()
+            } else {
+                selectedPaths.insert(path)
+                selectedPath = path
+            }
+            selectionAnchorPath = path
+        case .range:
+            let paths = displayRows.compactMap { row -> String? in
+                guard case .entry(let entry) = row else { return nil }
+                return entry.path
+            }
+            let anchor = selectionAnchorPath.flatMap { paths.firstIndex(of: $0) }
+                ?? selectedPath.flatMap { paths.firstIndex(of: $0) }
+            guard let anchor, let target = paths.firstIndex(of: path) else {
+                selectedPaths = [path]
+                selectedPath = path
+                selectionAnchorPath = path
+                return
+            }
+            let range = anchor <= target ? anchor...target : target...anchor
+            selectedPaths = Set(paths[range])
+            selectedPath = path
+            selectionAnchorPath = paths[anchor]
+        }
+    }
+
+    mutating func selectAll() {
+        selectedPaths = Set(entries.map(\.path))
+        selectedPath = entries.first?.path
+        selectionAnchorPath = entries.first?.path
+    }
+
     private var sourceEntries: [BrowserEntry] {
         searchEntries ?? directoryEntries
     }
@@ -266,6 +327,14 @@ struct BrowserColumn: Identifiable {
         if let selectedPath,
            !entries.contains(where: { $0.path == selectedPath }) {
             self.selectedPath = nil
+        }
+        let visiblePaths = Set(entries.map(\.path))
+        selectedPaths.formIntersection(visiblePaths)
+        if let selectionAnchorPath, !visiblePaths.contains(selectionAnchorPath) {
+            self.selectionAnchorPath = nil
+        }
+        if self.selectedPath == nil {
+            self.selectedPath = selectedPaths.min()
         }
     }
 
@@ -367,6 +436,13 @@ struct BrowserTab: Identifiable {
     }
 }
 
+struct BrowserGlobalSearchState {
+    let rootPath: String
+    let query: String
+    let entries: [BrowserEntry]
+    let truncated: Bool
+}
+
 struct UpdateDownloadState: Equatable {
     let downloadedBytes: UInt64
     let totalBytes: UInt64
@@ -395,6 +471,7 @@ final class KiteModel: ObservableObject {
 
     private let core: KiteCore
     private var columnSearchGeneration: UInt64 = 0
+    private var globalSearchGeneration: UInt64 = 0
 
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var favorites: [FavoriteEntryDto] = []
@@ -402,12 +479,16 @@ final class KiteModel: ObservableObject {
     @Published private(set) var activeTabID: UUID?
     @Published var errorMessage: String?
     @Published var focusedAddressRequest = 0
+    @Published var focusedGlobalSearchRequest = 0
     @Published private(set) var updateInProgress = false
     @Published private(set) var updateStatusMessage: String?
     @Published private(set) var updateDownload: UpdateDownloadState?
     @Published var activeColumnSearchPath: String?
     @Published var columnSearchText = ""
     @Published private(set) var columnSearchLoading = false
+    @Published var globalSearchText = ""
+    @Published private(set) var globalSearch: BrowserGlobalSearchState?
+    @Published private(set) var globalSearchLoading = false
 
     init(core: KiteCore = KiteCore()) {
         self.core = core
@@ -436,8 +517,14 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    var selectedColumnEntries: [BrowserEntry] {
+        guard let column = columns.last else { return [] }
+        return column.entries.filter { column.selectedPaths.contains($0.path) }
+    }
+
     var selectedColumnEntry: BrowserEntry? {
         guard let column = columns.last,
+              column.selectedPaths.count == 1,
               let selectedPath = column.selectedPath else {
             return nil
         }
@@ -527,11 +614,20 @@ final class KiteModel: ObservableObject {
         }
     }
 
-    func select(column index: Int, entry: BrowserEntry) {
+    func select(
+        column index: Int,
+        entry: BrowserEntry,
+        modifiers: NSEvent.ModifierFlags = []
+    ) {
         guard let tabIndex = activeTabIndex, tabs[tabIndex].columns.indices.contains(index) else {
             return
         }
-        tabs[tabIndex].columns[index].selectedPath = entry.path
+        let mode = BrowserSelectionMode(modifiers: modifiers)
+        if mode != .replace, index != tabs[tabIndex].columns.count - 1 {
+            return
+        }
+        tabs[tabIndex].columns[index].select(path: entry.path, mode: mode)
+        guard mode == .replace else { return }
         if tabs[tabIndex].columns.count > index + 1 {
             tabs[tabIndex].columns.removeSubrange((index + 1)..<tabs[tabIndex].columns.count)
         }
@@ -544,6 +640,14 @@ final class KiteModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func selectAll() {
+        guard let tabIndex = activeTabIndex,
+              let columnIndex = tabs[tabIndex].columns.indices.last else {
+            return
+        }
+        tabs[tabIndex].columns[columnIndex].selectAll()
     }
 
     func toggleColumnSort(index: Int) {
@@ -644,6 +748,54 @@ final class KiteModel: ObservableObject {
         columnSearchText = ""
     }
 
+    func submitGlobalSearch() {
+        let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            clearGlobalSearch()
+            return
+        }
+
+        globalSearchGeneration &+= 1
+        let generation = globalSearchGeneration
+        let rootPath = currentPath
+        core.cancelDirectorySearch()
+        globalSearchLoading = true
+        globalSearch = nil
+        errorMessage = nil
+        let core = self.core
+
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try core.searchDirectory(path: rootPath, query: query)
+                }.value
+
+                guard generation == self.globalSearchGeneration else { return }
+                self.globalSearchLoading = false
+                guard let result else { return }
+                self.globalSearch = BrowserGlobalSearchState(
+                    rootPath: result.path,
+                    query: result.query,
+                    entries: result.entries.map(BrowserEntry.init(dto:)),
+                    truncated: result.truncated
+                )
+                self.errorMessage = nil
+            } catch {
+                guard generation == self.globalSearchGeneration else { return }
+                self.globalSearchLoading = false
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func clearGlobalSearch() {
+        globalSearchGeneration &+= 1
+        core.cancelDirectorySearch()
+        globalSearchLoading = false
+        globalSearch = nil
+        globalSearchText = ""
+    }
+
     private func applyColumnSearchResult(_ result: DirectorySearchDto, path: String) {
         guard let tabIndex = activeTabIndex,
               let columnIndex = tabs[tabIndex].columns.firstIndex(where: { $0.path == path }) else {
@@ -680,6 +832,7 @@ final class KiteModel: ObservableObject {
         resetColumnSearchRequest()
         activeColumnSearchPath = nil
         columnSearchText = ""
+        clearGlobalSearch()
     }
 
     func navigateUp() {
@@ -693,7 +846,16 @@ final class KiteModel: ObservableObject {
         focusedAddressRequest += 1
     }
 
+    func focusGlobalSearch() {
+        focusedGlobalSearchRequest += 1
+    }
+
     func refresh() {
+        if globalSearch != nil || globalSearchLoading {
+            submitGlobalSearch()
+            reloadVolumes()
+            return
+        }
         loadRoot(currentPath)
         reloadVolumes()
     }
@@ -703,12 +865,20 @@ final class KiteModel: ObservableObject {
     }
 
     func copyFile(_ path: String) {
-        KitePlatform.writeFilePasteboard([path], cut: false)
+        copyFiles([path])
+    }
+
+    func copyFiles(_ paths: [String]) {
+        KitePlatform.writeFilePasteboard(paths, cut: false)
         errorMessage = nil
     }
 
     func cutFile(_ path: String) {
-        KitePlatform.writeFilePasteboard([path], cut: true)
+        cutFiles([path])
+    }
+
+    func cutFiles(_ paths: [String]) {
+        KitePlatform.writeFilePasteboard(paths, cut: true)
         errorMessage = nil
     }
 
@@ -722,6 +892,7 @@ final class KiteModel: ObservableObject {
         let core = self.core
 
         Task {
+            var completed = 0
             do {
                 for path in paths {
                     if moveFiles {
@@ -739,6 +910,7 @@ final class KiteModel: ObservableObject {
                             )
                         }.value
                     }
+                    completed += 1
                 }
                 if moveFiles {
                     KitePlatform.clearFilePasteboard()
@@ -746,21 +918,37 @@ final class KiteModel: ObservableObject {
                 errorMessage = nil
                 refreshIfShowing(directory)
             } catch {
-                errorMessage = error.localizedDescription
+                if moveFiles, completed > 0 {
+                    let remaining = Array(paths.dropFirst(completed))
+                    if remaining.isEmpty {
+                        KitePlatform.clearFilePasteboard()
+                    } else {
+                        KitePlatform.writeFilePasteboard(remaining, cut: true)
+                    }
+                }
+                refreshIfShowing(directory)
+                errorMessage = completed > 0
+                    ? "已处理 \(completed) 项，后续操作失败：\(error.localizedDescription)"
+                    : error.localizedDescription
             }
         }
     }
 
     func copyTo(path: String) {
+        copyTo(paths: [path])
+    }
+
+    func copyTo(paths: [String]) {
         guard let destination = KitePlatform.chooseDirectory(prompt: "拷贝到这里") else {
             return
         }
-        transferPaths([path], to: destination, moveFiles: false)
+        transferPaths(paths, to: destination, moveFiles: false)
     }
 
     private func transferPaths(_ paths: [String], to directory: String, moveFiles: Bool) {
         let core = self.core
         Task {
+            var completed = 0
             do {
                 for path in paths {
                     if moveFiles {
@@ -778,11 +966,15 @@ final class KiteModel: ObservableObject {
                             )
                         }.value
                     }
+                    completed += 1
                 }
                 errorMessage = nil
                 refreshIfShowing(directory)
             } catch {
-                errorMessage = error.localizedDescription
+                refreshIfShowing(directory)
+                errorMessage = completed > 0
+                    ? "已处理 \(completed) 项，后续操作失败：\(error.localizedDescription)"
+                    : error.localizedDescription
             }
         }
     }
@@ -796,15 +988,35 @@ final class KiteModel: ObservableObject {
     }
 
     func moveToTrash(_ entry: BrowserEntry) {
-        moveToTrash(path: entry.path)
+        moveToTrash(entries: [entry])
+    }
+
+    func moveToTrash(entries: [BrowserEntry]) {
+        moveToTrash(paths: entries.map(\.path))
     }
 
     func moveToTrash(path: String) {
+        moveToTrash(paths: [path])
+    }
+
+    func moveToTrash(paths: [String]) {
+        guard !paths.isEmpty else { return }
+        var destination = currentPath
+        var completed = 0
         do {
-            try KitePlatform.moveToTrash(path)
-            loadRoot(pathAfterRecycle(currentPath, removed: path))
+            for path in paths {
+                try KitePlatform.moveToTrash(path)
+                destination = pathAfterRecycle(destination, removed: path)
+                completed += 1
+            }
+            loadRoot(destination)
         } catch {
-            errorMessage = error.localizedDescription
+            if completed > 0 {
+                loadRoot(destination)
+            }
+            errorMessage = completed > 0
+                ? "已处理 \(completed) 项，后续操作失败：\(error.localizedDescription)"
+                : error.localizedDescription
         }
     }
 
@@ -1110,7 +1322,7 @@ final class KiteModel: ObservableObject {
                 activeTabID = tab.id
                 if let index = activeTabIndex,
                    let columnIndex = tabs[index].columns.indices.last {
-                    tabs[index].columns[columnIndex].selectedPath = path
+                    tabs[index].columns[columnIndex].select(path: path, mode: .replace)
                 }
                 errorMessage = nil
             } catch {
@@ -1186,7 +1398,10 @@ final class KiteModel: ObservableObject {
 
         if restoredColumns.count > 1 {
             for index in 0..<(restoredColumns.count - 1) {
-                restoredColumns[index].selectedPath = restoredColumns[index + 1].path
+                restoredColumns[index].select(
+                    path: restoredColumns[index + 1].path,
+                    mode: .replace
+                )
             }
         }
 

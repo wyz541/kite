@@ -177,6 +177,11 @@ struct KiteMacApp: App {
                     model.focusAddress()
                 }
                 .keyboardShortcut("l", modifiers: [.command])
+
+                Button("搜索当前文件夹") {
+                    model.focusGlobalSearch()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
             CommandMenu("页签") {
                 Button("新建页签") {
@@ -202,6 +207,12 @@ struct KiteMacApp: App {
                     model.previousTab()
                 }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            }
+            CommandMenu("选择") {
+                Button("全选") {
+                    model.selectAll()
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
             }
             CommandMenu("文件夹") {
                 Button("新建文件夹…") {

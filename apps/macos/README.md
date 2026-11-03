@@ -21,6 +21,9 @@ The script creates `apps/macos/build/Kite.app`.
 ## Current native coverage
 
 - SwiftUI column browser.
+- Column multi-selection with range and toggle selection.
+- Global toolbar search over the active directory tree.
+- Configurable detail columns and persisted column-width presets.
 - SwiftUI tab rail with new, close, and switch commands.
 - Tab and directory restoration on app relaunch.
 - One breadcrumb and path-entry control with Command+L focus and Command+Up parent navigation.

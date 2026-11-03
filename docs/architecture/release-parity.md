@@ -2,10 +2,11 @@
 
 ## 结论
 
-Kite 使用两个自动检查防止 Windows 功能遗漏 macOS 对齐：
+Kite 使用三个自动检查防止 Windows 功能遗漏 macOS 对齐：
 
 - PR 对齐检查。
 - 发布对齐检查。
+- 功能矩阵检查。
 
 ## 标签
 
@@ -22,6 +23,9 @@ Kite 使用两个自动检查防止 Windows 功能遗漏 macOS 对齐：
 1. Windows UI 文件变化需要 platform:windows 标签。
 2. macOS 源文件变化需要 platform:macos 标签。
 3. Windows UI 变化没有 macOS 源文件变化时需要 parity:required 标签。
+4. README 功能矩阵必须同时标记 Windows 和 macOS 支持。
+
+`Cargo.toml` 变化按 Windows 前端变化处理。
 
 ## 发布检查
 
@@ -33,6 +37,7 @@ Kite 使用两个自动检查防止 Windows 功能遗漏 macOS 对齐：
 2. Windows UI 有变化时，要求 macOS 源文件也有变化。
 3. 确认发布说明包含 Windows 和 macOS 安装入口。
 4. 有打开的 parity:required PR 时停止发布。
+5. 功能矩阵检查必须通过。
 
 ## 例外
 

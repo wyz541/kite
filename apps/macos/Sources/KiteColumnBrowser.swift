@@ -5,6 +5,10 @@ struct KiteColumnBrowser: View {
     @ObservedObject var model: KiteModel
     @Binding var showsPreview: Bool
     @AppStorage("kite.macos.column-details-visible") private var showsColumnDetails = false
+    @AppStorage("kite.macos.column-date-visible") private var showsDateColumn = true
+    @AppStorage("kite.macos.column-kind-visible") private var showsKindColumn = true
+    @AppStorage("kite.macos.column-size-visible") private var showsSizeColumn = true
+    @AppStorage("kite.macos.detailed-column-width") private var preferredColumnWidth = 416.0
     @State private var detailedColumnWidth = KiteTheme.detailedColumnWidth
 
     var body: some View {
@@ -21,12 +25,21 @@ struct KiteColumnBrowser: View {
                                     index: index,
                                     isActive: isActive,
                                     showsDetails: showsColumnDetails && isActive,
+                                    showsDateColumn: $showsDateColumn,
+                                    showsKindColumn: $showsKindColumn,
+                                    showsSizeColumn: $showsSizeColumn,
+                                    preferredColumnWidth: $preferredColumnWidth,
                                     columnWidth: showsColumnDetails && isActive
                                         ? detailedColumnWidth
                                         : KiteTheme.columnWidth,
                                     onToggleDetails: {
                                         withAnimation(.snappy(duration: 0.22)) {
                                             showsColumnDetails.toggle()
+                                        }
+                                    },
+                                    onShowDetails: {
+                                        withAnimation(.snappy(duration: 0.22)) {
+                                            showsColumnDetails = true
                                         }
                                     }
                                 )
@@ -81,6 +94,15 @@ struct KiteColumnBrowser: View {
                             animated: true
                         )
                     }
+                    .onChange(of: showsDateColumn) { _ in
+                        scrollToActiveColumn(proxy, viewportWidth: viewport.size.width, animated: true)
+                    }
+                    .onChange(of: showsKindColumn) { _ in
+                        scrollToActiveColumn(proxy, viewportWidth: viewport.size.width, animated: true)
+                    }
+                    .onChange(of: showsSizeColumn) { _ in
+                        scrollToActiveColumn(proxy, viewportWidth: viewport.size.width, animated: true)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,6 +127,10 @@ struct KiteColumnBrowser: View {
     private var detailsMeasurementKey: ColumnDetailsMeasurementKey {
         ColumnDetailsMeasurementKey(
             showsDetails: showsColumnDetails,
+            showsDateColumn: showsDateColumn,
+            showsKindColumn: showsKindColumn,
+            showsSizeColumn: showsSizeColumn,
+            preferredColumnWidth: preferredColumnWidth,
             columnID: model.columns.last?.id,
             entries: model.columns.last?.entries ?? []
         )
@@ -118,8 +144,18 @@ struct KiteColumnBrowser: View {
         }
 
         let names = entries.map(\.name)
+        let dateVisible = showsDateColumn
+        let kindVisible = showsKindColumn
+        let sizeVisible = showsSizeColumn
+        let preferredWidth = CGFloat(preferredColumnWidth)
         let measuredWidth = await Task.detached(priority: .userInitiated) {
-            KiteColumnDetailsLayout.columnWidth(for: names)
+            KiteColumnDetailsLayout.columnWidth(
+                for: names,
+                showsDateColumn: dateVisible,
+                showsKindColumn: kindVisible,
+                showsSizeColumn: sizeVisible,
+                preferredWidth: preferredWidth
+            )
         }.value
         guard !Task.isCancelled else { return }
         detailedColumnWidth = measuredWidth
@@ -149,6 +185,10 @@ struct KiteColumnBrowser: View {
 
 private struct ColumnDetailsMeasurementKey: Equatable {
     let showsDetails: Bool
+    let showsDateColumn: Bool
+    let showsKindColumn: Bool
+    let showsSizeColumn: Bool
+    let preferredColumnWidth: Double
     let columnID: String?
     let entries: [BrowserEntry]
 }
@@ -190,7 +230,7 @@ private final class KiteShiftWheelHorizontalScrollerView: NSView {
         scrollView = enclosingScrollView
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
             [weak self] event in
-            self?.handleShiftWheel(event) ?? event
+            self?.handleWheel(event) ?? event
         }
     }
 
@@ -200,9 +240,8 @@ private final class KiteShiftWheelHorizontalScrollerView: NSView {
         self.eventMonitor = nil
     }
 
-    private func handleShiftWheel(_ event: NSEvent) -> NSEvent? {
-        guard event.modifierFlags.contains(.shift),
-              let scrollView,
+    private func handleWheel(_ event: NSEvent) -> NSEvent? {
+        guard let scrollView,
               event.window === scrollView.window else { return event }
 
         let location = scrollView.convert(event.locationInWindow, from: nil)
@@ -210,17 +249,65 @@ private final class KiteShiftWheelHorizontalScrollerView: NSView {
               abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
               event.scrollingDeltaY != 0 else { return event }
 
-        let clipView = scrollView.contentView
-        let documentWidth = scrollView.documentView?.frame.width ?? 0
-        let maxX = max(0, documentWidth - clipView.bounds.width)
-        let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 24
-        let targetX = (clipView.bounds.origin.x - event.scrollingDeltaY * scale)
-            .clamped(to: 0...maxX)
-        guard targetX != clipView.bounds.origin.x else { return nil }
+        if event.modifierFlags.contains(.shift) {
+            let clipView = scrollView.contentView
+            let documentWidth = scrollView.documentView?.frame.width ?? 0
+            let maxX = max(0, documentWidth - clipView.bounds.width)
+            let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 24
+            let targetX = (clipView.bounds.origin.x - event.scrollingDeltaY * scale)
+                .clamped(to: 0...maxX)
 
-        clipView.scroll(to: NSPoint(x: targetX, y: clipView.bounds.origin.y))
-        scrollView.reflectScrolledClipView(clipView)
+            clipView.scroll(to: NSPoint(x: targetX, y: clipView.bounds.origin.y))
+            scrollView.reflectScrolledClipView(clipView)
+            return nil
+        }
+
+        if let innerScrollView = verticalScrollView(
+            at: event.locationInWindow,
+            inside: scrollView
+        ), innerScrollView.canScrollVertically(for: event.scrollingDeltaY) {
+            return event
+        }
+
+        // Do not let the horizontal container map remaining vertical wheel
+        // input onto horizontal scrolling after the inner list reaches an edge.
         return nil
+    }
+
+    private func verticalScrollView(
+        at windowLocation: NSPoint,
+        inside horizontalScrollView: NSScrollView
+    ) -> NSScrollView? {
+        guard let contentView = horizontalScrollView.window?.contentView else {
+            return nil
+        }
+        let location = contentView.convert(windowLocation, from: nil)
+        guard let hitView = contentView.hitTest(location) else { return nil }
+
+        var current: NSView? = hitView
+        while let view = current, view !== horizontalScrollView {
+            if let scrollView = view as? NSScrollView,
+               scrollView !== horizontalScrollView {
+                return scrollView
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
+private extension NSScrollView {
+    func canScrollVertically(for deltaY: CGFloat) -> Bool {
+        guard let documentView else { return false }
+        let visibleHeight = contentView.bounds.height
+        let documentHeight = documentView.bounds.height
+        let maxY = max(0, documentHeight - visibleHeight)
+        guard maxY > 0.5 else { return false }
+
+        let y = contentView.bounds.origin.y
+        let atTop = documentView.isFlipped ? y <= 0.5 : y >= maxY - 0.5
+        let atBottom = documentView.isFlipped ? y >= maxY - 0.5 : y <= 0.5
+        return deltaY > 0 ? !atTop : !atBottom
     }
 }
 
@@ -250,20 +337,36 @@ private enum KiteColumnDetailsLayout {
     static let kindWidth: CGFloat = 70
     static let sizeWidth: CGFloat = 64
     private static let nameFontSize: CGFloat = 12.5
-    private static let rowFixedWidth: CGFloat = 360
+    private static let rowFixedWidth: CGFloat = 150
+    private static let minimumColumnWidth: CGFloat = 250
     private static let maximumColumnWidth: CGFloat = 640
 
-    static func columnWidth(for names: [String]) -> CGFloat {
+    static func columnWidth(
+        for names: [String],
+        showsDateColumn: Bool,
+        showsKindColumn: Bool,
+        showsSizeColumn: Bool,
+        preferredWidth: CGFloat
+    ) -> CGFloat {
         let font = NSFont.systemFont(ofSize: nameFontSize, weight: .medium)
         let textWidth = names.reduce(CGFloat.zero) { width, name in
             let nameWidth = (name as NSString).size(withAttributes: [.font: font]).width
             return max(width, ceil(nameWidth))
         }
+        let details = [
+            (showsDateColumn, dateWidth),
+            (showsKindColumn, kindWidth),
+            (showsSizeColumn, sizeWidth)
+        ]
+        let detailsWidth = details
+            .filter { $0.0 }
+            .reduce(CGFloat.zero) { $0 + $1.1 }
+        let gapWidth = CGFloat(max(details.filter { $0.0 }.count - 1, 0)) * spacing
         let desiredWidth = max(
-            KiteTheme.detailedColumnWidth,
-            ceil(rowFixedWidth + textWidth)
+            preferredWidth,
+            ceil(rowFixedWidth + detailsWidth + gapWidth + textWidth)
         )
-        return min(desiredWidth, maximumColumnWidth)
+        return min(max(desiredWidth, minimumColumnWidth), maximumColumnWidth)
     }
 }
 
@@ -273,8 +376,13 @@ private struct KiteBrowserColumn: View {
     let index: Int
     let isActive: Bool
     let showsDetails: Bool
+    @Binding var showsDateColumn: Bool
+    @Binding var showsKindColumn: Bool
+    @Binding var showsSizeColumn: Bool
+    @Binding var preferredColumnWidth: Double
     let columnWidth: CGFloat
     let onToggleDetails: () -> Void
+    let onShowDetails: () -> Void
 
     @FocusState private var searchFocused: Bool
 
@@ -503,8 +611,11 @@ private struct KiteBrowserColumn: View {
                 model: model,
                 entry: entry,
                 columnIndex: index,
-                isSelected: column.selectedPath == entry.path,
-                showsDetails: showsDetails
+                isSelected: column.selectedPaths.contains(entry.path),
+                showsDetails: showsDetails,
+                showsDateColumn: showsDateColumn,
+                showsKindColumn: showsKindColumn,
+                showsSizeColumn: showsSizeColumn
             )
         }
     }
@@ -547,6 +658,42 @@ private struct KiteBrowserColumn: View {
                 Label("分组", systemImage: "rectangle.3.group")
             }
 
+            Menu {
+                Toggle("显示修改日期列", isOn: columnVisibilityBinding($showsDateColumn))
+                Toggle("显示类型列", isOn: columnVisibilityBinding($showsKindColumn))
+                Toggle("显示大小列", isOn: columnVisibilityBinding($showsSizeColumn))
+
+                Divider()
+
+                Button {
+                    preferredColumnWidth = 260
+                } label: {
+                    ruleLabel("紧凑宽度", selected: preferredColumnWidth == 260)
+                }
+                Button {
+                    preferredColumnWidth = 416
+                } label: {
+                    ruleLabel("标准宽度", selected: preferredColumnWidth == 416)
+                }
+                Button {
+                    preferredColumnWidth = 520
+                } label: {
+                    ruleLabel("宽列", selected: preferredColumnWidth == 520)
+                }
+
+                Divider()
+
+                Button("重置列与布局") {
+                    showsDateColumn = true
+                    showsKindColumn = true
+                    showsSizeColumn = true
+                    preferredColumnWidth = 416
+                    onShowDetails()
+                }
+            } label: {
+                Label("列与布局", systemImage: "tablecells")
+            }
+
             Divider()
 
             Button {
@@ -576,20 +723,39 @@ private struct KiteBrowserColumn: View {
             }
         }
     }
+
+    private func columnVisibilityBinding(_ binding: Binding<Bool>) -> Binding<Bool> {
+        Binding(
+            get: { binding.wrappedValue },
+            set: { visible in
+                binding.wrappedValue = visible
+                if visible, !showsDetails {
+                    onShowDetails()
+                }
+            }
+        )
+    }
+
     private var detailsHeader: some View {
         HStack(spacing: KiteColumnDetailsLayout.spacing) {
             Text("名称")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 29)
 
-            Text("日期")
-                .frame(width: KiteColumnDetailsLayout.dateWidth, alignment: .leading)
+            if showsDateColumn {
+                Text("日期")
+                    .frame(width: KiteColumnDetailsLayout.dateWidth, alignment: .leading)
+            }
 
-            Text("类型")
-                .frame(width: KiteColumnDetailsLayout.kindWidth, alignment: .leading)
+            if showsKindColumn {
+                Text("类型")
+                    .frame(width: KiteColumnDetailsLayout.kindWidth, alignment: .leading)
+            }
 
-            Text("大小")
-                .frame(width: KiteColumnDetailsLayout.sizeWidth, alignment: .trailing)
+            if showsSizeColumn {
+                Text("大小")
+                    .frame(width: KiteColumnDetailsLayout.sizeWidth, alignment: .trailing)
+            }
         }
         .font(.system(size: 9.5, weight: .semibold))
         .foregroundStyle(.tertiary)
@@ -643,23 +809,33 @@ private struct KiteBrowserRow: View {
     let columnIndex: Int
     let isSelected: Bool
     let showsDetails: Bool
+    let showsDateColumn: Bool
+    let showsKindColumn: Bool
+    let showsSizeColumn: Bool
 
     @State private var isHovering = false
 
     var body: some View {
         Button {
-            model.select(column: columnIndex, entry: entry)
+            model.select(
+                column: columnIndex,
+                entry: entry,
+                modifiers: NSEvent.modifierFlags
+            )
         } label: {
             HStack(spacing: showsDetails ? KiteColumnDetailsLayout.spacing : 9) {
                 nameCell
 
-                if showsDetails {
+                if showsDetails && showsDateColumn {
                     Text(metadataDate)
                         .font(.system(size: 10.5, design: .rounded))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .frame(width: KiteColumnDetailsLayout.dateWidth, alignment: .leading)
 
+                }
+
+                if showsDetails && showsKindColumn {
                     Text(metadataKind)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
@@ -667,6 +843,9 @@ private struct KiteBrowserRow: View {
                         .truncationMode(.middle)
                         .frame(width: KiteColumnDetailsLayout.kindWidth, alignment: .leading)
 
+                }
+
+                if showsDetails && showsSizeColumn {
                     Text(metadataSize)
                         .font(.system(size: 10.5, design: .rounded))
                         .foregroundStyle(.secondary)
@@ -844,6 +1023,202 @@ private struct KiteVcsBadge {
     }
 }
 
+struct KiteGlobalSearchResults: View {
+    @ObservedObject var model: KiteModel
+    @State private var selectedPath: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+
+                if let search = model.globalSearch {
+                    Text("“\(search.query)”的搜索结果")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("\(search.entries.count) 项")
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.primary.opacity(0.055), in: Capsule())
+                    if search.truncated {
+                        Text("1000+")
+                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    Text("正在搜索…")
+                        .font(.system(size: 12, weight: .semibold))
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(model.globalSearch?.rootPath ?? model.currentPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.06))
+                .frame(height: 0.5)
+                .padding(.horizontal, 10)
+
+            if let search = model.globalSearch, search.entries.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 30, weight: .light))
+                        .foregroundStyle(.tertiary)
+                    Text("无搜索结果")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let entries = model.globalSearch?.entries {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(entries) { entry in
+                            searchRow(entry)
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 6)
+                }
+                .scrollIndicators(.hidden)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(0.42),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.2), lineWidth: 0.7)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: model.globalSearch?.query) { _ in
+            selectedPath = nil
+        }
+    }
+
+    private func searchRow(_ entry: BrowserEntry) -> some View {
+        Button {
+            selectedPath = entry.path
+        } label: {
+            HStack(spacing: 9) {
+                KiteFileIcon(path: entry.path, isDirectory: entry.isDirectory, size: 20)
+                    .frame(width: 22, height: 22)
+
+                Text(entry.name)
+                    .font(.system(
+                        size: 12.5,
+                        weight: selectedPath == entry.path ? .medium : .regular
+                    ))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 8)
+
+                Text(relativeLocation(for: entry))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 320, alignment: .trailing)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background {
+                if selectedPath == entry.path {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .kiteGlass(.selection, cornerRadius: 9)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                if entry.isDirectory {
+                    model.loadRoot(entry.path)
+                } else {
+                    KitePlatform.open(entry.path)
+                }
+            }
+        )
+        .contextMenu {
+            Button("打开") {
+                if entry.isDirectory {
+                    model.loadRoot(entry.path)
+                } else {
+                    KitePlatform.open(entry.path)
+                }
+            }
+            Button("在 Finder 中显示") {
+                KitePlatform.revealInFinder(entry.path)
+            }
+            Button("拷贝路径") {
+                KitePlatform.copyPath(entry.path)
+            }
+            Divider()
+            Button("拷贝") {
+                model.copyFile(entry.path)
+            }
+            Button("剪切") {
+                model.cutFile(entry.path)
+            }
+            Button("拷贝到…") {
+                model.copyTo(path: entry.path)
+            }
+            Button("分享…") {
+                KitePlatform.share(entry.path)
+            }
+            Button(role: .destructive) {
+                model.moveToTrash(entry)
+            } label: {
+                Label("移到废纸篓", systemImage: "trash")
+            }
+            .disabled(!KitePlatform.canModify(entry.path))
+        }
+        .help(entry.path)
+        .accessibilityLabel("\(entry.name)，\(entry.isDirectory ? "文件夹" : entry.kindLabel)")
+    }
+
+    private func relativeLocation(for entry: BrowserEntry) -> String {
+        let root = model.globalSearch?.rootPath ?? model.currentPath
+        let rootURL = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
+        let parentURL = URL(fileURLWithPath: entry.path)
+            .deletingLastPathComponent()
+            .standardizedFileURL
+        let parent = parentURL.path
+        let rootPath = rootURL.path
+        let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard parent == rootPath || parent.hasPrefix(rootPrefix) else {
+            return parent
+        }
+        let suffix = String(parent.dropFirst(rootPath.count))
+        if suffix.isEmpty {
+            return "."
+        }
+        return suffix.hasPrefix("/") ? "." + suffix : "./" + suffix
+    }
+}
+
 private struct KiteEntryMenu: View {
     @ObservedObject var model: KiteModel
     let entry: BrowserEntry
@@ -884,15 +1259,15 @@ private struct KiteEntryMenu: View {
         Divider()
 
         Button {
-            model.copyFile(entry.path)
+            model.copyFiles(operationPaths)
         } label: {
-            Label("拷贝", systemImage: "doc.on.doc")
+            Label(operationEntries.count > 1 ? "拷贝所选项目" : "拷贝", systemImage: "doc.on.doc")
         }
 
         Button {
-            model.cutFile(entry.path)
+            model.cutFiles(operationPaths)
         } label: {
-            Label("剪切", systemImage: "scissors")
+            Label(operationEntries.count > 1 ? "剪切所选项目" : "剪切", systemImage: "scissors")
         }
 
         Button {
@@ -902,9 +1277,12 @@ private struct KiteEntryMenu: View {
         }
 
         Button {
-            model.copyTo(path: entry.path)
+            model.copyTo(paths: operationPaths)
         } label: {
-            Label("拷贝到…", systemImage: "folder.badge.plus")
+            Label(
+                operationEntries.count > 1 ? "将所选项目拷贝到…" : "拷贝到…",
+                systemImage: "folder.badge.plus"
+            )
         }
 
         Divider()
@@ -937,9 +1315,9 @@ private struct KiteEntryMenu: View {
         Divider()
 
         Button {
-            KitePlatform.share(entry.path)
+            KitePlatform.share(operationPaths)
         } label: {
-            Label("分享…", systemImage: "square.and.arrow.up")
+            Label(operationEntries.count > 1 ? "分享所选项目…" : "分享…", systemImage: "square.and.arrow.up")
         }
 
         Divider()
@@ -949,14 +1327,17 @@ private struct KiteEntryMenu: View {
         } label: {
             Label("重命名…", systemImage: "pencil")
         }
-        .disabled(!KitePlatform.canModify(entry.path))
+        .disabled(!KitePlatform.canModify(entry.path) || operationEntries.count > 1)
 
         Button(role: .destructive) {
-            model.moveToTrash(entry)
+            model.moveToTrash(entries: operationEntries)
         } label: {
-            Label("移到废纸篓", systemImage: "trash")
+            Label(
+                operationEntries.count > 1 ? "将所选项目移到废纸篓" : "移到废纸篓",
+                systemImage: "trash"
+            )
         }
-        .disabled(!KitePlatform.canModify(entry.path))
+        .disabled(operationEntries.contains { !KitePlatform.canModify($0.path) })
     }
 
     private var parentDirectory: String {
@@ -969,6 +1350,18 @@ private struct KiteEntryMenu: View {
 
     private var isFavorite: Bool {
         model.isFavorite(path: entry.path)
+    }
+
+    private var operationEntries: [BrowserEntry] {
+        let selected = model.selectedColumnEntries
+        if selected.count > 1, selected.contains(where: { $0.path == entry.path }) {
+            return selected
+        }
+        return [entry]
+    }
+
+    private var operationPaths: [String] {
+        operationEntries.map(\.path)
     }
 }
 

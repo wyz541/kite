@@ -13,6 +13,7 @@ actions!(
         CopySelection,
         CutSelection,
         PasteSelection,
+        SelectAll,
         FocusAddress,
         FocusSearch,
         CreateFolder,
@@ -80,6 +81,13 @@ pub enum ColumnPaneCommand {
     GroupExtension,
     GroupModified,
     ResetView,
+    ToggleDateColumn,
+    ToggleKindColumn,
+    ToggleSizeColumn,
+    SetCompactColumnWidth,
+    SetStandardColumnWidth,
+    SetWideColumnWidth,
+    ResetLayout,
 }
 
 #[derive(Clone, Debug, PartialEq, Action)]
