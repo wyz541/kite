@@ -468,10 +468,12 @@ struct UpdateDownloadState: Equatable {
 @MainActor
 final class KiteModel: ObservableObject {
     private static let sessionSchemaVersion: UInt32 = 1
+    private static let columnSearchDebounceNanoseconds: UInt64 = 180_000_000
 
     private let core: KiteCore
     private var columnSearchGeneration: UInt64 = 0
     private var globalSearchGeneration: UInt64 = 0
+    private var columnSearchDebounceTask: Task<Void, Never>?
 
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var favorites: [FavoriteEntryDto] = []
@@ -707,10 +709,36 @@ final class KiteModel: ObservableObject {
 
     func setColumnSearchText(_ text: String) {
         columnSearchText = text
+        guard let path = activeColumnSearchPath else { return }
+
+        resetColumnSearchRequest()
+        cancelColumnSearchDebounce()
+
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            clearColumnSearchResults(for: path)
+            return
+        }
+
+        columnSearchDebounceTask = Task { [weak self] in
+            try? await Task<Never, Never>.sleep(
+                nanoseconds: Self.columnSearchDebounceNanoseconds
+            )
+            guard !Task.isCancelled, let self else { return }
+            guard self.activeColumnSearchPath == path,
+                  self.columnSearchText.trimmingCharacters(in: .whitespacesAndNewlines) == query
+            else { return }
+            self.startColumnSearch(path: path, query: query)
+        }
     }
 
     func submitColumnSearch(path: String) {
-        let query = columnSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        cancelColumnSearchDebounce()
+        startColumnSearch(path: path, query: columnSearchText)
+    }
+
+    private func startColumnSearch(path: String, query: String) {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             clearColumnSearchResults(for: path)
             resetColumnSearchRequest()
@@ -718,7 +746,6 @@ final class KiteModel: ObservableObject {
         }
 
         resetColumnSearchRequest()
-        columnSearchGeneration &+= 1
         let generation = columnSearchGeneration
         columnSearchLoading = true
         let core = self.core
@@ -742,6 +769,7 @@ final class KiteModel: ObservableObject {
     }
 
     func clearColumnSearch(path: String) {
+        cancelColumnSearchDebounce()
         resetColumnSearchRequest()
         clearColumnSearchResults(for: path)
         activeColumnSearchPath = nil
@@ -822,6 +850,11 @@ final class KiteModel: ObservableObject {
         columns.first(where: { $0.path == path })?.searchQuery
     }
 
+    private func cancelColumnSearchDebounce() {
+        columnSearchDebounceTask?.cancel()
+        columnSearchDebounceTask = nil
+    }
+
     private func resetColumnSearchRequest() {
         columnSearchGeneration &+= 1
         columnSearchLoading = false
@@ -829,6 +862,7 @@ final class KiteModel: ObservableObject {
     }
 
     private func resetColumnSearchUI() {
+        cancelColumnSearchDebounce()
         resetColumnSearchRequest()
         activeColumnSearchPath = nil
         columnSearchText = ""
