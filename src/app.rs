@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -25,7 +26,7 @@ use crate::preview_window::PreviewWindow;
 use crate::shell_fs;
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
 use crate::text_editor;
-use crate::ui_preferences;
+use crate::ui_preferences::{self, ColumnGroupPreference as ColumnGroup, ColumnViewRule};
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
     run_vcs_operation, run_vcs_query,
@@ -140,15 +141,6 @@ enum ColumnFilter {
     Documents,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum ColumnGroup {
-    #[default]
-    None,
-    Kind,
-    Extension,
-    Modified,
-}
-
 #[derive(Clone, Copy)]
 struct ColumnViewRules {
     sort: SortSpec,
@@ -166,7 +158,11 @@ struct ColumnLayoutState {
 
 #[derive(Clone)]
 enum ColumnDisplayRow {
-    Group(SharedString),
+    Group {
+        label: SharedString,
+        count: usize,
+        collapsed: bool,
+    },
     Entry(FileEntry),
 }
 
@@ -182,6 +178,7 @@ struct ColumnPane {
     sort: SortSpec,
     filter: ColumnFilter,
     group: ColumnGroup,
+    collapsed_groups: BTreeSet<String>,
     search_query: Option<String>,
     search_truncated: bool,
     loading: bool,
@@ -198,7 +195,7 @@ impl ColumnPane {
         loading: bool,
         git_available: bool,
         svn_available: bool,
-        sort: SortSpec,
+        rule: ColumnViewRule,
     ) -> Self {
         let mut pane = Self {
             path,
@@ -208,9 +205,10 @@ impl ColumnPane {
             selected_path: None,
             selected_paths: Vec::new(),
             selection_anchor_path: None,
-            sort,
+            sort: rule.sort,
             filter: ColumnFilter::All,
-            group: ColumnGroup::None,
+            group: rule.group,
+            collapsed_groups: rule.collapsed_groups,
             search_query: None,
             search_truncated: false,
             loading,
@@ -295,7 +293,7 @@ impl ColumnPane {
             .into_iter()
             .filter_map(|row| match row {
                 ColumnDisplayRow::Entry(entry) => Some(entry.path),
-                ColumnDisplayRow::Group(_) => None,
+                ColumnDisplayRow::Group { .. } => None,
             })
             .collect::<Vec<_>>();
         let anchor = self
@@ -397,30 +395,76 @@ impl ColumnPane {
         let mut rows = Vec::new();
         for ((_, label), mut entries) in groups {
             sort_entries(&mut entries, self.sort);
-            rows.push(ColumnDisplayRow::Group(SharedString::from(label)));
-            rows.extend(entries.into_iter().map(ColumnDisplayRow::Entry));
+            let collapsed = self.collapsed_groups.contains(&label);
+            rows.push(ColumnDisplayRow::Group {
+                label: SharedString::from(label),
+                count: entries.len(),
+                collapsed,
+            });
+            if !collapsed {
+                rows.extend(entries.into_iter().map(ColumnDisplayRow::Entry));
+            }
         }
         rows
     }
 
     fn visible_row_count(&self) -> usize {
-        if self.group == ColumnGroup::None {
-            return self.entries.len();
-        }
-        let now = SystemTime::now();
-        let groups = self
-            .entries
-            .iter()
-            .map(|entry| self.group_key(entry, now))
-            .collect::<std::collections::BTreeSet<_>>();
-        self.entries.len() + groups.len()
+        self.display_rows().len()
     }
 
     fn entry_at_visible_row(&self, row: usize) -> Option<FileEntry> {
         self.display_rows().get(row).and_then(|row| match row {
             ColumnDisplayRow::Entry(entry) => Some(entry.clone()),
-            ColumnDisplayRow::Group(_) => None,
+            ColumnDisplayRow::Group { .. } => None,
         })
+    }
+
+    fn view_rule(&self) -> ColumnViewRule {
+        ColumnViewRule {
+            sort: self.sort,
+            group: self.group,
+            collapsed_groups: self.collapsed_groups.clone(),
+        }
+    }
+
+    fn toggle_group_collapse(&mut self, label: &str) {
+        if !self.collapsed_groups.remove(label) {
+            self.collapsed_groups.insert(label.to_string());
+            self.prune_selection_to_visible_rows();
+        }
+    }
+
+    fn prune_selection_to_visible_rows(&mut self) {
+        let visible_paths = self
+            .display_rows()
+            .into_iter()
+            .filter_map(|row| match row {
+                ColumnDisplayRow::Entry(entry) => Some(entry.path),
+                ColumnDisplayRow::Group { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        self.selected_paths.retain(|selected| {
+            visible_paths
+                .iter()
+                .any(|visible| same_path(visible, selected))
+        });
+        if self.selected_path.as_ref().is_some_and(|selected| {
+            !visible_paths
+                .iter()
+                .any(|visible| same_path(visible, selected))
+        }) {
+            self.selected_path = None;
+        }
+        if self.selection_anchor_path.as_ref().is_some_and(|selected| {
+            !visible_paths
+                .iter()
+                .any(|visible| same_path(visible, selected))
+        }) {
+            self.selection_anchor_path = None;
+        }
+        if self.selected_path.is_none() {
+            self.selected_path = self.selected_paths.first().cloned();
+        }
     }
 
     fn group_key(&self, entry: &FileEntry, now: SystemTime) -> (u8, String) {
@@ -742,9 +786,14 @@ impl KiteApp {
                 .placeholder("搜索此分栏")
                 .clean_on_escape()
         });
+        let ui_preferences = ui_preferences::load_ui_preferences();
         let table = cx.new(|cx| {
             TableState::new(
-                FileTableDelegate::new(Vec::new(), SortSpec::default(), home.clone()),
+                FileTableDelegate::new(
+                    Vec::new(),
+                    ui_preferences.default_column_rule.sort,
+                    home.clone(),
+                ),
                 window,
                 cx,
             )
@@ -816,7 +865,6 @@ impl KiteApp {
             },
         );
         let table_subscription = cx.subscribe_in(&table, window, Self::on_table_event);
-        let ui_preferences = ui_preferences::load_ui_preferences();
 
         let mut app = Self {
             current_dir: home.clone(),
@@ -917,10 +965,16 @@ impl KiteApp {
     }
 
     fn toggle_column_sort_order(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(pane) = self.column_panes.get_mut(index) else {
-            return;
+        let (path, rule) = {
+            let Some(pane) = self.column_panes.get_mut(index) else {
+                return;
+            };
+            pane.toggle_sort_order();
+            (pane.path.clone(), pane.view_rule())
         };
-        pane.toggle_sort_order();
+        if let Err(error) = ui_preferences::save_column_view_rule(&path, rule) {
+            self.notice = Some(error.into());
+        }
         self.clear_hidden_column_selection();
         self.column_scroll_pending = true;
         cx.notify();
@@ -936,13 +990,13 @@ impl KiteApp {
     }
 
     fn save_layout_preferences(&self) -> Result<(), String> {
-        ui_preferences::save_ui_preferences(ui_preferences::UiPreferences {
-            column_details_visible: self.show_column_details,
-            date_column_visible: self.show_date_column,
-            kind_column_visible: self.show_kind_column,
-            size_column_visible: self.show_size_column,
-            column_width: self.preferred_column_width,
-        })
+        let mut preferences = ui_preferences::load_ui_preferences();
+        preferences.column_details_visible = self.show_column_details;
+        preferences.date_column_visible = self.show_date_column;
+        preferences.kind_column_visible = self.show_kind_column;
+        preferences.size_column_visible = self.show_size_column;
+        preferences.column_width = self.preferred_column_width;
+        ui_preferences::save_ui_preferences(preferences)
     }
 
     fn start_device_watcher(&mut self, cx: &mut Context<Self>) {
@@ -1588,70 +1642,113 @@ impl KiteApp {
         else {
             return;
         };
-        let Some(pane) = self.column_panes.get_mut(index) else {
-            return;
-        };
+        let (path, rule) = {
+            let Some(pane) = self.column_panes.get_mut(index) else {
+                return;
+            };
 
-        match action.command {
-            ColumnPaneCommand::SortNameAscending => {
-                pane.sort = SortSpec {
-                    key: crate::fs::SortKey::Name,
-                    ascending: true,
+            match action.command {
+                ColumnPaneCommand::SortNameAscending => {
+                    pane.sort = SortSpec {
+                        key: crate::fs::SortKey::Name,
+                        ascending: true,
+                    }
                 }
-            }
-            ColumnPaneCommand::SortNameDescending => {
-                pane.sort = SortSpec {
-                    key: crate::fs::SortKey::Name,
-                    ascending: false,
+                ColumnPaneCommand::SortNameDescending => {
+                    pane.sort = SortSpec {
+                        key: crate::fs::SortKey::Name,
+                        ascending: false,
+                    }
                 }
-            }
-            ColumnPaneCommand::SortModifiedNewest => {
-                pane.sort = SortSpec {
-                    key: crate::fs::SortKey::Modified,
-                    ascending: false,
+                ColumnPaneCommand::SortModifiedNewest => {
+                    pane.sort = SortSpec {
+                        key: crate::fs::SortKey::Modified,
+                        ascending: false,
+                    }
                 }
-            }
-            ColumnPaneCommand::SortModifiedOldest => {
-                pane.sort = SortSpec {
-                    key: crate::fs::SortKey::Modified,
-                    ascending: true,
+                ColumnPaneCommand::SortModifiedOldest => {
+                    pane.sort = SortSpec {
+                        key: crate::fs::SortKey::Modified,
+                        ascending: true,
+                    }
                 }
-            }
-            ColumnPaneCommand::SortKind => {
-                pane.sort = SortSpec {
-                    key: crate::fs::SortKey::Kind,
-                    ascending: true,
+                ColumnPaneCommand::SortKind => {
+                    pane.sort = SortSpec {
+                        key: crate::fs::SortKey::Kind,
+                        ascending: true,
+                    }
                 }
-            }
-            ColumnPaneCommand::SortSizeDescending => {
-                pane.sort = SortSpec {
-                    key: crate::fs::SortKey::Size,
-                    ascending: false,
+                ColumnPaneCommand::SortSizeDescending => {
+                    pane.sort = SortSpec {
+                        key: crate::fs::SortKey::Size,
+                        ascending: false,
+                    }
                 }
+                ColumnPaneCommand::FilterAll => pane.filter = ColumnFilter::All,
+                ColumnPaneCommand::FilterFolders => pane.filter = ColumnFilter::Folders,
+                ColumnPaneCommand::FilterFiles => pane.filter = ColumnFilter::Files,
+                ColumnPaneCommand::FilterMedia => pane.filter = ColumnFilter::Media,
+                ColumnPaneCommand::FilterDocuments => pane.filter = ColumnFilter::Documents,
+                ColumnPaneCommand::GroupNone => {
+                    if pane.group != ColumnGroup::None {
+                        pane.group = ColumnGroup::None;
+                        pane.collapsed_groups.clear();
+                    }
+                }
+                ColumnPaneCommand::GroupKind => {
+                    if pane.group != ColumnGroup::Kind {
+                        pane.group = ColumnGroup::Kind;
+                        pane.collapsed_groups.clear();
+                    }
+                }
+                ColumnPaneCommand::GroupExtension => {
+                    if pane.group != ColumnGroup::Extension {
+                        pane.group = ColumnGroup::Extension;
+                        pane.collapsed_groups.clear();
+                    }
+                }
+                ColumnPaneCommand::GroupModified => {
+                    if pane.group != ColumnGroup::Modified {
+                        pane.group = ColumnGroup::Modified;
+                        pane.collapsed_groups.clear();
+                    }
+                }
+                ColumnPaneCommand::ResetView => {
+                    pane.sort = SortSpec::default();
+                    pane.filter = ColumnFilter::All;
+                    pane.group = ColumnGroup::None;
+                    pane.collapsed_groups.clear();
+                }
+                ColumnPaneCommand::ToggleDateColumn
+                | ColumnPaneCommand::ToggleKindColumn
+                | ColumnPaneCommand::ToggleSizeColumn
+                | ColumnPaneCommand::SetCompactColumnWidth
+                | ColumnPaneCommand::SetStandardColumnWidth
+                | ColumnPaneCommand::SetWideColumnWidth
+                | ColumnPaneCommand::ResetLayout => return,
             }
-            ColumnPaneCommand::FilterAll => pane.filter = ColumnFilter::All,
-            ColumnPaneCommand::FilterFolders => pane.filter = ColumnFilter::Folders,
-            ColumnPaneCommand::FilterFiles => pane.filter = ColumnFilter::Files,
-            ColumnPaneCommand::FilterMedia => pane.filter = ColumnFilter::Media,
-            ColumnPaneCommand::FilterDocuments => pane.filter = ColumnFilter::Documents,
-            ColumnPaneCommand::GroupNone => pane.group = ColumnGroup::None,
-            ColumnPaneCommand::GroupKind => pane.group = ColumnGroup::Kind,
-            ColumnPaneCommand::GroupExtension => pane.group = ColumnGroup::Extension,
-            ColumnPaneCommand::GroupModified => pane.group = ColumnGroup::Modified,
-            ColumnPaneCommand::ResetView => {
-                pane.sort = SortSpec::default();
-                pane.filter = ColumnFilter::All;
-                pane.group = ColumnGroup::None;
-            }
-            ColumnPaneCommand::ToggleDateColumn
-            | ColumnPaneCommand::ToggleKindColumn
-            | ColumnPaneCommand::ToggleSizeColumn
-            | ColumnPaneCommand::SetCompactColumnWidth
-            | ColumnPaneCommand::SetStandardColumnWidth
-            | ColumnPaneCommand::SetWideColumnWidth
-            | ColumnPaneCommand::ResetLayout => return,
+            pane.refresh_view();
+            (pane.path.clone(), pane.view_rule())
+        };
+        if let Err(error) = ui_preferences::save_column_view_rule(&path, rule) {
+            self.notice = Some(error.into());
         }
-        pane.refresh_view();
+        self.clear_hidden_column_selection();
+        self.column_scroll_pending = true;
+        cx.notify();
+    }
+
+    fn toggle_column_group(&mut self, column: usize, label: SharedString, cx: &mut Context<Self>) {
+        let (path, rule) = {
+            let Some(pane) = self.column_panes.get_mut(column) else {
+                return;
+            };
+            pane.toggle_group_collapse(label.as_ref());
+            (pane.path.clone(), pane.view_rule())
+        };
+        if let Err(error) = ui_preferences::save_column_view_rule(&path, rule) {
+            self.notice = Some(error.into());
+        }
         self.clear_hidden_column_selection();
         self.column_scroll_pending = true;
         cx.notify();
@@ -1710,23 +1807,38 @@ impl KiteApp {
         self.column_generation = self.column_generation.wrapping_add(1);
         let generation = self.column_generation;
         let chain = column_chain(&root);
-        let sort = self.table.read(cx).delegate().sort_spec();
+        let preferences = ui_preferences::load_ui_preferences();
+        let rules = chain
+            .iter()
+            .map(|path| preferences.column_view_rule(path))
+            .collect::<Vec<_>>();
         self.column_panes = chain
             .iter()
-            .map(|path| ColumnPane::new(path.clone(), Vec::new(), 0, true, false, false, sort))
+            .zip(rules.iter())
+            .map(|(path, rule)| {
+                ColumnPane::new(
+                    path.clone(),
+                    Vec::new(),
+                    0,
+                    true,
+                    false,
+                    false,
+                    rule.clone(),
+                )
+            })
             .collect();
         self.column_selected_path = None;
         self.column_scroll_pending = true;
         self.path_bar_scroll_pending = true;
         cx.notify();
 
-        let load_paths = chain;
+        let load_paths = chain.into_iter().zip(rules).collect::<Vec<_>>();
         self._column_task = cx.spawn(async move |this, cx| {
             let panes = cx
                 .background_spawn(async move {
                     let mut panes = Vec::with_capacity(load_paths.len());
-                    for path in load_paths {
-                        panes.push(load_column_pane(path, sort));
+                    for (path, rule) in load_paths {
+                        panes.push(load_column_pane(path, rule));
                     }
                     panes
                 })
@@ -1765,8 +1877,8 @@ impl KiteApp {
         let final_index = chain.len() - 1;
         let mut entries = Some(entries);
         let mut panes = self.column_panes[..common].to_vec();
+        let preferences = ui_preferences::load_ui_preferences();
 
-        let sort = self.table.read(cx).delegate().sort_spec();
         for (index, path) in chain.iter().enumerate().skip(common) {
             let ready_entries = (index == final_index).then(|| entries.take().unwrap_or_default());
             panes.push(ColumnPane::new(
@@ -1776,7 +1888,7 @@ impl KiteApp {
                 index != final_index,
                 git_available,
                 svn_available,
-                sort,
+                preferences.column_view_rule(path),
             ));
         }
         if let Some(entries) = entries
@@ -1798,7 +1910,11 @@ impl KiteApp {
         self.path_bar_scroll_pending = true;
 
         let load_paths = (common..final_index)
-            .map(|index| (index, chain[index].clone()))
+            .map(|index| {
+                let path = chain[index].clone();
+                let rule = preferences.column_view_rule(&path);
+                (index, path, rule)
+            })
             .collect::<Vec<_>>();
         if load_paths.is_empty() {
             self._column_task = Task::ready(());
@@ -1808,7 +1924,7 @@ impl KiteApp {
                     .background_spawn(async move {
                         load_paths
                             .into_iter()
-                            .map(|(index, path)| (index, load_column_pane(path, sort)))
+                            .map(|(index, path, rule)| (index, load_column_pane(path, rule)))
                             .collect::<Vec<_>>()
                     })
                     .await;
@@ -5255,20 +5371,35 @@ impl KiteApp {
                 continue;
             };
             let entry = match display_row {
-                ColumnDisplayRow::Group(label) => {
+                ColumnDisplayRow::Group {
+                    label,
+                    count,
+                    collapsed,
+                } => {
+                    let click_label = label.clone();
                     rows.push(
-                        div()
+                        h_flex()
                             .id(("column-group", column * 100_000 + row_ix))
                             .h(px(30.))
                             .w_full()
+                            .gap_1()
                             .px_2()
-                            .flex()
                             .items_center()
                             .text_xs()
                             .font_medium()
                             .text_color(muted)
                             .bg(cx.theme().status_bar)
-                            .child(label.clone())
+                            .cursor_pointer()
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .size_3()
+                                    .rotate(percentage(if *collapsed { 0. } else { 0.25 })),
+                            )
+                            .child(div().flex_1().truncate().child(label.clone()))
+                            .child(div().text_xs().child(count.to_string()))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.toggle_column_group(column, click_label.clone(), cx)
+                            }))
                             .into_any_element(),
                     );
                     continue;
@@ -6076,12 +6207,12 @@ fn common_column_prefix(panes: &[ColumnPane], chain: &[PathBuf]) -> usize {
         .count()
 }
 
-fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
-    let (mut entries, skipped) = load_directory_snapshot(&path, sort)
+fn load_column_pane(path: PathBuf, rule: ColumnViewRule) -> ColumnPane {
+    let (mut entries, skipped) = load_directory_snapshot(&path, rule.sort)
         .map(|snapshot| (snapshot.entries, snapshot.skipped))
         .unwrap_or_default();
     if shell_fs::is_shell_namespace_path(&path) {
-        return ColumnPane::new(path, entries, skipped, false, false, false, sort);
+        return ColumnPane::new(path, entries, skipped, false, false, false, rule);
     }
     let snapshot = load_vcs_snapshot(&path);
     apply_statuses(&mut entries, &path, &snapshot);
@@ -6092,7 +6223,7 @@ fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
         false,
         snapshot.git_available(),
         snapshot.svn_available(),
-        sort,
+        rule,
     )
 }
 
@@ -6881,11 +7012,12 @@ mod launch_target_tests {
 #[cfg(test)]
 mod path_bar_tests {
     use super::{
-        ColumnDisplayRow, ColumnFilter, ColumnGroup, ColumnPane, column_chain,
-        column_context_menu_target, column_count_after_file_selection, common_column_prefix,
-        loaded_column_index, path_after_recycle, path_after_recycle_paths, path_after_rename,
+        ColumnDisplayRow, ColumnFilter, ColumnPane, column_chain, column_context_menu_target,
+        column_count_after_file_selection, common_column_prefix, loaded_column_index,
+        path_after_recycle, path_after_recycle_paths, path_after_rename,
     };
     use crate::fs::{EntryKind, FileEntry, SortKey, SortSpec};
+    use crate::ui_preferences::{ColumnGroupPreference as ColumnGroup, ColumnViewRule};
     use std::path::{Path, PathBuf};
 
     fn pane(path: &str, loading: bool) -> ColumnPane {
@@ -6896,7 +7028,7 @@ mod path_bar_tests {
             loading,
             false,
             false,
-            crate::fs::SortSpec::default(),
+            ColumnViewRule::default(),
         )
     }
 
@@ -6934,7 +7066,7 @@ mod path_bar_tests {
             false,
             false,
             false,
-            SortSpec::default(),
+            ColumnViewRule::default(),
         );
 
         column.filter = ColumnFilter::Documents;
@@ -6949,11 +7081,23 @@ mod path_bar_tests {
         let groups = rows
             .iter()
             .filter_map(|row| match row {
-                ColumnDisplayRow::Group(label) => Some(label.to_string()),
+                ColumnDisplayRow::Group { label, .. } => Some(label.to_string()),
                 ColumnDisplayRow::Entry(_) => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(groups, vec!["文件夹", "PNG", "TXT"]);
+
+        column.toggle_group_collapse("PNG");
+        let collapsed_rows = column.display_rows();
+        assert!(collapsed_rows.iter().any(|row| matches!(
+            row,
+            ColumnDisplayRow::Group { label, count, collapsed }
+                if label.as_ref() == "PNG" && *count == 1 && *collapsed
+        )));
+        assert!(!collapsed_rows.iter().any(|row| matches!(
+            row,
+            ColumnDisplayRow::Entry(entry) if entry.name == "photo.png"
+        )));
     }
 
     #[test]
@@ -6969,9 +7113,12 @@ mod path_bar_tests {
             false,
             false,
             false,
-            SortSpec {
-                key: SortKey::Name,
-                ascending: true,
+            ColumnViewRule {
+                sort: SortSpec {
+                    key: SortKey::Name,
+                    ascending: true,
+                },
+                ..ColumnViewRule::default()
             },
         );
         assert_eq!(column.entries[0].name, "alpha.txt");
@@ -7000,7 +7147,7 @@ mod path_bar_tests {
             false,
             false,
             false,
-            SortSpec::default(),
+            ColumnViewRule::default(),
         );
 
         column.set_search_results(
@@ -7032,7 +7179,7 @@ mod path_bar_tests {
             false,
             false,
             false,
-            SortSpec::default(),
+            ColumnViewRule::default(),
         );
 
         column.set_single_selection(PathBuf::from(r"C:\repo\alpha.txt"));

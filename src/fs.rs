@@ -9,6 +9,7 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Local};
 use ignore::{WalkBuilder, WalkState};
+use serde::{Deserialize, Serialize};
 
 pub const SEARCH_RESULT_LIMIT: usize = 1_000;
 
@@ -91,7 +92,8 @@ pub fn worse_status(left: Option<VcsStatus>, right: Option<VcsStatus>) -> Option
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SortKey {
     Name,
     Vcs,
@@ -100,7 +102,8 @@ pub enum SortKey {
     Size,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SortSpec {
     pub key: SortKey,
     pub ascending: bool,
