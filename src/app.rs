@@ -227,6 +227,11 @@ impl ColumnPane {
         }
     }
 
+    fn toggle_sort_order(&mut self) {
+        self.sort.ascending = !self.sort.ascending;
+        self.refresh_view();
+    }
+
     fn set_directory_entries(&mut self, entries: Vec<FileEntry>, skipped: usize) {
         self.directory_entries = entries;
         self.search_entries = None;
@@ -412,11 +417,6 @@ struct ColumnPreviewState {
 enum PreviewScrollbar {
     Lines(UniformListScrollHandle),
     Markdown(ScrollHandle),
-}
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct DirectoryScrollRoute {
-    directory_offset: f32,
-    column_delta: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -780,6 +780,16 @@ impl KiteApp {
         } else {
             self.clear_column_preview();
         }
+        cx.notify();
+    }
+
+    fn toggle_column_sort_order(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(pane) = self.column_panes.get_mut(index) else {
+            return;
+        };
+        pane.toggle_sort_order();
+        self.clear_hidden_column_selection();
+        self.column_scroll_pending = true;
         cx.notify();
     }
 
@@ -4463,6 +4473,29 @@ impl KiteApp {
                     .text_xs()
                     .text_color(muted)
                     .child(entry_count.to_string()),
+            )
+            .child(
+                Button::new(("column-sort-order", index))
+                    .ghost()
+                    .compact()
+                    .icon(if sort.ascending {
+                        IconName::SortAscending
+                    } else {
+                        IconName::SortDescending
+                    })
+                    .tooltip(if sort.ascending {
+                        "当前升序，点击改为降序"
+                    } else {
+                        "当前降序，点击改为升序"
+                    })
+                    .accessibility_label(if sort.ascending {
+                        "切换为降序排序"
+                    } else {
+                        "切换为升序排序"
+                    })
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.toggle_column_sort_order(index, cx)
+                    })),
             );
         if active {
             header = header.child(
@@ -4585,13 +4618,11 @@ impl KiteApp {
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .when(!loading && entry_count > 0, |this| {
-                        this.on_scroll_wheel(cx.listener(
-                            move |this, event: &ScrollWheelEvent, window, cx| {
-                                this.handle_column_scroll_wheel(index, event, window, cx)
-                            },
-                        ))
-                    })
+                    .on_scroll_wheel(cx.listener(
+                        move |this, event: &ScrollWheelEvent, window, cx| {
+                            this.handle_column_scroll_wheel(index, event, window, cx)
+                        },
+                    ))
                     .child(body),
             )
             .context_menu(move |menu, window, cx| {
@@ -4642,20 +4673,11 @@ impl KiteApp {
             return;
         }
 
-        let max_y = base.max_offset().y.as_f32();
-        if !handle.is_scrollable() || max_y <= 0.0 {
-            base.set_offset(point(current.x, px(0.0)));
-            cx.notify();
-            return;
-        }
-
-        let route = route_directory_scroll(current.y.as_f32(), max_y);
-        base.set_offset(point(current.x, px(route.directory_offset)));
-        if route.column_delta != 0.0 {
-            self.scroll_columns_by(route.column_delta, cx);
-        }
+        let max_y = base.max_offset().y.as_f32().max(0.0);
+        let clamped_y = directory_scroll_offset(current.y.as_f32(), max_y);
+        base.set_offset(point(current.x, px(clamped_y)));
         // The list handles wheel input before this wrapper during bubbling.
-        // Stop the parent strip only after the directory consumes the gesture.
+        // Keep vertical input inside the directory at both scroll boundaries.
         cx.notify();
         cx.stop_propagation();
     }
@@ -5209,23 +5231,13 @@ fn column_size_label(entry: &FileEntry) -> String {
     if entry.is_dir() {
         "—".to_string()
     } else {
-        format!("{:.2} MB", entry.size as f64 / 1_000_000.0)
+        entry.size_label()
     }
 }
 
-fn route_directory_scroll(offset_after_scroll: f32, max_offset: f32) -> DirectoryScrollRoute {
-    if max_offset <= 0.0 {
-        return DirectoryScrollRoute {
-            directory_offset: 0.0,
-            column_delta: offset_after_scroll,
-        };
-    }
-
-    let directory_offset = offset_after_scroll.clamp(-max_offset, 0.0);
-    DirectoryScrollRoute {
-        directory_offset,
-        column_delta: offset_after_scroll - directory_offset,
-    }
+fn directory_scroll_offset(offset_after_scroll: f32, max_offset: f32) -> f32 {
+    let max_offset = max_offset.max(0.0);
+    offset_after_scroll.clamp(-max_offset, 0.0)
 }
 
 fn resolve_location_input(value: &str, current_dir: &Path) -> Result<PathBuf, String> {
@@ -6212,7 +6224,7 @@ mod path_bar_tests {
         column_context_menu_target, column_count_after_file_selection, common_column_prefix,
         loaded_column_index, path_after_recycle, path_after_rename,
     };
-    use crate::fs::{EntryKind, FileEntry, SortSpec};
+    use crate::fs::{EntryKind, FileEntry, SortKey, SortSpec};
     use std::path::{Path, PathBuf};
 
     fn pane(path: &str, loading: bool) -> ColumnPane {
@@ -6281,6 +6293,40 @@ mod path_bar_tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(groups, vec!["文件夹", "PNG", "TXT"]);
+    }
+
+    #[test]
+    fn column_sort_button_toggles_current_sort_direction() {
+        let root = PathBuf::from(r"C:\repo");
+        let mut column = ColumnPane::new(
+            root,
+            vec![
+                entry(r"C:\repo\zeta.txt", EntryKind::File),
+                entry(r"C:\repo\alpha.txt", EntryKind::File),
+            ],
+            0,
+            false,
+            false,
+            false,
+            SortSpec {
+                key: SortKey::Name,
+                ascending: true,
+            },
+        );
+        assert_eq!(column.entries[0].name, "alpha.txt");
+        assert_eq!(column.entries[1].name, "zeta.txt");
+
+        column.toggle_sort_order();
+
+        assert_eq!(
+            column.sort,
+            SortSpec {
+                key: SortKey::Name,
+                ascending: false,
+            }
+        );
+        assert_eq!(column.entries[0].name, "zeta.txt");
+        assert_eq!(column.entries[1].name, "alpha.txt");
     }
 
     #[test]
@@ -6588,8 +6634,10 @@ mod column_details_tests {
     }
 
     #[test]
-    fn detailed_size_uses_megabytes() {
-        assert_eq!(column_size_label(&entry(false, 157_286_400)), "157.29 MB");
+    fn detailed_size_uses_adaptive_units() {
+        assert_eq!(column_size_label(&entry(false, 211)), "211 B");
+        assert_eq!(column_size_label(&entry(false, 1536)), "1.5 KB");
+        assert_eq!(column_size_label(&entry(false, 157_286_400)), "150.0 MB");
         assert_eq!(column_size_label(&entry(true, 157_286_400)), "—");
     }
 
@@ -6602,9 +6650,7 @@ mod column_details_tests {
 
 #[cfg(test)]
 mod scroll_routing_tests {
-    use super::{
-        DirectoryScrollRoute, horizontal_wheel_delta, route_directory_scroll, wheel_scrolls_columns,
-    };
+    use super::{directory_scroll_offset, horizontal_wheel_delta, wheel_scrolls_columns};
 
     #[test]
     fn horizontal_gesture_takes_priority_over_vertical_noise() {
@@ -6627,46 +6673,22 @@ mod scroll_routing_tests {
     }
 
     #[test]
-    fn directory_interior_consumes_vertical_wheel_input() {
-        assert_eq!(
-            route_directory_scroll(-420.0, 800.0),
-            DirectoryScrollRoute {
-                directory_offset: -420.0,
-                column_delta: 0.0,
-            }
-        );
+    fn directory_interior_preserves_vertical_offset() {
+        assert_eq!(directory_scroll_offset(-420.0, 800.0), -420.0);
     }
 
     #[test]
-    fn bottom_boundary_routes_only_overflow_to_columns() {
-        assert_eq!(
-            route_directory_scroll(-830.0, 800.0),
-            DirectoryScrollRoute {
-                directory_offset: -800.0,
-                column_delta: -30.0,
-            }
-        );
+    fn bottom_boundary_stops_vertical_offset() {
+        assert_eq!(directory_scroll_offset(-830.0, 800.0), -800.0);
     }
 
     #[test]
-    fn top_boundary_routes_only_overflow_to_columns() {
-        assert_eq!(
-            route_directory_scroll(25.0, 800.0),
-            DirectoryScrollRoute {
-                directory_offset: 0.0,
-                column_delta: 25.0,
-            }
-        );
+    fn top_boundary_stops_vertical_offset() {
+        assert_eq!(directory_scroll_offset(25.0, 800.0), 0.0);
     }
 
     #[test]
-    fn non_scrollable_directory_passes_full_delta_to_columns() {
-        assert_eq!(
-            route_directory_scroll(-90.0, 0.0),
-            DirectoryScrollRoute {
-                directory_offset: 0.0,
-                column_delta: -90.0,
-            }
-        );
+    fn non_scrollable_directory_stays_at_start() {
+        assert_eq!(directory_scroll_offset(-90.0, 0.0), 0.0);
     }
 }
