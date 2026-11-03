@@ -1080,7 +1080,32 @@ final class KiteModel: ObservableObject {
         transferPaths(paths, to: destination, moveFiles: false)
     }
 
+    func dragPaths(column index: Int, entry: BrowserEntry) -> [String] {
+        guard columns.indices.contains(index) else { return [entry.path] }
+        let column = columns[index]
+        guard column.selectedPaths.contains(entry.path),
+              column.selectedPaths.count > 1 else {
+            return [entry.path]
+        }
+        return column.entries
+            .filter { column.selectedPaths.contains($0.path) }
+            .map(\.path)
+    }
+
+    func handleFileDrop(_ providers: [NSItemProvider], destination: String) {
+        KitePlatform.loadDroppedFilePaths(from: providers) { [weak self] paths, isInternal in
+            Task { @MainActor in
+                guard let self, !paths.isEmpty else { return }
+                let moveFiles = isInternal && !NSEvent.modifierFlags.contains(.option)
+                self.transferPaths(paths, to: destination, moveFiles: moveFiles)
+            }
+        }
+    }
+
     private func transferPaths(_ paths: [String], to directory: String, moveFiles: Bool) {
+        var seen = Set<String>()
+        let paths = paths.filter { seen.insert($0).inserted }
+        guard !paths.isEmpty else { return }
         let core = self.core
         Task {
             var completed = 0
@@ -1104,9 +1129,9 @@ final class KiteModel: ObservableObject {
                     completed += 1
                 }
                 errorMessage = nil
-                refreshIfShowing(directory)
+                refresh()
             } catch {
-                refreshIfShowing(directory)
+                refresh()
                 errorMessage = completed > 0
                     ? "已处理 \(completed) 项，后续操作失败：\(error.localizedDescription)"
                     : error.localizedDescription
