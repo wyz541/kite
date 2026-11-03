@@ -56,6 +56,7 @@ const DETAILED_COLUMN_NAME_OVERHEAD: f32 = 150.;
 const DETAILED_DATE_WIDTH: f32 = 84.;
 const DETAILED_KIND_WIDTH: f32 = 70.;
 const DETAILED_SIZE_WIDTH: f32 = 64.;
+const COLUMN_SEARCH_DEBOUNCE: Duration = Duration::from_millis(180);
 
 #[derive(Clone, Copy, Debug)]
 enum NavigationIntent {
@@ -803,10 +804,13 @@ impl KiteApp {
                     let value = this.column_search_input.read(cx).value().to_string();
                     this.submit_column_search(value, window, cx);
                 }
-                InputEvent::Change
-                    if this.column_search_input.read(cx).value().trim().is_empty() =>
-                {
-                    this.clear_column_search_results(window, cx);
+                InputEvent::Change => {
+                    let value = this.column_search_input.read(cx).value().to_string();
+                    if value.trim().is_empty() {
+                        this.clear_column_search_results(window, cx);
+                    } else {
+                        this.schedule_column_search(value, window, cx);
+                    }
                 }
                 _ => {}
             },
@@ -1393,6 +1397,25 @@ impl KiteApp {
     }
 
     fn submit_column_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_column_search(query, Duration::ZERO, window, cx);
+    }
+
+    fn schedule_column_search(
+        &mut self,
+        query: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_column_search(query, COLUMN_SEARCH_DEBOUNCE, window, cx);
+    }
+
+    fn start_column_search(
+        &mut self,
+        query: String,
+        delay: Duration,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let query = query.trim().to_string();
         if query.is_empty() {
             self.clear_column_search_results(window, cx);
@@ -1417,6 +1440,12 @@ impl KiteApp {
         cx.notify();
 
         self._column_search_task = cx.spawn_in(window, async move |this, cx| {
+            if !delay.is_zero() {
+                cx.background_executor().timer(delay).await;
+            }
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
             let result = cx
                 .background_spawn(
                     async move { search_directory(&root, &query, sort, cancel.as_ref()) },
