@@ -31,24 +31,29 @@ enum FileDragProviderSmoke {
         let fileTypeIndex = types.firstIndex(of: UTType.fileURL.identifier)
         let internalTypeIndex = types.firstIndex(of: KiteFileDragProvider.contentType.identifier)
 
-        guard let fileTypeIndex, let internalTypeIndex, fileTypeIndex < internalTypeIndex else {
-            throw SmokeError("system file type must precede the internal drag type: \(types)")
+        guard types.first == UTType.fileURL.identifier,
+              let fileTypeIndex,
+              let internalTypeIndex,
+              fileTypeIndex < internalTypeIndex else {
+            throw SmokeError("file URL must be the primary drag type: \(types)")
         }
 
-        let fileURLData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            provider.loadDataRepresentation(
-                forTypeIdentifier: UTType.fileURL.identifier
-            ) { data, error in
+        let loadedItem = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<NSSecureCoding, Error>) in
+            provider.loadItem(
+                forTypeIdentifier: UTType.fileURL.identifier,
+                options: nil
+            ) { item, error in
                 if let error {
                     continuation.resume(throwing: error)
-                } else if let data {
-                    continuation.resume(returning: data)
+                } else if let item {
+                    continuation.resume(returning: item)
                 } else {
-                    continuation.resume(throwing: SmokeError("file URL data was missing"))
+                    continuation.resume(throwing: SmokeError("file URL item was missing"))
                 }
             }
         }
-        guard let loadedURL = URL(dataRepresentation: fileURLData, relativeTo: nil),
+        guard let loadedURL = dragURL(from: loadedItem),
               loadedURL.standardizedFileURL == url.standardizedFileURL else {
             throw SmokeError("file URL representation did not point to the original item")
         }
@@ -62,6 +67,19 @@ enum FileDragProviderSmoke {
         guard paths == [url.path] else {
             throw SmokeError("internal drag payload did not preserve its paths")
         }
+    }
+
+    private static func dragURL(from item: NSSecureCoding) -> URL? {
+        if let url = item as? URL {
+            return url
+        }
+        if let url = item as? NSURL {
+            return url as URL
+        }
+        if let data = item as? Data {
+            return URL(dataRepresentation: data, relativeTo: nil)
+        }
+        return nil
     }
 
     private static func verifyContents(of url: URL) throws {

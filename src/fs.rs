@@ -852,6 +852,21 @@ mod transfer_tests {
     }
 
     #[test]
+    fn moves_file_without_losing_contents() {
+        let root = test_root("move");
+        let destination = root.join("destination");
+        fs::create_dir_all(&destination).expect("create destination");
+        let source = root.join("note.txt");
+        fs::write(&source, b"move me").expect("write source");
+
+        let moved = transfer_entry(&source, &destination, true).expect("move file");
+
+        assert!(!source.exists());
+        assert_eq!(fs::read(&moved).expect("read moved file"), b"move me");
+        fs::remove_dir_all(root).expect("clean test root");
+    }
+
+    #[test]
     fn copies_directory_recursively() {
         let root = test_root("copy-directory");
         let source = root.join("source");
