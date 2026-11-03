@@ -260,9 +260,10 @@ macOS 与 Windows 使用相同的详细信息交互和宽度规则。
 
 ### 分栏显示规则与搜索
 
-Windows 分栏视图的每个标题栏提供排序方向按钮、搜索按钮和更多按钮。
-排序方向按钮保持当前排序字段，并在升序和降序之间切换。
-更多按钮只显示分栏显示规则。
+macOS 和 Windows 的分栏标题栏提供排序方向按钮。
+排序方向按钮在升序和降序之间切换。
+Windows 标题栏还提供搜索按钮和更多按钮。
+Windows 更多按钮只显示分栏显示规则。
 显示规则包括排序、筛选、分组和重置。
 右键菜单继续提供文件操作。
 
@@ -503,7 +504,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.38-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.39-windows-x64.zip`。
 
 ### macOS 构建
 

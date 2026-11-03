@@ -357,6 +357,19 @@ private struct KiteBrowserColumn: View {
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.055), in: Capsule())
 
+            Button {
+                model.toggleColumnSort(index: index)
+            } label: {
+                Image(systemName: column.sortAscending ? "arrow.up" : "arrow.down")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(column.sortAscending ? "当前升序，点击改为降序" : "当前降序，点击改为升序")
+            .accessibilityLabel(column.sortAscending ? "切换为降序排序" : "切换为升序排序")
+
             if isActive {
                 Button(action: onToggleDetails) {
                     Image(systemName: showsDetails ? "rectangle.grid.2x2.fill" : "rectangle.grid.2x2")

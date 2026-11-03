@@ -27,16 +27,34 @@ struct BrowserEntry: Identifiable, Hashable {
 
 struct BrowserColumn: Identifiable {
     let path: String
-    let entries: [BrowserEntry]
+    var entries: [BrowserEntry]
     let skipped: UInt64
     let gitAvailable: Bool
     let svnAvailable: Bool
     var selectedPath: String?
+    var sortAscending: Bool
 
     var id: String { path }
     var title: String {
         let name = FileManager.default.displayName(atPath: path)
         return name.isEmpty ? path : name
+    }
+
+    mutating func toggleSortOrder() {
+        sortAscending.toggle()
+        let ascending = sortAscending
+        entries.sort { left, right in
+            if left.isDirectory != right.isDirectory {
+                return left.isDirectory
+            }
+            var comparison = left.name.localizedStandardCompare(right.name)
+            if comparison == .orderedSame {
+                comparison = left.path.localizedStandardCompare(right.path)
+            }
+            return ascending
+                ? comparison == .orderedAscending
+                : comparison == .orderedDescending
+        }
     }
 }
 
@@ -216,6 +234,14 @@ final class KiteModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func toggleColumnSort(index: Int) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].toggleSortOrder()
     }
 
     func navigateUp() {
@@ -754,7 +780,8 @@ final class KiteModel: ObservableObject {
             skipped: listing.skipped,
             gitAvailable: listing.gitAvailable,
             svnAvailable: listing.svnAvailable,
-            selectedPath: nil
+            selectedPath: nil,
+            sortAscending: true
         )
     }
 
