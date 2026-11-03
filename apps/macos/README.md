@@ -18,6 +18,12 @@ bash apps/macos/build.sh
 
 The script creates `apps/macos/build/Kite.app`.
 
+Run the file drag provider regression check with:
+
+```bash
+bash apps/macos/test-file-drag.sh
+```
+
 ## Current native coverage
 
 - SwiftUI column browser.
