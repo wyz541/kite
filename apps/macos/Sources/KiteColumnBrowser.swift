@@ -613,17 +613,37 @@ private struct KiteBrowserColumn: View {
     @ViewBuilder
     private func columnRow(_ row: BrowserColumnRow) -> some View {
         switch row {
-        case .group(let title):
-            HStack {
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+        case .group(let title, let count, let isCollapsed):
+            Button {
+                model.toggleColumnGroup(index: index, title: title)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 10)
+
+                    Text(title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 0)
+
+                    Text("\(count)")
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
             }
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+            .buttonStyle(.plain)
+            .help(isCollapsed ? "展开 \(title)" : "折叠 \(title)")
+            .accessibilityLabel(
+                "\(title)，\(count) 个项目，\(isCollapsed ? "已折叠" : "已展开")"
+            )
         case .entry(let entry):
             KiteBrowserRow(
                 model: model,
