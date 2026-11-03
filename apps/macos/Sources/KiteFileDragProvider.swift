@@ -14,10 +14,15 @@ enum KiteFileDragProvider {
         let uniquePaths = paths.filter { seen.insert($0).inserted }
         let primaryURL = URL(fileURLWithPath: primaryPath)
 
-        // Register the real file representation first. Otherwise Finder can
-        // materialize the internal JSON payload as an unusable file with the real name.
-        let provider = NSItemProvider(contentsOf: primaryURL) ?? NSItemProvider()
+        // Expose the file URL as the first and primary representation. Providers
+        // created with contentsOf also advertise public.plain-text first, which
+        // makes web upload targets treat the drag as text instead of a file.
+        let provider = NSItemProvider()
         provider.suggestedName = primaryURL.lastPathComponent
+        provider.registerItem(forTypeIdentifier: UTType.fileURL.identifier) {
+            completion, _, _ in
+            completion?(primaryURL as NSURL, nil)
+        }
         provider.registerDataRepresentation(
             forTypeIdentifier: contentType.identifier,
             visibility: .all
