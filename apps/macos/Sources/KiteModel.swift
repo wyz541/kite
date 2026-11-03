@@ -1158,13 +1158,23 @@ final class KiteModel: ObservableObject {
                     completed += 1
                 }
                 errorMessage = nil
-                refresh()
+                revealDropDestination(directory)
             } catch {
                 refresh()
                 errorMessage = completed > 0
                     ? "已处理 \(completed) 项，后续操作失败：\(error.localizedDescription)"
                     : error.localizedDescription
             }
+        }
+    }
+
+    private func revealDropDestination(_ directory: String) {
+        let current = URL(fileURLWithPath: currentPath).standardizedFileURL
+        let destination = URL(fileURLWithPath: directory).standardizedFileURL
+        if current.path == destination.path {
+            refresh()
+        } else {
+            loadRoot(destination.path)
         }
     }
 
