@@ -41,6 +41,13 @@ enum BrowserColumnSortKey: String, CaseIterable, Identifiable, Codable {
         case .size: return "大小"
         }
     }
+
+    var defaultAscending: Bool {
+        switch self {
+        case .name, .kind: return true
+        case .modified, .size: return false
+        }
+    }
 }
 
 enum BrowserColumnFilter: String, CaseIterable, Identifiable {
@@ -293,7 +300,20 @@ struct BrowserColumn: Identifiable {
     }
 
     mutating func setSortKey(_ key: BrowserColumnSortKey) {
+        if sortKey != key {
+            sortAscending = key.defaultAscending
+        }
         sortKey = key
+        refreshView()
+    }
+
+    mutating func toggleSort(key: BrowserColumnSortKey) {
+        if sortKey == key {
+            sortAscending.toggle()
+        } else {
+            sortKey = key
+            sortAscending = key.defaultAscending
+        }
         refreshView()
     }
 
@@ -755,6 +775,15 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].setSortKey(key)
+        persistColumnViewRule(index: index)
+    }
+
+    func toggleColumnSort(index: Int, key: BrowserColumnSortKey) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].toggleSort(key: key)
         persistColumnViewRule(index: index)
     }
 
