@@ -80,6 +80,19 @@ struct KiteSidebar: View {
                         model.loadRoot(path)
                     }
                 }
+                .contextMenu {
+                    if let path = location.path {
+                        Button("打开") {
+                            model.loadRoot(path)
+                        }
+                        Button("在 Finder 中显示") {
+                            KitePlatform.revealInFinder(path)
+                        }
+                        Button("显示简介") {
+                            KitePlatform.showInfo(path)
+                        }
+                    }
+                }
             }
         }
     }
@@ -119,6 +132,9 @@ struct KiteSidebar: View {
                         }
                         Button("在 Finder 中显示") {
                             KitePlatform.revealInFinder(favorite.path)
+                        }
+                        Button("显示简介") {
+                            KitePlatform.showInfo(favorite.path)
                         }
                         Button("拷贝路径") {
                             KitePlatform.copyPath(favorite.path)
@@ -384,6 +400,7 @@ private struct KiteVolumeRow: View {
         .contextMenu {
             Button("打开") { action() }
             Button("在 Finder 中显示") { KitePlatform.revealInFinder(volume.path) }
+            Button("显示简介") { KitePlatform.showInfo(volume.path) }
         }
     }
 

@@ -2378,7 +2378,7 @@ impl KiteApp {
                 match show_properties(window, &action.target) {
                     Ok(()) => {
                         self.error = None;
-                        self.notice = Some("已打开文件属性".into());
+                        self.notice = Some("已打开属性".into());
                     }
                     Err(error) => {
                         self.notice = None;
@@ -4285,14 +4285,27 @@ impl KiteApp {
         let navigation_path = item.path.clone();
         let is_directory = item.is_directory;
         let is_favorite = item.favorite;
-        let action_context = self.focus_handle.clone();
+        let context = self.focus_handle.clone();
+        let open_action = ContextMenuAction {
+            target: item.path.clone(),
+            working_directory: item.path.clone(),
+            command: ContextMenuCommand::Open,
+        };
+        let copy_path_action = ContextMenuAction {
+            target: item.path.clone(),
+            working_directory: item.path.clone(),
+            command: ContextMenuCommand::CopyPath,
+        };
+        let properties_action = ContextMenuAction {
+            target: item.path.clone(),
+            working_directory: item.path.clone(),
+            command: ContextMenuCommand::ShowProperties,
+        };
         let remove_action = is_favorite.then(|| ContextMenuAction {
             target: item.path.clone(),
             working_directory: item.path.clone(),
             command: ContextMenuCommand::RemoveFavorite,
         });
-        let remove_context = action_context.clone();
-
         let row = div()
             .id(row_id)
             .h(px(30.))
@@ -4330,23 +4343,37 @@ impl KiteApp {
                 } else {
                     this.open_path(navigation_path.clone(), window, cx);
                 }
-            }));
+            }))
+            .context_menu(move |mut menu, window, cx| {
+                context.focus(window, cx);
+                menu = menu.menu_with_icon(
+                    "打开",
+                    IconName::FolderOpen,
+                    Box::new(open_action.clone()),
+                );
+                menu = menu.menu_with_icon(
+                    "复制完整路径",
+                    IconName::Link,
+                    Box::new(copy_path_action.clone()),
+                );
+                menu = menu.separator();
+                menu = menu.menu_with_icon(
+                    "属性…",
+                    IconName::Info,
+                    Box::new(properties_action.clone()),
+                );
+                if let Some(remove_action) = remove_action.as_ref() {
+                    menu = menu.separator();
+                    menu = menu.menu_with_icon(
+                        "从收藏移除",
+                        IconName::StarMinus,
+                        Box::new(remove_action.clone()),
+                    );
+                }
+                menu
+            });
 
-        let mut container = v_flex().w_full().gap_0p5();
-        if let Some(remove_action) = remove_action {
-            container = container.child(row.context_menu(move |menu, window, cx| {
-                remove_context.focus(window, cx);
-                menu.item(
-                    PopupMenuItem::new("从收藏移除")
-                        .icon(IconName::StarMinus)
-                        .action(Box::new(remove_action.clone())),
-                )
-            }));
-        } else {
-            container = container.child(row);
-        }
-
-        container.into_any_element()
+        v_flex().w_full().gap_0p5().child(row).into_any_element()
     }
 
     fn favorite_item(
@@ -4379,6 +4406,18 @@ impl KiteApp {
         let muted = cx.theme().muted_foreground;
         let hover_color = muted.opacity(0.12);
         let clicked = device.clone();
+        let path = PathBuf::from(&device.shell_path);
+        let open_action = ContextMenuAction {
+            target: path.clone(),
+            working_directory: path.clone(),
+            command: ContextMenuCommand::Open,
+        };
+        let properties_action = ContextMenuAction {
+            target: path,
+            working_directory: PathBuf::from(&device.shell_path),
+            command: ContextMenuCommand::ShowProperties,
+        };
+        let context = self.focus_handle.clone();
         let active = same_path(&self.current_dir, Path::new(&device.shell_path));
         div()
             .id(SharedString::from(format!(
@@ -4418,6 +4457,21 @@ impl KiteApp {
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.open_portable_device(clicked.clone(), window, cx);
             }))
+            .context_menu(move |mut menu, window, cx| {
+                context.focus(window, cx);
+                menu = menu.menu_with_icon(
+                    "打开",
+                    IconName::FolderOpen,
+                    Box::new(open_action.clone()),
+                );
+                menu = menu.separator();
+                menu = menu.menu_with_icon(
+                    "属性…",
+                    IconName::Info,
+                    Box::new(properties_action.clone()),
+                );
+                menu
+            })
             .into_any_element()
     }
 
@@ -5925,9 +5979,7 @@ fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLi
             label: crate::platform::volume_label(name, &volume.path).into(),
             path: volume.path.clone(),
             icon,
-            detail: volume
-                .total_bytes
-                .map(|bytes| SharedString::from(format_size(bytes))),
+            detail: volume.capacity_label().map(SharedString::from),
         };
 
         if volume.kind.is_removable() {
