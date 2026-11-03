@@ -182,6 +182,13 @@ struct KiteMacApp: App {
                     model.focusGlobalSearch()
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("刷新") {
+                    model.refresh()
+                }
+                .keyboardShortcut("r", modifiers: [.command])
             }
             CommandMenu("页签") {
                 Button("新建页签") {
