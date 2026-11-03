@@ -149,9 +149,7 @@ struct ContentView: View {
                     title: showsPreview ? "隐藏预览" : "显示预览",
                     isActive: showsPreview
                 ) {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        showsPreview.toggle()
-                    }
+                    showsPreview.toggle()
                 }
             }
             .padding(.horizontal, 6)
