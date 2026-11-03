@@ -18,6 +18,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check feature matrix
+        run: bash .github/scripts/check-feature-matrix.sh
+
       - name: Check platform labels and coverage
         env:
           GH_TOKEN: ${{ github.token }}

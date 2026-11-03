@@ -25,7 +25,7 @@ macos_changed=false
 while IFS= read -r file; do
   [[ -z "$file" ]] && continue
   case "$file" in
-    src/app.rs|src/actions.rs|src/table.rs|src/tabs.rs|src/preview_window.rs|src/main.rs|src/explorer_integration.rs|src/file_clipboard.rs|src/shell_fs.rs|src/ui_preferences.rs|build.ps1|src/context_menu/*)
+    Cargo.toml|src/app.rs|src/actions.rs|src/table.rs|src/tabs.rs|src/preview_window.rs|src/main.rs|src/explorer_integration.rs|src/file_clipboard.rs|src/shell_fs.rs|src/ui_preferences.rs|build.ps1|src/context_menu/*)
       windows_changed=true
       ;;
   esac

@@ -27,6 +27,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check feature matrix
+        run: bash .github/scripts/check-feature-matrix.sh
+
       - name: Run core tests
         run: cargo test --locked --lib
 

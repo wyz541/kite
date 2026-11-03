@@ -60,7 +60,12 @@ pub(crate) struct ContextMenuCapabilities {
     pub can_paste: bool,
     pub git_available: bool,
     pub svn_available: bool,
-    pub supports_local_ops: bool,
+    pub supports_transfer_ops: bool,
+    pub supports_cut: bool,
+    pub supports_rename: bool,
+    pub supports_delete: bool,
+    pub supports_favorite: bool,
+    pub is_shell_namespace: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -73,7 +78,43 @@ pub(crate) struct ContextMenuTarget {
     pub can_paste: bool,
     pub git_available: bool,
     pub svn_available: bool,
-    pub supports_local_ops: bool,
+    pub supports_transfer_ops: bool,
+    pub supports_cut: bool,
+    pub supports_rename: bool,
+    pub supports_delete: bool,
+    pub supports_favorite: bool,
+    pub is_shell_namespace: bool,
+}
+
+impl ContextMenuCapabilities {
+    pub(crate) fn for_path(
+        path: &std::path::Path,
+        loading: bool,
+        can_paste: bool,
+        git_available: bool,
+        svn_available: bool,
+    ) -> Self {
+        let is_shell_namespace = crate::shell_fs::is_shell_namespace_path(path);
+        let (supports_cut, supports_rename, supports_delete) = if is_shell_namespace {
+            let (can_rename, can_delete, can_move) = crate::shell_fs::item_capabilities(path);
+            (can_move, can_rename, can_delete)
+        } else {
+            let can_change = path.parent().is_some();
+            (can_change, can_change, can_change)
+        };
+        Self {
+            loading,
+            can_paste,
+            git_available,
+            svn_available,
+            supports_transfer_ops: true,
+            supports_cut,
+            supports_rename,
+            supports_delete,
+            supports_favorite: !is_shell_namespace,
+            is_shell_namespace,
+        }
+    }
 }
 
 impl ContextMenuTarget {
@@ -91,7 +132,12 @@ impl ContextMenuTarget {
             can_paste: capabilities.can_paste,
             git_available: capabilities.git_available,
             svn_available: capabilities.svn_available,
-            supports_local_ops: capabilities.supports_local_ops,
+            supports_transfer_ops: capabilities.supports_transfer_ops,
+            supports_cut: capabilities.supports_cut,
+            supports_rename: capabilities.supports_rename,
+            supports_delete: capabilities.supports_delete,
+            supports_favorite: capabilities.supports_favorite,
+            is_shell_namespace: capabilities.is_shell_namespace,
         }
     }
 
@@ -111,7 +157,12 @@ impl ContextMenuTarget {
             can_paste: capabilities.can_paste,
             git_available: capabilities.git_available,
             svn_available: capabilities.svn_available,
-            supports_local_ops: capabilities.supports_local_ops,
+            supports_transfer_ops: capabilities.supports_transfer_ops,
+            supports_cut: capabilities.supports_cut,
+            supports_rename: capabilities.supports_rename,
+            supports_delete: capabilities.supports_delete,
+            supports_favorite: capabilities.supports_favorite,
+            is_shell_namespace: capabilities.is_shell_namespace,
         }
     }
 
@@ -121,10 +172,6 @@ impl ContextMenuTarget {
             working_directory: self.working_directory.clone(),
             command,
         }
-    }
-
-    fn target_can_change(&self) -> bool {
-        self.supports_local_ops && self.path.parent().is_some()
     }
 }
 
@@ -248,13 +295,13 @@ impl ContextMenuProvider for CoreMenuProvider {
             "复制",
             IconName::Copy,
             ContextMenuCommand::Copy,
-            !disabled && target.supports_local_ops,
+            !disabled && target.supports_transfer_ops,
         );
         model.item(
             "拷贝到…",
             IconName::FolderInput,
             ContextMenuCommand::CopyTo,
-            !disabled && target.supports_local_ops,
+            !disabled && target.supports_transfer_ops,
         );
         model.item(
             "复制完整路径",
@@ -266,13 +313,13 @@ impl ContextMenuProvider for CoreMenuProvider {
             "剪切",
             IconName::Scissors,
             ContextMenuCommand::Cut,
-            !disabled && target.supports_local_ops,
+            !disabled && target.supports_transfer_ops && target.supports_cut,
         );
         model.item(
             "粘贴",
             IconName::ClipboardPaste,
             ContextMenuCommand::Paste,
-            !disabled && target.can_paste && target.supports_local_ops,
+            !disabled && target.can_paste && target.supports_transfer_ops,
         );
         if !policy.compact {
             model.separator();
@@ -281,31 +328,35 @@ impl ContextMenuProvider for CoreMenuProvider {
             "新建文件夹",
             IconName::FolderPlus,
             ContextMenuCommand::NewFolder,
-            !disabled && target.supports_local_ops,
+            !disabled && target.supports_transfer_ops,
         );
         model.item(
             "新建文件",
             IconName::FileText,
             ContextMenuCommand::NewFile,
-            !disabled && target.supports_local_ops,
+            !disabled && target.supports_transfer_ops,
         );
         model.item(
             "添加到收藏",
             IconName::StarPlus,
             ContextMenuCommand::AddFavorite,
-            !disabled && target.supports_local_ops,
+            !disabled && target.supports_favorite,
         );
         model.item(
             "重命名",
             IconName::Pencil,
             ContextMenuCommand::Rename,
-            !disabled && target.target_can_change(),
+            !disabled && target.supports_rename,
         );
         model.item(
-            "移到回收站",
+            if target.is_shell_namespace {
+                "删除设备项目"
+            } else {
+                "移到回收站"
+            },
             IconName::Trash,
             ContextMenuCommand::Recycle,
-            !disabled && target.target_can_change(),
+            !disabled && target.supports_delete,
         );
         if !policy.compact {
             model.separator();
@@ -616,13 +667,35 @@ mod tests {
                 can_paste: true,
                 git_available: true,
                 svn_available: true,
-                supports_local_ops: true,
+                supports_transfer_ops: true,
+                supports_cut: true,
+                supports_rename: true,
+                supports_delete: true,
+                supports_favorite: true,
+                is_shell_namespace: false,
             },
         )
     }
 
     fn windows_policy() -> ContextMenuPolicy {
         ContextMenuPolicy::for_platform(HostPlatform::Windows)
+    }
+
+    #[test]
+    fn local_root_keeps_transfer_actions_and_disables_destructive_actions() {
+        let capabilities = ContextMenuCapabilities::for_path(
+            std::path::Path::new(r"C:\"),
+            false,
+            true,
+            false,
+            false,
+        );
+
+        assert!(capabilities.supports_transfer_ops);
+        assert!(capabilities.supports_favorite);
+        assert!(!capabilities.supports_cut);
+        assert!(!capabilities.supports_rename);
+        assert!(!capabilities.supports_delete);
     }
 
     fn submenu_entries(model: &ContextMenuModel, label: &str) -> Vec<ContextMenuNode> {
@@ -794,7 +867,12 @@ mod tests {
                 can_paste: true,
                 git_available: true,
                 svn_available: false,
-                supports_local_ops: true,
+                supports_transfer_ops: true,
+                supports_cut: true,
+                supports_rename: true,
+                supports_delete: true,
+                supports_favorite: true,
+                is_shell_namespace: false,
             },
         );
         let action = target.action(ContextMenuCommand::Paste);
@@ -805,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_target_disables_local_operations() {
+    fn shell_target_allows_transfer_and_hides_unsafe_operations() {
         let target = ContextMenuTarget::entry(
             PathBuf::from(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\phone\photo.jpg"),
             "photo.jpg".to_string(),
@@ -816,7 +894,12 @@ mod tests {
                 can_paste: true,
                 git_available: false,
                 svn_available: false,
-                supports_local_ops: false,
+                supports_transfer_ops: true,
+                supports_cut: false,
+                supports_rename: false,
+                supports_delete: false,
+                supports_favorite: false,
+                is_shell_namespace: true,
             },
         );
         let model = build_model(&target, windows_policy());
@@ -829,15 +912,25 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(commands.contains(&ContextMenuCommand::Open));
+        assert!(commands.contains(&ContextMenuCommand::Copy));
+        assert!(commands.contains(&ContextMenuCommand::CopyTo));
         assert!(commands.contains(&ContextMenuCommand::CopyPath));
+        assert!(commands.contains(&ContextMenuCommand::Paste));
+        assert!(commands.contains(&ContextMenuCommand::NewFolder));
+        assert!(commands.contains(&ContextMenuCommand::NewFile));
         assert!(commands.contains(&ContextMenuCommand::ShowProperties));
+        assert!(model.entries.iter().any(|entry| matches!(
+            entry,
+            ContextMenuNode::Item {
+                label: "删除设备项目",
+                command: ContextMenuCommand::Recycle,
+                enabled: false,
+                ..
+            }
+        )));
         for command in [
-            ContextMenuCommand::Copy,
-            ContextMenuCommand::CopyTo,
-            ContextMenuCommand::Paste,
-            ContextMenuCommand::NewFolder,
-            ContextMenuCommand::NewFile,
             ContextMenuCommand::AddFavorite,
+            ContextMenuCommand::Cut,
             ContextMenuCommand::Rename,
             ContextMenuCommand::Recycle,
         ] {
@@ -862,7 +955,12 @@ mod tests {
                 can_paste: true,
                 git_available: true,
                 svn_available: false,
-                supports_local_ops: true,
+                supports_transfer_ops: true,
+                supports_cut: true,
+                supports_rename: true,
+                supports_delete: true,
+                supports_favorite: true,
+                is_shell_namespace: false,
             },
         );
         let folder_action = target.action(ContextMenuCommand::NewFolder);

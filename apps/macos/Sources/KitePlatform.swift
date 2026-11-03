@@ -94,8 +94,15 @@ enum KitePlatform {
     }
 
     static func share(_ path: String) {
+        share([path])
+    }
+
+    static func share(_ paths: [String]) {
+        guard !paths.isEmpty else { return }
         guard let view = NSApp.keyWindow?.contentView else { return }
-        let picker = NSSharingServicePicker(items: [URL(fileURLWithPath: path)])
+        let picker = NSSharingServicePicker(
+            items: paths.map { URL(fileURLWithPath: $0) }
+        )
         picker.show(relativeTo: NSRect(x: 0, y: 0, width: 1, height: 1), of: view, preferredEdge: .minY)
     }
 

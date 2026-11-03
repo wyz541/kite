@@ -37,7 +37,7 @@ use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
+use gpui_kit::component::scroll::{ScrollableMask, Scrollbar, ScrollbarHandle, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::text::{TextView, TextViewState};
 use gpui_kit::component::{
@@ -50,9 +50,9 @@ use gpui_kit::*;
 const SIDEBAR_WIDTH: f32 = 218.;
 const TOOLBAR_CONTROL_HEIGHT: f32 = 40.;
 const COLUMN_WIDTH: f32 = 274.;
-const DETAILED_COLUMN_MIN_WIDTH: f32 = 416.;
+const DETAILED_COLUMN_MIN_WIDTH: f32 = 250.;
 const DETAILED_COLUMN_MAX_WIDTH: f32 = 640.;
-const DETAILED_COLUMN_NAME_OVERHEAD: f32 = 360.;
+const DETAILED_COLUMN_NAME_OVERHEAD: f32 = 150.;
 const DETAILED_DATE_WIDTH: f32 = 84.;
 const DETAILED_KIND_WIDTH: f32 = 70.;
 const DETAILED_SIZE_WIDTH: f32 = 64.;
@@ -148,6 +148,21 @@ enum ColumnGroup {
     Modified,
 }
 
+#[derive(Clone, Copy)]
+struct ColumnViewRules {
+    sort: SortSpec,
+    filter: ColumnFilter,
+    group: ColumnGroup,
+}
+
+#[derive(Clone, Copy)]
+struct ColumnLayoutState {
+    show_date_column: bool,
+    show_kind_column: bool,
+    show_size_column: bool,
+    preferred_width: u16,
+}
+
 #[derive(Clone)]
 enum ColumnDisplayRow {
     Group(SharedString),
@@ -161,6 +176,8 @@ struct ColumnPane {
     search_entries: Option<Vec<FileEntry>>,
     entries: Vec<FileEntry>,
     selected_path: Option<PathBuf>,
+    selected_paths: Vec<PathBuf>,
+    selection_anchor_path: Option<PathBuf>,
     sort: SortSpec,
     filter: ColumnFilter,
     group: ColumnGroup,
@@ -188,6 +205,8 @@ impl ColumnPane {
             search_entries: None,
             entries: Vec::new(),
             selected_path: None,
+            selected_paths: Vec::new(),
+            selection_anchor_path: None,
             sort,
             filter: ColumnFilter::All,
             group: ColumnGroup::None,
@@ -217,14 +236,115 @@ impl ColumnPane {
             .collect::<Vec<_>>();
         sort_entries(&mut entries, self.sort);
         self.entries = entries;
-        if self.selected_path.as_ref().is_some_and(|selected| {
+        self.selected_paths.retain(|selected| {
+            self.entries
+                .iter()
+                .any(|entry| same_path(&entry.path, selected))
+        });
+        if self.selection_anchor_path.as_ref().is_some_and(|selected| {
             !self
                 .entries
                 .iter()
                 .any(|entry| same_path(&entry.path, selected))
         }) {
+            self.selection_anchor_path = None;
+        }
+        if self.selected_path.as_ref().is_some_and(|selected| {
+            !self
+                .selected_paths
+                .iter()
+                .any(|path| same_path(path, selected))
+        }) {
             self.selected_path = None;
         }
+        if self.selected_path.is_none() {
+            self.selected_path = self.selected_paths.first().cloned();
+        }
+    }
+
+    fn is_selected(&self, path: &Path) -> bool {
+        self.selected_paths
+            .iter()
+            .any(|selected| same_path(selected, path))
+    }
+
+    fn set_single_selection(&mut self, path: PathBuf) {
+        self.selected_path = Some(path.clone());
+        self.selected_paths = vec![path.clone()];
+        self.selection_anchor_path = Some(path);
+    }
+
+    fn toggle_selection(&mut self, path: PathBuf) {
+        if let Some(index) = self
+            .selected_paths
+            .iter()
+            .position(|selected| same_path(selected, &path))
+        {
+            self.selected_paths.remove(index);
+        } else {
+            self.selected_paths.push(path.clone());
+        }
+        self.selected_path = self.selected_paths.last().cloned();
+        self.selection_anchor_path = Some(path);
+    }
+
+    fn select_range_to(&mut self, path: PathBuf) {
+        let visible_entries = self
+            .display_rows()
+            .into_iter()
+            .filter_map(|row| match row {
+                ColumnDisplayRow::Entry(entry) => Some(entry.path),
+                ColumnDisplayRow::Group(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let anchor = self
+            .selection_anchor_path
+            .as_ref()
+            .and_then(|anchor| {
+                visible_entries
+                    .iter()
+                    .position(|path| same_path(path, anchor))
+            })
+            .or_else(|| {
+                self.selected_path.as_ref().and_then(|selected| {
+                    visible_entries
+                        .iter()
+                        .position(|path| same_path(path, selected))
+                })
+            });
+        let target = visible_entries
+            .iter()
+            .position(|candidate| same_path(candidate, &path));
+        let (Some(anchor), Some(target)) = (anchor, target) else {
+            self.set_single_selection(path);
+            return;
+        };
+        let range = if anchor <= target {
+            anchor..=target
+        } else {
+            target..=anchor
+        };
+        self.selected_paths = visible_entries[range].to_vec();
+        self.selected_path = Some(path.clone());
+        if self.selection_anchor_path.is_none() {
+            self.selection_anchor_path = Some(path);
+        }
+    }
+
+    fn clear_selection(&mut self) {
+        self.selected_path = None;
+        self.selected_paths.clear();
+        self.selection_anchor_path = None;
+    }
+
+    fn select_all(&mut self) {
+        self.selected_paths = self
+            .entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect();
+        self.selected_path = self.selected_paths.first().cloned();
+        self.selection_anchor_path = self.selected_paths.first().cloned();
     }
 
     fn toggle_sort_order(&mut self) {
@@ -487,6 +607,10 @@ pub struct KiteApp {
     search_visible: bool,
     show_preview: bool,
     show_column_details: bool,
+    show_date_column: bool,
+    show_kind_column: bool,
+    show_size_column: bool,
+    preferred_column_width: u16,
     column_panes: Vec<ColumnPane>,
     column_selected_path: Option<PathBuf>,
     column_scroll: ScrollHandle,
@@ -688,6 +812,7 @@ impl KiteApp {
             },
         );
         let table_subscription = cx.subscribe_in(&table, window, Self::on_table_event);
+        let ui_preferences = ui_preferences::load_ui_preferences();
 
         let mut app = Self {
             current_dir: home.clone(),
@@ -730,7 +855,11 @@ impl KiteApp {
             address_editing: false,
             search_visible: false,
             show_preview: true,
-            show_column_details: ui_preferences::load_ui_preferences().column_details_visible,
+            show_column_details: ui_preferences.column_details_visible,
+            show_date_column: ui_preferences.date_column_visible,
+            show_kind_column: ui_preferences.kind_column_visible,
+            show_size_column: ui_preferences.size_column_visible,
+            preferred_column_width: ui_preferences.column_width,
             column_panes: Vec::new(),
             column_selected_path: None,
             column_scroll: ScrollHandle::new(),
@@ -796,10 +925,20 @@ impl KiteApp {
     fn toggle_column_details(&mut self, cx: &mut Context<Self>) {
         self.show_column_details = !self.show_column_details;
         self.column_scroll_pending = true;
-        if let Err(error) = ui_preferences::save_column_details_visible(self.show_column_details) {
+        if let Err(error) = self.save_layout_preferences() {
             self.notice = Some(error.into());
         }
         cx.notify();
+    }
+
+    fn save_layout_preferences(&self) -> Result<(), String> {
+        ui_preferences::save_ui_preferences(ui_preferences::UiPreferences {
+            column_details_visible: self.show_column_details,
+            date_column_visible: self.show_date_column,
+            kind_column_visible: self.show_kind_column,
+            size_column_visible: self.show_size_column,
+            column_width: self.preferred_column_width,
+        })
     }
 
     fn start_device_watcher(&mut self, cx: &mut Context<Self>) {
@@ -860,6 +999,7 @@ impl KiteApp {
             KeyBinding::new("secondary-c", CopySelection, Some("Kite")),
             KeyBinding::new("secondary-x", CutSelection, Some("Kite")),
             KeyBinding::new("secondary-v", PasteSelection, Some("Kite")),
+            KeyBinding::new("secondary-a", SelectAll, Some("Kite")),
             KeyBinding::new("f2", RenameSelection, Some("Kite")),
             KeyBinding::new("delete", RecycleSelection, Some("Kite")),
             KeyBinding::new("enter", OpenSelection, Some("Kite")),
@@ -1133,11 +1273,11 @@ impl KiteApp {
 
         self.column_panes.truncate(column + 1);
         for index in 0..self.column_panes.len().saturating_sub(1) {
-            self.column_panes[index].selected_path =
-                Some(self.column_panes[index + 1].path.clone());
+            let child_path = self.column_panes[index + 1].path.clone();
+            self.column_panes[index].set_single_selection(child_path);
         }
         if let Some(pane) = self.column_panes.last_mut() {
-            pane.selected_path = None;
+            pane.clear_selection();
         }
         self.column_selected_path = None;
         self.column_scroll_pending = true;
@@ -1349,11 +1489,9 @@ impl KiteApp {
 
     fn clear_hidden_column_selection(&mut self) {
         let selection_is_visible = self.column_selected_path.as_ref().is_some_and(|selected| {
-            self.column_panes.iter().any(|pane| {
-                pane.entries
-                    .iter()
-                    .any(|entry| same_path(&entry.path, selected))
-            })
+            self.column_panes
+                .iter()
+                .any(|pane| pane.is_selected(selected))
         });
         if !selection_is_visible {
             self.column_selected_path = None;
@@ -1367,6 +1505,53 @@ impl KiteApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let layout_changed = match action.command {
+            ColumnPaneCommand::ToggleDateColumn => {
+                self.show_date_column = !self.show_date_column;
+                self.show_column_details = true;
+                true
+            }
+            ColumnPaneCommand::ToggleKindColumn => {
+                self.show_kind_column = !self.show_kind_column;
+                self.show_column_details = true;
+                true
+            }
+            ColumnPaneCommand::ToggleSizeColumn => {
+                self.show_size_column = !self.show_size_column;
+                self.show_column_details = true;
+                true
+            }
+            ColumnPaneCommand::SetCompactColumnWidth => {
+                self.preferred_column_width = 250;
+                true
+            }
+            ColumnPaneCommand::SetStandardColumnWidth => {
+                self.preferred_column_width = 320;
+                true
+            }
+            ColumnPaneCommand::SetWideColumnWidth => {
+                self.preferred_column_width = 420;
+                true
+            }
+            ColumnPaneCommand::ResetLayout => {
+                self.show_column_details = true;
+                self.show_date_column = true;
+                self.show_kind_column = true;
+                self.show_size_column = true;
+                self.preferred_column_width = 320;
+                true
+            }
+            _ => false,
+        };
+        if layout_changed {
+            if let Err(error) = self.save_layout_preferences() {
+                self.notice = Some(error.into());
+            }
+            self.column_scroll_pending = true;
+            cx.notify();
+            return;
+        }
+
         let Some(index) = self
             .column_panes
             .iter()
@@ -1429,6 +1614,13 @@ impl KiteApp {
                 pane.filter = ColumnFilter::All;
                 pane.group = ColumnGroup::None;
             }
+            ColumnPaneCommand::ToggleDateColumn
+            | ColumnPaneCommand::ToggleKindColumn
+            | ColumnPaneCommand::ToggleSizeColumn
+            | ColumnPaneCommand::SetCompactColumnWidth
+            | ColumnPaneCommand::SetStandardColumnWidth
+            | ColumnPaneCommand::SetWideColumnWidth
+            | ColumnPaneCommand::ResetLayout => return,
         }
         pane.refresh_view();
         self.clear_hidden_column_selection();
@@ -1516,7 +1708,8 @@ impl KiteApp {
                 }
                 let mut panes = panes;
                 for index in 0..panes.len().saturating_sub(1) {
-                    panes[index].selected_path = Some(panes[index + 1].path.clone());
+                    let child_path = panes[index + 1].path.clone();
+                    panes[index].set_single_selection(child_path);
                 }
                 this.column_panes = panes;
                 this.column_scroll_pending = true;
@@ -1565,11 +1758,11 @@ impl KiteApp {
 
         self.column_panes = panes;
         for index in 0..self.column_panes.len().saturating_sub(1) {
-            self.column_panes[index].selected_path =
-                Some(self.column_panes[index + 1].path.clone());
+            let child_path = self.column_panes[index + 1].path.clone();
+            self.column_panes[index].set_single_selection(child_path);
         }
         if let Some(last) = self.column_panes.last_mut() {
-            last.selected_path = None;
+            last.clear_selection();
         }
         self.column_selected_path = None;
         self.column_scroll_pending = true;
@@ -1600,8 +1793,8 @@ impl KiteApp {
                         }
                     }
                     for index in 0..this.column_panes.len().saturating_sub(1) {
-                        this.column_panes[index].selected_path =
-                            Some(this.column_panes[index + 1].path.clone());
+                        let child_path = this.column_panes[index + 1].path.clone();
+                        this.column_panes[index].set_single_selection(child_path);
                     }
                     cx.notify();
                 });
@@ -1888,6 +2081,35 @@ impl KiteApp {
         .detach();
     }
 
+    fn selected_entries(&self, cx: &App) -> Vec<FileEntry> {
+        if self.view_mode == ViewMode::Columns && self.active_search.is_none() {
+            let Some(selected) = self.column_selected_path.as_ref() else {
+                return Vec::new();
+            };
+            let Some(pane) = self
+                .column_panes
+                .iter()
+                .rev()
+                .find(|pane| pane.is_selected(selected))
+            else {
+                return Vec::new();
+            };
+            return pane
+                .entries
+                .iter()
+                .filter(|entry| pane.is_selected(&entry.path))
+                .cloned()
+                .collect();
+        }
+
+        self.table
+            .read(cx)
+            .selected_row()
+            .and_then(|selected| self.table.read(cx).delegate().entry(selected).cloned())
+            .into_iter()
+            .collect()
+    }
+
     fn selected_entry(&self, cx: &App) -> Option<FileEntry> {
         if self.view_mode == ViewMode::Columns && self.active_search.is_none() {
             let selected = self.column_selected_path.as_ref()?;
@@ -1899,13 +2121,34 @@ impl KiteApp {
                 .cloned();
         }
 
-        let selected = self.table.read(cx).selected_row()?;
-        self.table.read(cx).delegate().entry(selected).cloned()
+        self.selected_entries(cx).into_iter().next()
     }
 
     fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.selected_entry(cx) {
             self.open_entry(entry, window, cx);
+        }
+    }
+
+    fn select_all(&mut self, cx: &mut Context<Self>) {
+        if self.view_mode == ViewMode::Columns && self.active_search.is_none() {
+            let Some(last) = self.column_panes.len().checked_sub(1) else {
+                return;
+            };
+            if let Some(pane) = self.column_panes.get_mut(last) {
+                pane.select_all();
+                self.column_selected_path = pane.selected_path.clone();
+            }
+            self.clear_column_preview();
+            self.column_scroll_pending = true;
+            cx.notify();
+            return;
+        }
+
+        let has_entries = !self.table.read(cx).delegate().entries().is_empty();
+        if has_entries {
+            self.table
+                .update(cx, |state, cx| state.set_selected_row(0, cx));
         }
     }
 
@@ -2607,6 +2850,16 @@ impl KiteApp {
     }
 
     fn select_column_entry(&mut self, column: usize, row: usize, cx: &mut Context<Self>) {
+        self.select_column_entry_with_modifiers(column, row, "", cx);
+    }
+
+    fn select_column_entry_with_modifiers(
+        &mut self,
+        column: usize,
+        row: usize,
+        mode: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(entry) = self
             .column_panes
             .get(column)
@@ -2615,9 +2868,36 @@ impl KiteApp {
             return;
         };
         if let Some(pane) = self.column_panes.get_mut(column) {
-            pane.selected_path = Some(entry.path.clone());
+            match mode {
+                "toggle" => pane.toggle_selection(entry.path.clone()),
+                "range" => pane.select_range_to(entry.path.clone()),
+                _ => pane.set_single_selection(entry.path.clone()),
+            }
         }
-        self.column_selected_path = Some(entry.path.clone());
+        let selected_count = self
+            .column_panes
+            .get(column)
+            .map_or(0, |pane| pane.selected_paths.len());
+        self.column_selected_path = self
+            .column_panes
+            .get(column)
+            .and_then(|pane| pane.selected_path.clone());
+        if selected_count != 1 {
+            self.clear_column_preview();
+            self.path_bar_scroll_pending = true;
+            cx.notify();
+            return;
+        }
+        let Some(entry) = self.column_panes.get(column).and_then(|pane| {
+            pane.selected_path.as_ref().and_then(|selected| {
+                pane.entries
+                    .iter()
+                    .find(|entry| same_path(&entry.path, selected))
+                    .cloned()
+            })
+        }) else {
+            return;
+        };
         if !entry.is_dir() {
             self.column_panes
                 .truncate(column_count_after_file_selection(
@@ -2722,8 +3002,23 @@ impl KiteApp {
         else {
             return;
         };
+        let modifiers = event.modifiers();
+        let selection_mode = if modifiers.shift {
+            "range"
+        } else if modifiers.secondary() {
+            "toggle"
+        } else {
+            ""
+        };
+        if !selection_mode.is_empty() {
+            self.select_column_entry_with_modifiers(column, row, selection_mode, cx);
+            return;
+        }
         if entry.is_dir() {
             self.column_selected_path = None;
+            if let Some(pane) = self.column_panes.get_mut(column) {
+                pane.clear_selection();
+            }
             self.navigate_to(entry.path, NavigationIntent::Push, window, cx);
             return;
         }
@@ -2734,37 +3029,61 @@ impl KiteApp {
     }
 
     fn set_clipboard(&mut self, mode: ClipboardMode, cx: &mut Context<Self>) {
-        if let Some(entry) = self.selected_entry(cx) {
-            self.set_clipboard_entry(entry, mode, cx);
-        }
-    }
-
-    fn set_clipboard_entry(
-        &mut self,
-        entry: FileEntry,
-        mode: ClipboardMode,
-        cx: &mut Context<Self>,
-    ) {
-        self.set_clipboard_path(entry.path, mode, cx);
+        let paths = self
+            .selected_entries(cx)
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>();
+        self.set_clipboard_paths(paths, mode, cx);
     }
 
     fn set_clipboard_path(&mut self, path: PathBuf, mode: ClipboardMode, cx: &mut Context<Self>) {
-        if shell_fs::is_shell_namespace_path(&path) {
+        self.set_clipboard_paths(vec![path], mode, cx);
+    }
+
+    fn set_clipboard_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+        mode: ClipboardMode,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        if mode == ClipboardMode::Cut
+            && paths.iter().any(|path| {
+                shell_fs::is_shell_namespace_path(path) && !shell_fs::can_move_item(path)
+            })
+        {
             self.error = None;
-            self.notice = Some("移动设备项目复制暂不支持".into());
+            self.notice = Some("此设备项目不支持剪切".into());
             cx.notify();
             return;
         }
-        let paths = vec![path];
+        let path_count = paths.len();
+        if paths
+            .iter()
+            .any(|path| shell_fs::is_shell_namespace_path(path))
+        {
+            self.error = None;
+            self.notice = Some("移动设备项目只在 Kite 内部剪贴板中保留".into());
+            *self.clipboard.borrow_mut() = Some(FileClipboard {
+                paths: paths.clone(),
+                mode,
+            });
+            self.sync_clipboard_state(cx);
+            cx.notify();
+            return;
+        }
         let system_error = file_clipboard::write_file_clipboard(&paths, mode).err();
         *self.clipboard.borrow_mut() = Some(FileClipboard { paths, mode });
         self.sync_clipboard_state(cx);
         self.error = system_error
             .map(|error| format!("系统文件剪贴板不可用，复制仅在 Kite 内有效：{error}").into());
         self.notice = Some(if mode == ClipboardMode::Cut {
-            "已剪切 1 项".into()
+            format!("已剪切 {path_count} 项").into()
         } else {
-            "已复制 1 项".into()
+            format!("已复制 {path_count} 项").into()
         });
         cx.notify();
     }
@@ -2786,13 +3105,6 @@ impl KiteApp {
     }
 
     fn copy_to_directory(&mut self, source: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if shell_fs::is_shell_namespace_path(&source) {
-            self.error = None;
-            self.notice = Some("移动设备项目暂不支持拷贝到指定目录".into());
-            cx.notify();
-            return;
-        }
-
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -2827,10 +3139,21 @@ impl KiteApp {
 
             let copy_source = source.clone();
             let copy_destination = destination_dir.clone();
+            let uses_shell_operation = shell_fs::is_shell_namespace_path(&copy_source)
+                || shell_fs::is_shell_namespace_path(&copy_destination);
             let result = cx
-                .background_spawn(
-                    async move { transfer_entry(&copy_source, &copy_destination, false) },
-                )
+                .background_spawn(async move {
+                    if uses_shell_operation {
+                        shell_fs::transfer_items(
+                            std::slice::from_ref(&copy_source),
+                            &copy_destination,
+                            false,
+                        )
+                        .map(|()| copy_destination.clone())
+                    } else {
+                        transfer_entry(&copy_source, &copy_destination, false)
+                    }
+                })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(copied) => {
@@ -2864,9 +3187,18 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(clipboard) =
-            file_clipboard::read_file_clipboard().or_else(|| self.clipboard.borrow().clone())
-        else {
+        let internal_clipboard = self.clipboard.borrow().clone();
+        let clipboard = if internal_clipboard.as_ref().is_some_and(|clipboard| {
+            clipboard
+                .paths
+                .iter()
+                .any(|path| shell_fs::is_shell_namespace_path(path))
+        }) {
+            internal_clipboard
+        } else {
+            file_clipboard::read_file_clipboard().or(internal_clipboard)
+        };
+        let Some(clipboard) = clipboard else {
             return;
         };
         let sources = clipboard.paths;
@@ -2874,16 +3206,10 @@ impl KiteApp {
         if sources.is_empty() {
             return;
         }
-        if sources
+        let uses_shell_operation = sources
             .iter()
             .any(|source| shell_fs::is_shell_namespace_path(source))
-            || shell_fs::is_shell_namespace_path(&destination_dir)
-        {
-            self.error = None;
-            self.notice = Some("移动设备项目粘贴暂不支持".into());
-            cx.notify();
-            return;
-        }
+            || shell_fs::is_shell_namespace_path(&destination_dir);
         let cleared_sources = sources.clone();
         self.error = None;
         self.notice = Some(if move_source {
@@ -2891,34 +3217,88 @@ impl KiteApp {
         } else {
             "正在复制项目…".into()
         });
+        let operation_destination = destination_dir.clone();
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let mut destinations = Vec::with_capacity(sources.len());
-                    for source in &sources {
-                        destinations.push(transfer_entry(source, &destination_dir, move_source)?);
+                    if uses_shell_operation {
+                        return match shell_fs::transfer_items(
+                            &sources,
+                            &operation_destination,
+                            move_source,
+                        ) {
+                            Ok(()) => Ok(sources.len()),
+                            Err(error) => Err((0usize, error)),
+                        };
                     }
-                    Ok::<_, String>(destinations)
+                    for (completed, source) in sources.iter().enumerate() {
+                        if let Err(error) =
+                            transfer_entry(source, &operation_destination, move_source)
+                        {
+                            return Err((completed, error));
+                        }
+                    }
+                    Ok(sources.len())
                 })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(destinations) => {
+                Ok(item_count) => {
                     if move_source {
                         *this.clipboard.borrow_mut() = None;
                         file_clipboard::clear_if_matches(&cleared_sources);
                         this.sync_clipboard_state(cx);
                     }
                     this.notice = Some(if move_source {
-                        format!("已移动 {} 项", destinations.len()).into()
+                        format!("已移动 {item_count} 项").into()
                     } else {
-                        format!("已粘贴 {} 项", destinations.len()).into()
+                        format!("已粘贴 {item_count} 项").into()
                     });
                     this.refresh(window, cx);
                 }
-                Err(error) => {
-                    this.notice = None;
-                    this.error = Some(error.into());
-                    cx.notify();
+                Err((completed, error)) => {
+                    if uses_shell_operation {
+                        this.error = None;
+                        this.notice = Some(format!("设备写入未完成：{error}").into());
+                        if same_path(&this.current_dir, &destination_dir) {
+                            this.refresh(window, cx);
+                        } else {
+                            cx.notify();
+                        }
+                    } else if completed > 0 {
+                        if move_source {
+                            let remaining = cleared_sources
+                                .iter()
+                                .skip(completed)
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            if remaining.is_empty() {
+                                *this.clipboard.borrow_mut() = None;
+                                file_clipboard::clear_if_matches(&cleared_sources);
+                            } else {
+                                let _ = file_clipboard::write_file_clipboard(
+                                    &remaining,
+                                    ClipboardMode::Cut,
+                                );
+                                *this.clipboard.borrow_mut() = Some(FileClipboard {
+                                    paths: remaining,
+                                    mode: ClipboardMode::Cut,
+                                });
+                            }
+                            this.sync_clipboard_state(cx);
+                        }
+                        this.error = None;
+                        this.notice =
+                            Some(format!("已处理 {completed} 项，后续操作失败：{error}").into());
+                        if same_path(&this.current_dir, &destination_dir) {
+                            this.refresh(window, cx);
+                        } else {
+                            cx.notify();
+                        }
+                    } else {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                        cx.notify();
+                    }
                 }
             });
         })
@@ -2926,6 +3306,12 @@ impl KiteApp {
     }
 
     fn add_favorite(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if shell_fs::is_shell_namespace_path(&path) {
+            self.error = None;
+            self.notice = Some("设备项目不能添加为收藏".into());
+            cx.notify();
+            return;
+        }
         let name = favorite_name(&path);
         let is_directory = path.is_dir();
         match favorites_store::add_favorite(&path, &name, is_directory) {
@@ -2992,12 +3378,6 @@ impl KiteApp {
         if self.loading {
             return;
         }
-        if shell_fs::is_shell_namespace_path(&directory) {
-            self.error = None;
-            self.notice = Some("移动设备内新建文件夹暂不支持".into());
-            cx.notify();
-            return;
-        }
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("文件夹名称")
@@ -3030,12 +3410,6 @@ impl KiteApp {
         if self.loading {
             return;
         }
-        if shell_fs::is_shell_namespace_path(&directory) {
-            self.error = None;
-            self.notice = Some("移动设备内新建文件暂不支持".into());
-            cx.notify();
-            return;
-        }
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("文件名，例如 notes.txt")
@@ -3066,21 +3440,25 @@ impl KiteApp {
     }
 
     fn begin_rename_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if shell_fs::is_shell_namespace_path(&path) {
+        let is_shell_path = shell_fs::is_shell_namespace_path(&path);
+        if is_shell_path && !shell_fs::can_rename_item(&path) {
             self.error = None;
-            self.notice = Some("移动设备内重命名暂不支持".into());
+            self.notice = Some("此设备项目不支持重命名".into());
             cx.notify();
             return;
         }
-        let Some(name) = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-        else {
+        let name = if is_shell_path {
+            shell_fs::display_name(&path)
+        } else {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        };
+        let Some(name) = name else {
             self.error = Some("无法重命名驱动器根目录".into());
             cx.notify();
             return;
         };
-        if !path.exists() {
+        if !is_shell_path && !path.exists() {
             self.context_target_missing(window, cx);
             return;
         }
@@ -3143,10 +3521,17 @@ impl KiteApp {
         match kind {
             ModalKind::NewFolder(parent) => {
                 let name = value;
+                let uses_shell_operation = shell_fs::is_shell_namespace_path(&parent);
                 self.notice = Some("正在新建文件夹…".into());
                 cx.spawn_in(window, async move |this, cx| {
                     let result = cx
-                        .background_spawn(async move { create_folder(&parent, &name) })
+                        .background_spawn(async move {
+                            if uses_shell_operation {
+                                shell_fs::create_item_in(&parent, &name, true)
+                            } else {
+                                create_folder(&parent, &name).map(|_| ())
+                            }
+                        })
                         .await;
                     let _ = this.update_in(cx, |this, window, cx| match result {
                         Ok(_) => {
@@ -3165,10 +3550,17 @@ impl KiteApp {
             }
             ModalKind::NewFile(parent) => {
                 let name = value;
+                let uses_shell_operation = shell_fs::is_shell_namespace_path(&parent);
                 self.notice = Some("正在新建文件…".into());
                 cx.spawn_in(window, async move |this, cx| {
                     let result = cx
-                        .background_spawn(async move { create_file(&parent, &name) })
+                        .background_spawn(async move {
+                            if uses_shell_operation {
+                                shell_fs::create_item_in(&parent, &name, false)
+                            } else {
+                                create_file(&parent, &name).map(|_| ())
+                            }
+                        })
                         .await;
                     let _ = this.update_in(cx, |this, window, cx| match result {
                         Ok(_) => {
@@ -3192,18 +3584,25 @@ impl KiteApp {
                     .parent()
                     .map(|parent| parent.join(&name))
                     .unwrap_or_else(|| path.clone());
+                let uses_shell_operation = shell_fs::is_shell_namespace_path(&path);
                 self.notice = Some("正在重命名…".into());
                 cx.spawn_in(window, async move |this, cx| {
                     let result = cx
-                        .background_spawn(async move { rename_entry(&rename_source, &name) })
+                        .background_spawn(async move {
+                            if uses_shell_operation {
+                                shell_fs::rename_item(&rename_source, &name)
+                            } else {
+                                rename_entry(&rename_source, &name).map(|_| ())
+                            }
+                        })
                         .await;
                     let _ = this.update_in(cx, |this, window, cx| match result {
                         Ok(_) => {
                             this.close_modal(window, cx);
-                            this.notice = Some("名称已更新".into());
                             let destination =
                                 path_after_rename(&this.current_dir, &path, &renamed_path);
                             this.navigate_to(destination, NavigationIntent::Refresh, window, cx);
+                            this.notice = Some("名称已更新".into());
                         }
                         Err(error) => {
                             this.notice = None;
@@ -3226,30 +3625,78 @@ impl KiteApp {
     }
 
     fn confirm_recycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(entry) = self.selected_entry(cx) {
-            self.confirm_recycle_path(entry.path, window, cx);
-        }
+        let paths = self
+            .selected_entries(cx)
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>();
+        self.confirm_recycle_paths(paths, window, cx);
     }
 
     fn confirm_recycle_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        if shell_fs::is_shell_namespace_path(&path) {
+        self.confirm_recycle_paths(vec![path], window, cx);
+    }
+
+    fn confirm_recycle_paths(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        let has_shell_path = paths
+            .iter()
+            .any(|path| shell_fs::is_shell_namespace_path(path));
+        if paths
+            .iter()
+            .any(|path| shell_fs::is_shell_namespace_path(path) && !shell_fs::can_delete_item(path))
+        {
             self.error = None;
-            self.notice = Some("移动设备项目删除暂不支持".into());
+            self.notice = Some("此设备项目不支持删除".into());
             cx.notify();
             return;
         }
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path_text(&path));
-        if !path.exists() {
+        let missing_local_path = paths
+            .iter()
+            .any(|path| !shell_fs::is_shell_namespace_path(path) && !path.exists());
+        if missing_local_path {
             self.context_target_missing(window, cx);
             return;
         }
-        let message = format!("将“{name}”移到回收站？");
-        let recycle_source = path.clone();
-        let detail = path_text(&path);
-        let answers = [PromptButton::ok("移到回收站"), PromptButton::cancel("取消")];
+        let destination = path_after_recycle_paths(&self.current_dir, &paths);
+        let message = if paths.len() == 1 {
+            let path = &paths[0];
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path_text(path));
+            if has_shell_path {
+                format!("删除“{name}”？设备项目不会进入回收站。")
+            } else {
+                format!("将“{name}”移到回收站？")
+            }
+        } else if has_shell_path {
+            format!(
+                "删除所选的 {} 个项目？设备项目不会进入回收站。",
+                paths.len()
+            )
+        } else {
+            format!("将所选的 {} 个项目移到回收站？", paths.len())
+        };
+        let detail = paths
+            .iter()
+            .take(5)
+            .map(|path| path_text(path))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let action = if has_shell_path {
+            "删除"
+        } else {
+            "移到回收站"
+        };
+        let answers = [PromptButton::ok(action), PromptButton::cancel("取消")];
         let answer = window.prompt(PromptLevel::Warning, &message, Some(&detail), &answers, cx);
         cx.spawn_in(window, async move |this, cx| {
             let Ok(choice) = answer.await else {
@@ -3259,18 +3706,43 @@ impl KiteApp {
                 return;
             }
             let result = cx
-                .background_spawn(async move { recycle_entry(&recycle_source) })
+                .background_spawn(async move {
+                    for (completed, path) in paths.iter().enumerate() {
+                        let result = if shell_fs::is_shell_namespace_path(path) {
+                            shell_fs::delete_item(path)
+                        } else {
+                            recycle_entry(path)
+                        };
+                        if let Err(error) = result {
+                            return Err((completed, error));
+                        }
+                    }
+                    Ok(paths.len())
+                })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(()) => {
-                    this.notice = Some("已移到回收站".into());
-                    let destination = path_after_recycle(&this.current_dir, &path);
+                Ok(item_count) => {
                     this.navigate_to(destination, NavigationIntent::Refresh, window, cx);
+                    this.notice = Some(if has_shell_path {
+                        format!("已删除 {item_count} 项").into()
+                    } else {
+                        format!("已将 {item_count} 项移到回收站").into()
+                    });
                 }
-                Err(error) => {
-                    this.notice = None;
-                    this.error = Some(error.into());
-                    cx.notify();
+                Err((completed, error)) => {
+                    if has_shell_path || completed > 0 {
+                        this.error = None;
+                        this.navigate_to(destination, NavigationIntent::Refresh, window, cx);
+                        this.notice = Some(if completed > 0 {
+                            format!("已处理 {completed} 项，后续操作失败：{error}").into()
+                        } else {
+                            format!("设备删除未完成：{error}").into()
+                        });
+                    } else {
+                        this.notice = None;
+                        this.error = Some(error.into());
+                        cx.notify();
+                    }
                 }
             });
         })
@@ -3305,11 +3777,9 @@ impl KiteApp {
         let can_back = self.history_index > 0;
         let can_forward = self.history_index + 1 < self.history.len();
         let can_up = navigation_parent(&self.current_dir).is_some();
-        let selected_local = self
-            .selected_entry(cx)
-            .as_ref()
-            .is_some_and(|entry| !shell_fs::is_shell_namespace_path(&entry.path));
-        let current_local = !shell_fs::is_shell_namespace_path(&self.current_dir);
+        let selected_count = self.selected_entries(cx).len();
+        let has_selection = selected_count > 0;
+        let can_modify_current = !self.current_dir.as_os_str().is_empty();
         let has_clipboard = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let current_favorite = self.current_dir_is_favorite();
         let loading = self.loading;
@@ -3399,8 +3869,12 @@ impl KiteApp {
                     .ghost()
                     .compact()
                     .icon(IconName::Copy)
-                    .tooltip("复制 (Ctrl+C)")
-                    .disabled(!selected_local)
+                    .tooltip(if selected_count > 1 {
+                        "复制所选项目 (Ctrl+C)"
+                    } else {
+                        "复制 (Ctrl+C)"
+                    })
+                    .disabled(!has_selection)
                     .on_click(cx.listener(Self::copy_clicked)),
             )
             .child(
@@ -3409,7 +3883,7 @@ impl KiteApp {
                     .compact()
                     .icon(IconName::Scissors)
                     .tooltip("剪切 (Ctrl+X)")
-                    .disabled(!selected_local)
+                    .disabled(!has_selection)
                     .on_click(cx.listener(Self::cut_clicked)),
             )
             .child(
@@ -3418,7 +3892,7 @@ impl KiteApp {
                     .compact()
                     .icon(IconName::ClipboardPaste)
                     .tooltip("粘贴 (Ctrl+V)")
-                    .disabled(!has_clipboard || !current_local)
+                    .disabled(!has_clipboard || !can_modify_current)
                     .on_click(cx.listener(Self::paste_clicked)),
             )
             .child(
@@ -3427,7 +3901,7 @@ impl KiteApp {
                     .compact()
                     .icon(IconName::FolderPlus)
                     .tooltip("新建文件夹 (Ctrl+Shift+N)")
-                    .disabled(loading || !current_local)
+                    .disabled(loading || !can_modify_current)
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.begin_new_folder(window, cx)
                     })),
@@ -3912,7 +4386,7 @@ impl KiteApp {
             .items_stretch()
             .gap_2()
             .p_2()
-            .overflow_x_scroll()
+            .overflow_hidden()
             .track_scroll(&scroll_handle);
         if self.column_panes.is_empty() {
             if let Some(error) = self.error.clone() {
@@ -3951,10 +4425,15 @@ impl KiteApp {
         {
             strip = strip.child(self.render_column_preview(&entry, cx));
         }
+        let horizontal_wheel_handle = scroll_handle.clone();
         div()
             .relative()
             .size_full()
             .child(strip.into_any_element())
+            .child(
+                ScrollableMask::new(Axis::Horizontal, &horizontal_wheel_handle)
+                    .id("column-horizontal-wheel"),
+            )
             .child(
                 div().absolute().inset_0().child(
                     Scrollbar::horizontal(&scroll_handle)
@@ -4359,9 +4838,11 @@ impl KiteApp {
         let loading = pane.loading;
         let entry_count = pane.entries.len();
         let row_count = pane.visible_row_count();
-        let sort = pane.sort;
-        let filter = pane.filter;
-        let group = pane.group;
+        let rules = ColumnViewRules {
+            sort: pane.sort,
+            filter: pane.filter,
+            group: pane.group,
+        };
         let search_query = pane.search_query.clone();
         let search_truncated = pane.search_truncated;
         let vertical_scroll = self
@@ -4377,8 +4858,21 @@ impl KiteApp {
         let active = same_path(&path, &self.current_dir);
         let details_visible =
             active && self.show_column_details && index + 1 == self.column_panes.len();
+        let layout = ColumnLayoutState {
+            show_date_column: self.show_date_column,
+            show_kind_column: self.show_kind_column,
+            show_size_column: self.show_size_column,
+            preferred_width: self.preferred_column_width,
+        };
         let column_width = if details_visible {
-            detailed_column_width(&pane.entries, window)
+            detailed_column_width(
+                &pane.entries,
+                window,
+                layout.show_date_column,
+                layout.show_kind_column,
+                layout.show_size_column,
+                layout.preferred_width,
+            )
         } else {
             COLUMN_WIDTH
         };
@@ -4397,7 +4891,7 @@ impl KiteApp {
         let accent = cx.theme().accent;
         let empty_label = if search_query.is_some() {
             "无搜索结果"
-        } else if filter != ColumnFilter::All {
+        } else if rules.filter != ColumnFilter::All {
             "筛选后无项目"
         } else {
             "空文件夹"
@@ -4425,7 +4919,7 @@ impl KiteApp {
                 SharedString::from(format!("column-list-{index}-{}", path.display())),
                 row_count,
                 cx.processor(move |this, range, window, cx| {
-                    this.render_column_rows(index, range, details_visible, window, cx)
+                    this.render_column_rows(index, range, details_visible, layout, window, cx)
                 }),
             )
             .flex_1()
@@ -4478,17 +4972,17 @@ impl KiteApp {
                 Button::new(("column-sort-order", index))
                     .ghost()
                     .compact()
-                    .icon(if sort.ascending {
+                    .icon(if rules.sort.ascending {
                         IconName::SortAscending
                     } else {
                         IconName::SortDescending
                     })
-                    .tooltip(if sort.ascending {
+                    .tooltip(if rules.sort.ascending {
                         "当前升序，点击改为降序"
                     } else {
                         "当前降序，点击改为升序"
                     })
-                    .accessibility_label(if sort.ascending {
+                    .accessibility_label(if rules.sort.ascending {
                         "切换为降序排序"
                     } else {
                         "切换为升序排序"
@@ -4538,12 +5032,12 @@ impl KiteApp {
                     .tooltip("分栏显示规则")
                     .accessibility_label("分栏显示规则")
                     .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
-                        build_column_control_menu(menu, &menu_path, sort, filter, group, window, cx)
+                        build_column_control_menu(menu, &menu_path, rules, layout, window, cx)
                     }),
             );
 
         let details_header = details_visible.then(|| {
-            h_flex()
+            let mut header = h_flex()
                 .h(px(24.))
                 .w_full()
                 .px_2()
@@ -4555,10 +5049,17 @@ impl KiteApp {
                 .text_xs()
                 .font_medium()
                 .text_color(muted)
-                .child(div().flex_1().min_w_0().pl(px(24.)).child("名称"))
-                .child(div().w(px(DETAILED_DATE_WIDTH)).child("日期"))
-                .child(div().w(px(DETAILED_KIND_WIDTH)).child("类型"))
-                .child(div().w(px(DETAILED_SIZE_WIDTH)).text_right().child("大小"))
+                .child(div().flex_1().min_w_0().pl(px(24.)).child("名称"));
+            if layout.show_date_column {
+                header = header.child(div().w(px(DETAILED_DATE_WIDTH)).child("日期"));
+            }
+            if layout.show_kind_column {
+                header = header.child(div().w(px(DETAILED_KIND_WIDTH)).child("类型"));
+            }
+            if layout.show_size_column {
+                header = header.child(div().w(px(DETAILED_SIZE_WIDTH)).text_right().child("大小"));
+            }
+            header
         });
 
         let search_bar = search_open.then(|| {
@@ -4701,6 +5202,7 @@ impl KiteApp {
         column: usize,
         range: Range<usize>,
         details_visible: bool,
+        layout: ColumnLayoutState,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -4709,7 +5211,6 @@ impl KiteApp {
         };
         let display_rows = pane.display_rows();
         let column_path = pane.path.clone();
-        let selected_path = pane.selected_path.clone();
         let loading = pane.loading;
         let can_paste = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let git_available = pane.git_available;
@@ -4745,9 +5246,7 @@ impl KiteApp {
                 }
                 ColumnDisplayRow::Entry(entry) => entry.clone(),
             };
-            let selected = selected_path
-                .as_ref()
-                .is_some_and(|path| same_path(path, &entry.path));
+            let selected = pane.is_selected(&entry.path);
             let metadata_color = if selected { accent_foreground } else { muted };
             let modified_label = column_modified_label(&entry);
             let kind_label = entry.type_label();
@@ -4806,24 +5305,28 @@ impl KiteApp {
                 );
             }
             if details_visible {
-                row = row
-                    .child(
+                if layout.show_date_column {
+                    row = row.child(
                         div()
                             .w(px(DETAILED_DATE_WIDTH))
                             .truncate()
                             .text_xs()
                             .text_color(metadata_color)
                             .child(modified_label),
-                    )
-                    .child(
+                    );
+                }
+                if layout.show_kind_column {
+                    row = row.child(
                         div()
                             .w(px(DETAILED_KIND_WIDTH))
                             .truncate()
                             .text_xs()
                             .text_color(metadata_color)
                             .child(kind_label),
-                    )
-                    .child(
+                    );
+                }
+                if layout.show_size_column {
+                    row = row.child(
                         div()
                             .w(px(DETAILED_SIZE_WIDTH))
                             .truncate()
@@ -4832,6 +5335,7 @@ impl KiteApp {
                             .text_color(metadata_color)
                             .child(size_label),
                     );
+                }
             }
             let row = row
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -4840,20 +5344,19 @@ impl KiteApp {
                 // Right-click must not select the row. Selection loads the next
                 // column for folders and starts preview loading for files.
                 .context_menu(move |menu, window, cx| {
+                    let capabilities = ContextMenuCapabilities::for_path(
+                        &menu_entry.path,
+                        loading,
+                        can_paste,
+                        row_git_available,
+                        row_svn_available,
+                    );
                     let target = ContextMenuTarget::entry(
                         menu_entry.path.clone(),
                         menu_entry.name.clone(),
                         menu_entry.is_dir(),
                         row_column_path.clone(),
-                        ContextMenuCapabilities {
-                            loading,
-                            can_paste,
-                            git_available: row_git_available,
-                            svn_available: row_svn_available,
-                            supports_local_ops: !shell_fs::is_shell_namespace_path(
-                                &menu_entry.path,
-                            ),
-                        },
+                        capabilities,
                     );
                     render_context_menu(menu, &target, row_action_context.clone(), window, cx)
                 })
@@ -5127,7 +5630,12 @@ fn same_path(left: &Path, right: &Path) -> bool {
 }
 
 fn paste_destination(target: &Path, working_directory: &Path) -> PathBuf {
-    if target.is_dir() {
+    let target_is_directory = if shell_fs::is_shell_namespace_path(target) {
+        shell_fs::is_directory(target)
+    } else {
+        target.is_dir()
+    };
+    if target_is_directory {
         target.to_path_buf()
     } else {
         working_directory.to_path_buf()
@@ -5152,6 +5660,14 @@ fn path_after_recycle(current_dir: &Path, removed: &Path) -> PathBuf {
             .unwrap_or_else(default_root_path);
     }
     current_dir.to_path_buf()
+}
+
+fn path_after_recycle_paths(current_dir: &Path, removed: &[PathBuf]) -> PathBuf {
+    removed
+        .iter()
+        .fold(current_dir.to_path_buf(), |current, path| {
+            path_after_recycle(&current, path)
+        })
 }
 
 fn open_vcs_query_text(tool: VcsTool, query: VcsQuery, path: &Path) -> Result<String, String> {
@@ -5191,7 +5707,14 @@ fn horizontal_wheel_delta(shift: bool, delta_x: f32, delta_y: f32) -> Option<f32
     }
 }
 
-fn detailed_column_width(entries: &[FileEntry], window: &Window) -> f32 {
+fn detailed_column_width(
+    entries: &[FileEntry],
+    window: &Window,
+    show_date_column: bool,
+    show_kind_column: bool,
+    show_size_column: bool,
+    preferred_width: u16,
+) -> f32 {
     let text_style = window.text_style();
     let text_system = window.text_system();
     let font_id = text_system.resolve_font(&text_style.font());
@@ -5210,11 +5733,39 @@ fn detailed_column_width(entries: &[FileEntry], window: &Window) -> f32 {
                 .sum::<f32>()
         })
         .fold(0.0, f32::max);
-    detailed_column_width_for_name_width(max_name_width)
+    detailed_column_width_for_name_width(
+        max_name_width,
+        show_date_column,
+        show_kind_column,
+        show_size_column,
+        preferred_width,
+    )
 }
 
-fn detailed_column_width_for_name_width(name_width: f32) -> f32 {
-    (DETAILED_COLUMN_NAME_OVERHEAD + name_width.ceil())
+fn detailed_column_width_for_name_width(
+    name_width: f32,
+    show_date_column: bool,
+    show_kind_column: bool,
+    show_size_column: bool,
+    preferred_width: u16,
+) -> f32 {
+    let visible_widths = [
+        (show_date_column, DETAILED_DATE_WIDTH),
+        (show_kind_column, DETAILED_KIND_WIDTH),
+        (show_size_column, DETAILED_SIZE_WIDTH),
+    ];
+    let visible_count = visible_widths
+        .iter()
+        .filter(|(visible, _)| *visible)
+        .count();
+    let details_width = visible_widths
+        .iter()
+        .filter(|(visible, _)| *visible)
+        .map(|(_, width)| *width)
+        .sum::<f32>();
+    let gaps = visible_count.saturating_sub(1) as f32 * 8.0;
+    (DETAILED_COLUMN_NAME_OVERHEAD + details_width + gaps + name_width.ceil())
+        .max(f32::from(preferred_width))
         .clamp(DETAILED_COLUMN_MIN_WIDTH, DETAILED_COLUMN_MAX_WIDTH)
 }
 
@@ -5526,18 +6077,19 @@ fn column_pane_action(path: &Path, command: ColumnPaneCommand) -> Box<dyn Action
 fn build_column_control_menu(
     menu: PopupMenu,
     path: &Path,
-    sort: SortSpec,
-    filter: ColumnFilter,
-    group: ColumnGroup,
+    rules: ColumnViewRules,
+    layout: ColumnLayoutState,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let sort_path = path.to_path_buf();
     let filter_path = path.to_path_buf();
     let group_path = path.to_path_buf();
+    let layout_path = path.to_path_buf();
     let reset_path = path.to_path_buf();
-    let is_default =
-        sort == SortSpec::default() && filter == ColumnFilter::All && group == ColumnGroup::None;
+    let is_default = rules.sort == SortSpec::default()
+        && rules.filter == ColumnFilter::All
+        && rules.group == ColumnGroup::None;
 
     menu.min_w(px(250.))
         .submenu_with_icon(
@@ -5549,7 +6101,7 @@ fn build_column_control_menu(
                 let action_path = sort_path.clone();
                 menu.item(
                     PopupMenuItem::new("名称：升序")
-                        .checked(sort.key == SortKey::Name && sort.ascending)
+                        .checked(rules.sort.key == SortKey::Name && rules.sort.ascending)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::SortNameAscending,
@@ -5557,7 +6109,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("名称：降序")
-                        .checked(sort.key == SortKey::Name && !sort.ascending)
+                        .checked(rules.sort.key == SortKey::Name && !rules.sort.ascending)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::SortNameDescending,
@@ -5566,7 +6118,7 @@ fn build_column_control_menu(
                 .separator()
                 .item(
                     PopupMenuItem::new("修改日期：最新优先")
-                        .checked(sort.key == SortKey::Modified && !sort.ascending)
+                        .checked(rules.sort.key == SortKey::Modified && !rules.sort.ascending)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::SortModifiedNewest,
@@ -5574,7 +6126,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("修改日期：最旧优先")
-                        .checked(sort.key == SortKey::Modified && sort.ascending)
+                        .checked(rules.sort.key == SortKey::Modified && rules.sort.ascending)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::SortModifiedOldest,
@@ -5582,7 +6134,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("类型")
-                        .checked(sort.key == SortKey::Kind)
+                        .checked(rules.sort.key == SortKey::Kind)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::SortKind,
@@ -5590,7 +6142,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("大小：从大到小")
-                        .checked(sort.key == SortKey::Size && !sort.ascending)
+                        .checked(rules.sort.key == SortKey::Size && !rules.sort.ascending)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::SortSizeDescending,
@@ -5607,7 +6159,7 @@ fn build_column_control_menu(
                 let action_path = filter_path.clone();
                 menu.item(
                     PopupMenuItem::new("全部项目")
-                        .checked(filter == ColumnFilter::All)
+                        .checked(rules.filter == ColumnFilter::All)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::FilterAll,
@@ -5615,7 +6167,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("仅文件夹")
-                        .checked(filter == ColumnFilter::Folders)
+                        .checked(rules.filter == ColumnFilter::Folders)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::FilterFolders,
@@ -5623,7 +6175,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("仅文件")
-                        .checked(filter == ColumnFilter::Files)
+                        .checked(rules.filter == ColumnFilter::Files)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::FilterFiles,
@@ -5631,7 +6183,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("媒体文件")
-                        .checked(filter == ColumnFilter::Media)
+                        .checked(rules.filter == ColumnFilter::Media)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::FilterMedia,
@@ -5639,7 +6191,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("文档文件")
-                        .checked(filter == ColumnFilter::Documents)
+                        .checked(rules.filter == ColumnFilter::Documents)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::FilterDocuments,
@@ -5656,7 +6208,7 @@ fn build_column_control_menu(
                 let action_path = group_path.clone();
                 menu.item(
                     PopupMenuItem::new("不分组")
-                        .checked(group == ColumnGroup::None)
+                        .checked(rules.group == ColumnGroup::None)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::GroupNone,
@@ -5664,7 +6216,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("按类型")
-                        .checked(group == ColumnGroup::Kind)
+                        .checked(rules.group == ColumnGroup::Kind)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::GroupKind,
@@ -5672,7 +6224,7 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("按扩展名")
-                        .checked(group == ColumnGroup::Extension)
+                        .checked(rules.group == ColumnGroup::Extension)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::GroupExtension,
@@ -5680,11 +6232,76 @@ fn build_column_control_menu(
                 )
                 .item(
                     PopupMenuItem::new("按修改日期")
-                        .checked(group == ColumnGroup::Modified)
+                        .checked(rules.group == ColumnGroup::Modified)
                         .action(column_pane_action(
                             &action_path,
                             ColumnPaneCommand::GroupModified,
                         )),
+                )
+            },
+        )
+        .submenu_with_icon(
+            Some(Icon::new(IconName::Grid2x2).size_4()),
+            "列与布局",
+            window,
+            cx,
+            move |menu, _, _| {
+                let action_path = layout_path.clone();
+                menu.item(
+                    PopupMenuItem::new("显示修改日期列")
+                        .checked(layout.show_date_column)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::ToggleDateColumn,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("显示类型列")
+                        .checked(layout.show_kind_column)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::ToggleKindColumn,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("显示大小列")
+                        .checked(layout.show_size_column)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::ToggleSizeColumn,
+                        )),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("紧凑宽度")
+                        .checked(layout.preferred_width == 250)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SetCompactColumnWidth,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("标准宽度")
+                        .checked(layout.preferred_width == 320)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SetStandardColumnWidth,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("宽列")
+                        .checked(layout.preferred_width == 420)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SetWideColumnWidth,
+                        )),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("重置列与布局").action(column_pane_action(
+                        &action_path,
+                        ColumnPaneCommand::ResetLayout,
+                    )),
                 )
             },
         )
@@ -5711,13 +6328,13 @@ fn column_context_menu_target(pane: &ColumnPane, can_paste: bool) -> ContextMenu
     ContextMenuTarget::directory(
         pane.path.clone(),
         title,
-        ContextMenuCapabilities {
-            loading: pane.loading,
+        ContextMenuCapabilities::for_path(
+            &pane.path,
+            pane.loading,
             can_paste,
-            git_available: pane.git_available,
-            svn_available: pane.svn_available,
-            supports_local_ops: !shell_fs::is_shell_namespace_path(&pane.path),
-        },
+            pane.git_available,
+            pane.svn_available,
+        ),
     )
 }
 
@@ -5772,7 +6389,9 @@ impl EventEmitter<TabRequest> for KiteApp {}
 
 impl Render for KiteApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = self.selected_entry(cx);
+        let selected_entries = self.selected_entries(cx);
+        let selected_count = selected_entries.len();
+        let selected = selected_entries.first().cloned();
         let selected_exists = selected.is_some();
         let column_mode = self.view_mode == ViewMode::Columns && self.active_search.is_none();
         let item_count = if column_mode {
@@ -5783,10 +6402,22 @@ impl Render for KiteApp {
         } else {
             self.table.read(cx).delegate().entries().len()
         };
-        let selected_size = selected
-            .as_ref()
-            .map(FileEntry::size_label)
-            .unwrap_or_default();
+        let selected_size = if selected_count == 1 {
+            selected
+                .as_ref()
+                .map(FileEntry::size_label)
+                .unwrap_or_default()
+        } else if selected_entries.iter().any(|entry| !entry.is_dir()) {
+            format_size(
+                selected_entries
+                    .iter()
+                    .filter(|entry| !entry.is_dir())
+                    .map(|entry| entry.size)
+                    .sum(),
+            )
+        } else {
+            String::new()
+        };
         let error = self.error.clone();
         let notice = self.notice.clone();
         let update_download_fraction = self
@@ -5836,9 +6467,9 @@ impl Render for KiteApp {
             notice
         } else if selected_exists {
             SharedString::from(if selected_size.is_empty() {
-                "已选择 1 项".to_string()
+                format!("已选择 {selected_count} 项")
             } else {
-                format!("已选择 1 项 · {selected_size}")
+                format!("已选择 {selected_count} 项 · {selected_size}")
             })
         } else if skipped > 0 {
             SharedString::from(format!("已跳过 {skipped} 个不可读取项目"))
@@ -5939,6 +6570,7 @@ impl Render for KiteApp {
                     this.paste_clipboard(window, cx)
                 }),
             )
+            .on_action(cx.listener(|this, _: &SelectAll, _, cx| this.select_all(cx)))
             .on_action(
                 cx.listener(|this, _: &FocusAddress, window, cx| this.focus_address(window, cx)),
             )
@@ -6222,7 +6854,7 @@ mod path_bar_tests {
     use super::{
         ColumnDisplayRow, ColumnFilter, ColumnGroup, ColumnPane, column_chain,
         column_context_menu_target, column_count_after_file_selection, common_column_prefix,
-        loaded_column_index, path_after_recycle, path_after_rename,
+        loaded_column_index, path_after_recycle, path_after_recycle_paths, path_after_rename,
     };
     use crate::fs::{EntryKind, FileEntry, SortKey, SortSpec};
     use std::path::{Path, PathBuf};
@@ -6355,6 +6987,57 @@ mod path_bar_tests {
         assert!(column.search_query.is_none());
         assert!(!column.search_truncated);
         assert_eq!(column.entries[0].name, "notes.txt");
+    }
+
+    #[test]
+    fn column_selection_supports_toggle_and_visible_range() {
+        let root = PathBuf::from(r"C:\repo");
+        let mut column = ColumnPane::new(
+            root,
+            vec![
+                entry(r"C:\repo\alpha.txt", EntryKind::File),
+                entry(r"C:\repo\bravo.txt", EntryKind::File),
+                entry(r"C:\repo\charlie.txt", EntryKind::File),
+            ],
+            0,
+            false,
+            false,
+            false,
+            SortSpec::default(),
+        );
+
+        column.set_single_selection(PathBuf::from(r"C:\repo\alpha.txt"));
+        column.toggle_selection(PathBuf::from(r"C:\repo\charlie.txt"));
+        assert_eq!(column.selected_paths.len(), 2);
+        assert!(column.is_selected(Path::new(r"C:\repo\charlie.txt")));
+        assert_eq!(
+            column.selected_path,
+            Some(PathBuf::from(r"C:\repo\charlie.txt"))
+        );
+
+        column.toggle_selection(PathBuf::from(r"C:\repo\charlie.txt"));
+        assert_eq!(
+            column.selected_path,
+            Some(PathBuf::from(r"C:\repo\alpha.txt"))
+        );
+
+        column.selection_anchor_path = Some(PathBuf::from(r"C:\repo\alpha.txt"));
+        column.select_range_to(PathBuf::from(r"C:\repo\bravo.txt"));
+        assert_eq!(column.selected_paths.len(), 2);
+        assert!(column.is_selected(Path::new(r"C:\repo\alpha.txt")));
+        assert!(column.is_selected(Path::new(r"C:\repo\bravo.txt")));
+        assert!(!column.is_selected(Path::new(r"C:\repo\charlie.txt")));
+    }
+
+    #[test]
+    fn batch_recycle_uses_the_nearest_removed_ancestor() {
+        assert_eq!(
+            path_after_recycle_paths(
+                Path::new(r"C:\repo\src\ui"),
+                &[PathBuf::from(r"C:\repo\src")],
+            ),
+            PathBuf::from(r"C:\repo")
+        );
     }
 
     #[test]
@@ -6624,13 +7307,21 @@ mod column_details_tests {
     #[test]
     fn detailed_column_width_is_clamped() {
         assert_eq!(
-            detailed_column_width_for_name_width(0.0),
+            detailed_column_width_for_name_width(0.0, false, false, false, 250),
             DETAILED_COLUMN_MIN_WIDTH
         );
         assert_eq!(
-            detailed_column_width_for_name_width(10_000.0),
+            detailed_column_width_for_name_width(10_000.0, true, true, true, 320),
             DETAILED_COLUMN_MAX_WIDTH
         );
+    }
+
+    #[test]
+    fn hidden_detail_columns_reduce_the_required_width() {
+        let all_columns = detailed_column_width_for_name_width(80.0, true, true, true, 250);
+        let date_only = detailed_column_width_for_name_width(80.0, true, false, false, 250);
+
+        assert!(date_only < all_columns);
     }
 
     #[test]

@@ -5,13 +5,19 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use crate::fs::{DirectorySnapshot, EntryKind, FileEntry, SortSpec, sort_entries};
+use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
 use windows::Win32::System::Com::{
-    COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize, IBindCtx,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+    CoUninitialize, IBindCtx,
 };
-use windows::Win32::System::SystemServices::SFGAO_FOLDER;
+use windows::Win32::System::SystemServices::{
+    SFGAO_CANDELETE, SFGAO_CANMOVE, SFGAO_CANRENAME, SFGAO_FOLDER,
+};
 use windows::Win32::UI::Shell::{
-    BHID_EnumItems, IEnumShellItems, IShellItem, SHCreateItemFromParsingName,
-    SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING, ShellExecuteW,
+    BHID_EnumItems, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_RENAMEONCOLLISION, FileOperation,
+    IEnumShellItems, IFileOperation, IFileOperationProgressSink, IShellItem,
+    SHCreateItemFromParsingName, SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY,
+    SIGDN_PARENTRELATIVEPARSING, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{PCWSTR, PWSTR};
@@ -19,6 +25,161 @@ use windows::core::{PCWSTR, PWSTR};
 pub(crate) fn is_shell_namespace_path(path: &Path) -> bool {
     let value = path.as_os_str().to_string_lossy();
     value.starts_with("::{") || value.starts_with("shell:")
+}
+
+pub(crate) fn item_capabilities(path: &Path) -> (bool, bool, bool) {
+    let Ok(_com) = ComGuard::new() else {
+        return (false, false, false);
+    };
+    let Ok(item) = resolve_item(path) else {
+        return (false, false, false);
+    };
+    let Ok(attributes) =
+        (unsafe { item.GetAttributes(SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_CANMOVE) })
+    else {
+        return (false, false, false);
+    };
+    (
+        attributes.0 & SFGAO_CANRENAME.0 != 0,
+        attributes.0 & SFGAO_CANDELETE.0 != 0,
+        attributes.0 & SFGAO_CANMOVE.0 != 0,
+    )
+}
+
+pub(crate) fn can_rename_item(path: &Path) -> bool {
+    item_capabilities(path).0
+}
+
+pub(crate) fn can_delete_item(path: &Path) -> bool {
+    item_capabilities(path).1
+}
+
+pub(crate) fn can_move_item(path: &Path) -> bool {
+    item_capabilities(path).2
+}
+
+pub(crate) fn transfer_items(
+    sources: &[PathBuf],
+    destination: &Path,
+    move_source: bool,
+) -> Result<(), String> {
+    let _com = ComGuard::new()?;
+    let destination_item =
+        resolve_item(destination).map_err(|error| format!("无法打开目标移动设备目录：{error}"))?;
+    let operation = file_operation()?;
+    for source in sources {
+        let source_item = resolve_item(source)
+            .map_err(|error| format!("无法读取源项目 {}：{error}", source.display()))?;
+        let result = unsafe {
+            if move_source {
+                operation.MoveItem(
+                    &source_item,
+                    &destination_item,
+                    PCWSTR::null(),
+                    None::<&IFileOperationProgressSink>,
+                )
+            } else {
+                operation.CopyItem(
+                    &source_item,
+                    &destination_item,
+                    PCWSTR::null(),
+                    None::<&IFileOperationProgressSink>,
+                )
+            }
+        };
+        result.map_err(|error| format!("无法写入移动设备：{error}"))?;
+    }
+    perform_operations(&operation, "写入移动设备")
+}
+
+pub(crate) fn delete_item(path: &Path) -> Result<(), String> {
+    let _com = ComGuard::new()?;
+    let item = resolve_item(path).map_err(|error| format!("无法读取设备项目：{error}"))?;
+    let operation = file_operation()?;
+    unsafe {
+        operation
+            .DeleteItem(&item, None::<&IFileOperationProgressSink>)
+            .map_err(|error| format!("无法删除设备项目：{error}"))?;
+    }
+    perform_operations(&operation, "删除设备项目")
+}
+
+pub(crate) fn rename_item(path: &Path, name: &str) -> Result<(), String> {
+    let _com = ComGuard::new()?;
+    let item = resolve_item(path).map_err(|error| format!("无法读取设备项目：{error}"))?;
+    let operation = file_operation()?;
+    let name = wide(name);
+    unsafe {
+        operation
+            .RenameItem(
+                &item,
+                PCWSTR(name.as_ptr()),
+                None::<&IFileOperationProgressSink>,
+            )
+            .map_err(|error| format!("无法重命名设备项目：{error}"))?;
+    }
+    perform_operations(&operation, "重命名设备项目")
+}
+
+pub(crate) fn create_item_in(
+    directory: &Path,
+    name: &str,
+    is_directory: bool,
+) -> Result<(), String> {
+    let _com = ComGuard::new()?;
+    let folder = resolve_item(directory).map_err(|error| format!("无法打开设备目录：{error}"))?;
+    let operation = file_operation()?;
+    let name = wide(name);
+    let attributes = if is_directory {
+        FILE_ATTRIBUTE_DIRECTORY.0
+    } else {
+        FILE_ATTRIBUTE_NORMAL.0
+    };
+    unsafe {
+        operation
+            .NewItem(
+                &folder,
+                attributes,
+                PCWSTR(name.as_ptr()),
+                PCWSTR::null(),
+                None::<&IFileOperationProgressSink>,
+            )
+            .map_err(|error| format!("无法在设备中创建项目：{error}"))?;
+    }
+    perform_operations(&operation, "创建设备项目")
+}
+
+fn file_operation() -> Result<IFileOperation, String> {
+    let operation: IFileOperation = unsafe {
+        CoCreateInstance(&FileOperation, None::<&windows::core::IUnknown>, CLSCTX_ALL)
+            .map_err(|error| format!("无法创建 Windows 文件操作：{error}"))?
+    };
+    unsafe {
+        operation
+            .SetOperationFlags(FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_RENAMEONCOLLISION)
+            .map_err(|error| format!("无法配置 Windows 文件操作：{error}"))?;
+    }
+    Ok(operation)
+}
+
+fn perform_operations(operation: &IFileOperation, action: &str) -> Result<(), String> {
+    unsafe {
+        operation
+            .PerformOperations()
+            .map_err(|error| format!("无法{action}：{error}"))?;
+        if operation
+            .GetAnyOperationsAborted()
+            .map_err(|error| format!("无法读取{action}结果：{error}"))?
+            .as_bool()
+        {
+            return Err(format!("{action}已取消"));
+        }
+    }
+    Ok(())
+}
+
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 pub(crate) fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {

@@ -74,24 +74,22 @@ impl FileTableDelegate {
     }
 
     pub fn directory_context_menu_target(&self) -> ContextMenuTarget {
-        let title = self
-            .working_directory
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.working_directory.display().to_string());
-        ContextMenuTarget::directory(
-            self.working_directory.clone(),
-            title,
-            ContextMenuCapabilities {
-                loading: self.loading,
-                can_paste: self.can_paste,
-                git_available: self.git_available,
-                svn_available: self.svn_available,
-                supports_local_ops: !crate::shell_fs::is_shell_namespace_path(
-                    &self.working_directory,
-                ),
-            },
-        )
+        let title = if crate::shell_fs::is_shell_namespace_path(&self.working_directory) {
+            crate::shell_fs::display_name(&self.working_directory)
+        } else {
+            self.working_directory
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        }
+        .unwrap_or_else(|| self.working_directory.display().to_string());
+        let capabilities = ContextMenuCapabilities::for_path(
+            &self.working_directory,
+            self.loading,
+            self.can_paste,
+            self.git_available,
+            self.svn_available,
+        );
+        ContextMenuTarget::directory(self.working_directory.clone(), title, capabilities)
     }
 
     pub fn clear_entries(&mut self) {
@@ -179,18 +177,19 @@ impl TableDelegate for FileTableDelegate {
         let Some(entry) = self.entries.get(row_ix) else {
             return menu;
         };
+        let capabilities = ContextMenuCapabilities::for_path(
+            &entry.path,
+            self.loading,
+            self.can_paste,
+            self.git_available,
+            self.svn_available,
+        );
         let target = ContextMenuTarget::entry(
             entry.path.clone(),
             entry.name.clone(),
             entry.is_dir(),
             self.working_directory.clone(),
-            ContextMenuCapabilities {
-                loading: self.loading,
-                can_paste: self.can_paste,
-                git_available: self.git_available,
-                svn_available: self.svn_available,
-                supports_local_ops: !crate::shell_fs::is_shell_namespace_path(&entry.path),
-            },
+            capabilities,
         );
         let action_context = cx.entity().read(cx).focus_handle(cx);
         render_context_menu(menu, &target, action_context, window, cx)
@@ -444,6 +443,10 @@ mod tests {
         assert_eq!(target.working_directory, target.path);
         assert!(target.is_dir);
         assert!(target.can_paste);
-        assert!(target.supports_local_ops);
+        assert!(target.supports_transfer_ops);
+        assert!(target.supports_cut);
+        assert!(target.supports_rename);
+        assert!(target.supports_delete);
+        assert!(target.supports_favorite);
     }
 }
