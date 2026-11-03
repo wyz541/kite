@@ -1,11 +1,12 @@
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{
     DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HANDLE, HGLOBAL, POINT, S_OK,
 };
+use windows::Win32::System::Com::{IBindCtx, IDataObject};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
@@ -13,10 +14,13 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
     CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, DoDragDrop, IDropSource,
-    IDropSource_Impl, OleGetClipboard,
+    IDropSource_Impl,
 };
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
-use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, HDROP};
+use windows::Win32::UI::Shell::{
+    Common::ITEMIDLIST, DROPFILES, DragQueryFileW, HDROP, ILFindLastID, ILFree, SHCreateDataObject,
+    SHParseDisplayName,
+};
 use windows::core::{BOOL, HRESULT, Owned, PCWSTR, implement, w};
 
 const DRAGDROP_GET_FILES_COUNT: u32 = 0xFFFF_FFFF;
@@ -66,10 +70,8 @@ pub(crate) fn write_file_clipboard(paths: &[PathBuf], mode: ClipboardMode) -> Re
 }
 
 pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
-    write_file_clipboard(paths, ClipboardMode::Copy)?;
+    let (_pidls, data_object) = shell_drag_data_object(paths)?;
     unsafe {
-        let data_object =
-            OleGetClipboard().map_err(|error| format!("无法创建文件拖放数据：{error}"))?;
         let drop_source: IDropSource = KiteDropSource.into();
         let mut effect = DROPEFFECT_COPY;
         DoDragDrop(
@@ -80,6 +82,74 @@ pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
         )
         .ok()
         .map_err(|error| format!("文件拖放失败：{error}"))
+    }
+}
+
+fn shell_drag_data_object(paths: &[PathBuf]) -> Result<(Vec<ShellPidl>, IDataObject), String> {
+    let parent = shared_parent(paths)?;
+    let parent_pidl = ShellPidl::parse(parent)?;
+    let mut full_pidls = Vec::with_capacity(paths.len());
+    for path in paths {
+        full_pidls.push(ShellPidl::parse(path)?);
+    }
+    let child_pidls = full_pidls
+        .iter()
+        .map(|pidl| unsafe { ILFindLastID(pidl.as_ptr()) as *const ITEMIDLIST })
+        .collect::<Vec<_>>();
+    let data_object = unsafe {
+        SHCreateDataObject(
+            Some(parent_pidl.as_ptr()),
+            Some(&child_pidls),
+            None::<&IDataObject>,
+        )
+        .map_err(|error| format!("无法创建系统文件拖放数据：{error}"))?
+    };
+
+    let mut pidls = Vec::with_capacity(paths.len() + 1);
+    pidls.push(parent_pidl);
+    pidls.extend(full_pidls);
+    Ok((pidls, data_object))
+}
+
+fn shared_parent(paths: &[PathBuf]) -> Result<&Path, String> {
+    let parent = paths
+        .first()
+        .and_then(|path| path.parent())
+        .ok_or_else(|| "文件路径缺少父文件夹".to_string())?;
+    if paths.iter().any(|path| path.parent() != Some(parent)) {
+        return Err("一次只能拖动同一文件夹中的项目".to_string());
+    }
+    Ok(parent)
+}
+
+struct ShellPidl(*mut ITEMIDLIST);
+
+impl ShellPidl {
+    fn parse(path: &Path) -> Result<Self, String> {
+        let wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut pidl = std::ptr::null_mut();
+        unsafe {
+            SHParseDisplayName(PCWSTR(wide.as_ptr()), None::<&IBindCtx>, &mut pidl, 0, None)
+                .map_err(|error| format!("无法解析文件路径 {}：{error}", path.display()))?;
+        }
+        if pidl.is_null() {
+            return Err(format!("无法解析文件路径：{}", path.display()));
+        }
+        Ok(Self(pidl))
+    }
+
+    fn as_ptr(&self) -> *const ITEMIDLIST {
+        self.0
+    }
+}
+
+impl Drop for ShellPidl {
+    fn drop(&mut self) {
+        unsafe { ILFree(Some(self.0)) };
     }
 }
 
@@ -265,9 +335,9 @@ impl Drop for LockedGlobal {
 
 #[cfg(test)]
 mod tests {
-    use super::{DROPFILES, drop_files_bytes};
+    use super::{DROPFILES, drop_files_bytes, shared_parent};
     use std::mem::size_of;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn drop_files_payload_contains_utf16_paths() {
@@ -298,5 +368,25 @@ mod tests {
         let decoded = String::from_utf16(wide).expect("decode drop files");
         assert!(decoded.contains(r"C:\one.txt"));
         assert!(decoded.contains(r"C:\two.txt"));
+    }
+
+    #[test]
+    fn accepts_sibling_paths_from_one_folder() {
+        let paths = [
+            PathBuf::from(r"C:\folder\one.txt"),
+            PathBuf::from(r"C:\folder\two.txt"),
+        ];
+
+        assert_eq!(shared_parent(&paths).unwrap(), Path::new(r"C:\folder"));
+    }
+
+    #[test]
+    fn rejects_native_drag_paths_from_different_folders() {
+        let paths = [
+            PathBuf::from(r"C:\one\a.txt"),
+            PathBuf::from(r"C:\two\b.txt"),
+        ];
+
+        assert!(shared_parent(&paths).is_err());
     }
 }
