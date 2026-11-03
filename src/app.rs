@@ -391,6 +391,16 @@ impl ColumnPane {
         self.refresh_view();
     }
 
+    fn toggle_sort_for_header(&mut self, key: SortKey) {
+        let ascending = if self.sort.key == key {
+            !self.sort.ascending
+        } else {
+            default_column_header_sort_ascending(key)
+        };
+        self.sort = SortSpec { key, ascending };
+        self.refresh_view();
+    }
+
     fn set_directory_entries(&mut self, entries: Vec<FileEntry>, skipped: usize) {
         self.directory_entries = entries;
         self.search_entries = None;
@@ -1010,6 +1020,22 @@ impl KiteApp {
                 return;
             };
             pane.toggle_sort_order();
+            (pane.path.clone(), pane.view_rule())
+        };
+        if let Err(error) = ui_preferences::save_column_view_rule(&path, rule) {
+            self.notice = Some(error.into());
+        }
+        self.clear_hidden_column_selection();
+        self.column_scroll_pending = true;
+        cx.notify();
+    }
+
+    fn sort_column_from_header(&mut self, index: usize, key: SortKey, cx: &mut Context<Self>) {
+        let (path, rule) = {
+            let Some(pane) = self.column_panes.get_mut(index) else {
+                return;
+            };
+            pane.toggle_sort_for_header(key);
             (pane.path.clone(), pane.view_rule())
         };
         if let Err(error) = ui_preferences::save_column_view_rule(&path, rule) {
@@ -5369,6 +5395,8 @@ impl KiteApp {
             );
 
         let details_header = details_visible.then(|| {
+            let sort_key = rules.sort.key;
+            let sort_ascending = rules.sort.ascending;
             let mut header = h_flex()
                 .h(px(24.))
                 .w_full()
@@ -5381,15 +5409,150 @@ impl KiteApp {
                 .text_xs()
                 .font_medium()
                 .text_color(muted)
-                .child(div().flex_1().min_w_0().pl(px(24.)).child("名称"));
+                .child(
+                    Button::new(("column-header-name", index))
+                        .ghost()
+                        .compact()
+                        .h(px(22.))
+                        .px_0()
+                        .flex_1()
+                        .min_w_0()
+                        .toggled(sort_key == SortKey::Name)
+                        .tooltip(column_header_tooltip(
+                            "名称",
+                            SortKey::Name,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .accessibility_label(column_header_tooltip(
+                            "名称",
+                            SortKey::Name,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.sort_column_from_header(index, SortKey::Name, cx);
+                        }))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .pl(px(24.))
+                                .gap_1()
+                                .when(sort_key == SortKey::Name, |this| {
+                                    this.child(column_sort_header_icon(sort_ascending))
+                                })
+                                .child("名称"),
+                        ),
+                );
             if layout.show_date_column {
-                header = header.child(div().w(px(DETAILED_DATE_WIDTH)).child("日期"));
+                header = header.child(
+                    Button::new(("column-header-modified", index))
+                        .ghost()
+                        .compact()
+                        .h(px(22.))
+                        .px_0()
+                        .w(px(DETAILED_DATE_WIDTH))
+                        .toggled(sort_key == SortKey::Modified)
+                        .tooltip(column_header_tooltip(
+                            "日期",
+                            SortKey::Modified,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .accessibility_label(column_header_tooltip(
+                            "日期",
+                            SortKey::Modified,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.sort_column_from_header(index, SortKey::Modified, cx);
+                        }))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap_1()
+                                .when(sort_key == SortKey::Modified, |this| {
+                                    this.child(column_sort_header_icon(sort_ascending))
+                                })
+                                .child("日期"),
+                        ),
+                );
             }
             if layout.show_kind_column {
-                header = header.child(div().w(px(DETAILED_KIND_WIDTH)).child("类型"));
+                header = header.child(
+                    Button::new(("column-header-kind", index))
+                        .ghost()
+                        .compact()
+                        .h(px(22.))
+                        .px_0()
+                        .w(px(DETAILED_KIND_WIDTH))
+                        .toggled(sort_key == SortKey::Kind)
+                        .tooltip(column_header_tooltip(
+                            "类型",
+                            SortKey::Kind,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .accessibility_label(column_header_tooltip(
+                            "类型",
+                            SortKey::Kind,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.sort_column_from_header(index, SortKey::Kind, cx);
+                        }))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap_1()
+                                .when(sort_key == SortKey::Kind, |this| {
+                                    this.child(column_sort_header_icon(sort_ascending))
+                                })
+                                .child("类型"),
+                        ),
+                );
             }
             if layout.show_size_column {
-                header = header.child(div().w(px(DETAILED_SIZE_WIDTH)).text_right().child("大小"));
+                header = header.child(
+                    Button::new(("column-header-size", index))
+                        .ghost()
+                        .compact()
+                        .h(px(22.))
+                        .px_0()
+                        .w(px(DETAILED_SIZE_WIDTH))
+                        .toggled(sort_key == SortKey::Size)
+                        .tooltip(column_header_tooltip(
+                            "大小",
+                            SortKey::Size,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .accessibility_label(column_header_tooltip(
+                            "大小",
+                            SortKey::Size,
+                            sort_key,
+                            sort_ascending,
+                        ))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.sort_column_from_header(index, SortKey::Size, cx);
+                        }))
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .justify_end()
+                                .gap_1()
+                                .when(sort_key == SortKey::Size, |this| {
+                                    this.child(column_sort_header_icon(sort_ascending))
+                                })
+                                .child("大小"),
+                        ),
+                );
             }
             header
         });
@@ -6206,6 +6369,37 @@ fn detailed_column_width_for_name_width(
     (DETAILED_COLUMN_NAME_OVERHEAD + details_width + gaps + name_width.ceil())
         .max(f32::from(preferred_width))
         .clamp(DETAILED_COLUMN_MIN_WIDTH, DETAILED_COLUMN_MAX_WIDTH)
+}
+
+fn default_column_header_sort_ascending(key: SortKey) -> bool {
+    !matches!(key, SortKey::Modified | SortKey::Size)
+}
+
+fn column_header_tooltip(
+    title: &str,
+    key: SortKey,
+    active_key: SortKey,
+    ascending: bool,
+) -> SharedString {
+    if active_key == key {
+        if ascending {
+            format!("当前按{title}升序，点击改为降序")
+        } else {
+            format!("当前按{title}降序，点击改为升序")
+        }
+    } else {
+        format!("按{title}排序")
+    }
+    .into()
+}
+
+fn column_sort_header_icon(ascending: bool) -> Icon {
+    Icon::new(if ascending {
+        IconName::SortAscending
+    } else {
+        IconName::SortDescending
+    })
+    .size_3()
 }
 
 fn column_modified_label(entry: &FileEntry) -> String {
@@ -7298,6 +7492,7 @@ mod path_bar_tests {
     use crate::fs::{EntryKind, FileEntry, SortKey, SortSpec};
     use crate::ui_preferences::{ColumnGroupPreference as ColumnGroup, ColumnViewRule};
     use std::path::{Path, PathBuf};
+    use std::time::{Duration, UNIX_EPOCH};
 
     fn pane(path: &str, loading: bool) -> ColumnPane {
         ColumnPane::new(
@@ -7414,6 +7609,48 @@ mod path_bar_tests {
         );
         assert_eq!(column.entries[0].name, "zeta.txt");
         assert_eq!(column.entries[1].name, "alpha.txt");
+    }
+
+    #[test]
+    fn column_header_selects_field_and_toggles_direction() {
+        let root = PathBuf::from(r"C:\repo");
+        let mut older = entry(r"C:\repo\older.txt", EntryKind::File);
+        older.modified = Some(UNIX_EPOCH + Duration::from_secs(100));
+        let mut newer = entry(r"C:\repo\newer.txt", EntryKind::File);
+        newer.modified = Some(UNIX_EPOCH + Duration::from_secs(200));
+        let mut column = ColumnPane::new(
+            root,
+            vec![older, newer],
+            0,
+            false,
+            false,
+            false,
+            ColumnViewRule::default(),
+        );
+
+        column.toggle_sort_for_header(SortKey::Modified);
+        assert_eq!(
+            column.sort,
+            SortSpec {
+                key: SortKey::Modified,
+                ascending: false,
+            }
+        );
+        assert_eq!(column.entries[0].name, "newer.txt");
+
+        column.toggle_sort_for_header(SortKey::Modified);
+        assert_eq!(
+            column.sort,
+            SortSpec {
+                key: SortKey::Modified,
+                ascending: true,
+            }
+        );
+        assert_eq!(column.entries[0].name, "older.txt");
+
+        column.toggle_sort_for_header(SortKey::Size);
+        assert_eq!(column.sort.key, SortKey::Size);
+        assert!(!column.sort.ascending);
     }
 
     #[test]
