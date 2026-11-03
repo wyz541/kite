@@ -294,14 +294,8 @@ private struct KiteBrowserColumn: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(column.entries) { entry in
-                            KiteBrowserRow(
-                                model: model,
-                                entry: entry,
-                                columnIndex: index,
-                                isSelected: column.selectedPath == entry.path,
-                                showsDetails: showsDetails
-                            )
+                        ForEach(column.displayRows) { row in
+                            columnRow(row)
                         }
                     }
                     .padding(.horizontal, 5)
@@ -383,18 +377,7 @@ private struct KiteBrowserColumn: View {
                 .accessibilityLabel(showsDetails ? "隐藏详细信息" : "显示详细信息")
             }
 
-            Menu {
-                KiteDirectoryMenu(model: model, column: column)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 22, height: 22)
-                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .help("文件夹操作")
-            .accessibilityLabel("文件夹操作")
+            columnRulesMenu
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
@@ -416,6 +399,98 @@ private struct KiteBrowserColumn: View {
         }
     }
 
+    @ViewBuilder
+    private func columnRow(_ row: BrowserColumnRow) -> some View {
+        switch row {
+        case .group(let title):
+            HStack {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+        case .entry(let entry):
+            KiteBrowserRow(
+                model: model,
+                entry: entry,
+                columnIndex: index,
+                isSelected: column.selectedPath == entry.path,
+                showsDetails: showsDetails
+            )
+        }
+    }
+
+    private var columnRulesMenu: some View {
+        Menu {
+            Menu {
+                ForEach(BrowserColumnSortKey.allCases) { key in
+                    Button {
+                        model.setColumnSortKey(index: index, key: key)
+                    } label: {
+                        ruleLabel(key.title, selected: column.sortKey == key)
+                    }
+                }
+            } label: {
+                Label("排序", systemImage: "arrow.up.arrow.down")
+            }
+
+            Menu {
+                ForEach(BrowserColumnFilter.allCases) { filter in
+                    Button {
+                        model.setColumnFilter(index: index, filter: filter)
+                    } label: {
+                        ruleLabel(filter.title, selected: column.filter == filter)
+                    }
+                }
+            } label: {
+                Label("筛选", systemImage: "line.3.horizontal.decrease.circle")
+            }
+
+            Menu {
+                ForEach(BrowserColumnGroup.allCases) { group in
+                    Button {
+                        model.setColumnGroup(index: index, group: group)
+                    } label: {
+                        ruleLabel(group.title, selected: column.group == group)
+                    }
+                }
+            } label: {
+                Label("分组", systemImage: "rectangle.3.group")
+            }
+
+            Divider()
+
+            Button {
+                model.resetColumnView(index: index)
+            } label: {
+                Label("重置分栏显示规则", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(column.isDefaultView)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("分栏显示规则")
+        .accessibilityLabel("分栏显示规则")
+    }
+
+    private func ruleLabel(_ title: String, selected: Bool) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            if selected {
+                Image(systemName: "checkmark")
+            }
+        }
+    }
     private var detailsHeader: some View {
         HStack(spacing: KiteColumnDetailsLayout.spacing) {
             Text("名称")
@@ -450,21 +525,27 @@ private struct KiteBrowserColumn: View {
                     .fill(Color.primary.opacity(0.045))
                     .frame(width: 54, height: 54)
 
-                Image(systemName: "wind")
-                    .font(.system(size: 22, weight: .light))
-                    .foregroundStyle(.tertiary)
+                Image(
+                    systemName: column.searchQuery != nil
+                        ? "magnifyingglass"
+                        : (column.filter == .all ? "wind" : "line.3.horizontal.decrease")
+                )
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(.tertiary)
             }
 
-            Text("文件夹为空")
+            Text(column.emptyLabel)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            Button("新建文件夹…") {
-                model.createFolder(in: column.path)
+            if column.searchQuery == nil && column.filter == .all {
+                Button("新建文件夹…") {
+                    model.createFolder(in: column.path)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.accentColor)
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Color.accentColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
