@@ -450,7 +450,7 @@ private struct KiteBrowserColumn: View {
                 )
             )
             .textFieldStyle(.plain)
-            .focused()
+            .focused($searchFocused)
             .onSubmit {
                 model.submitColumnSearch(path: column.path)
             }
