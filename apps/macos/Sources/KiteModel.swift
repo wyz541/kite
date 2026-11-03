@@ -25,14 +25,148 @@ struct BrowserEntry: Identifiable, Hashable {
     }
 }
 
+enum BrowserColumnSortKey: String, CaseIterable, Identifiable {
+    case name
+    case modified
+    case kind
+    case size
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name: return "名称"
+        case .modified: return "修改日期"
+        case .kind: return "类型"
+        case .size: return "大小"
+        }
+    }
+}
+
+enum BrowserColumnFilter: String, CaseIterable, Identifiable {
+    case all
+    case folders
+    case files
+    case media
+    case documents
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部项目"
+        case .folders: return "仅文件夹"
+        case .files: return "仅文件"
+        case .media: return "媒体文件"
+        case .documents: return "文档文件"
+        }
+    }
+
+    func matches(_ entry: BrowserEntry) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .folders:
+            return entry.isDirectory
+        case .files:
+            return !entry.isDirectory
+        case .media:
+            return !entry.isDirectory && BrowserFileKind.mediaExtensions.contains(entry.fileExtension)
+        case .documents:
+            return !entry.isDirectory && BrowserFileKind.documentExtensions.contains(entry.fileExtension)
+        }
+    }
+}
+
+enum BrowserColumnGroup: String, CaseIterable, Identifiable {
+    case none
+    case kind
+    case extensionName
+    case modified
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "不分组"
+        case .kind: return "按类型"
+        case .extensionName: return "按扩展名"
+        case .modified: return "按修改日期"
+        }
+    }
+}
+
+enum BrowserColumnRow: Identifiable {
+    case group(String)
+    case entry(BrowserEntry)
+
+    var id: String {
+        switch self {
+        case .group(let title): return "group:\(title)"
+        case .entry(let entry): return "entry:\(entry.path)"
+        }
+    }
+}
+
+private enum BrowserFileKind {
+    static let mediaExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico",
+        "mp3", "wav", "flac", "aac", "ogg",
+        "mp4", "mkv", "mov", "avi", "webm"
+    ]
+
+    static let documentExtensions: Set<String> = [
+        "txt", "md", "log", "ini", "toml", "yaml", "yml", "json",
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"
+    ]
+}
+
+extension BrowserEntry {
+    fileprivate var fileExtension: String {
+        URL(fileURLWithPath: path).pathExtension.lowercased()
+    }
+}
+
 struct BrowserColumn: Identifiable {
     let path: String
+    var directoryEntries: [BrowserEntry]
+    var searchEntries: [BrowserEntry]?
     var entries: [BrowserEntry]
     let skipped: UInt64
     let gitAvailable: Bool
     let svnAvailable: Bool
     var selectedPath: String?
+    var sortKey: BrowserColumnSortKey
     var sortAscending: Bool
+    var filter: BrowserColumnFilter
+    var group: BrowserColumnGroup
+    var searchQuery: String?
+    var searchTruncated: Bool
+
+    init(
+        path: String,
+        entries: [BrowserEntry],
+        skipped: UInt64,
+        gitAvailable: Bool,
+        svnAvailable: Bool,
+        selectedPath: String? = nil
+    ) {
+        self.path = path
+        self.directoryEntries = entries
+        self.searchEntries = nil
+        self.entries = []
+        self.skipped = skipped
+        self.gitAvailable = gitAvailable
+        self.svnAvailable = svnAvailable
+        self.selectedPath = selectedPath
+        self.sortKey = .name
+        self.sortAscending = true
+        self.filter = .all
+        self.group = .none
+        self.searchQuery = nil
+        self.searchTruncated = false
+        refreshView()
+    }
 
     var id: String { path }
     var title: String {
@@ -40,20 +174,183 @@ struct BrowserColumn: Identifiable {
         return name.isEmpty ? path : name
     }
 
+    var isDefaultView: Bool {
+        sortKey == .name && sortAscending && filter == .all && group == .none
+    }
+
+    var emptyLabel: String {
+        if searchQuery != nil {
+            return "无搜索结果"
+        }
+        if filter != .all {
+            return "筛选后无项目"
+        }
+        return "文件夹为空"
+    }
+
+    var displayRows: [BrowserColumnRow] {
+        guard group != .none else {
+            return entries.map(BrowserColumnRow.entry)
+        }
+
+        let now = Date()
+        var grouped: [String: (rank: Int, entries: [BrowserEntry])] = [:]
+        for entry in entries {
+            let key = groupKey(for: entry, now: now)
+            var group = grouped[key.label] ?? (rank: key.rank, entries: [])
+            group.entries.append(entry)
+            grouped[key.label] = group
+        }
+
+        return grouped
+            .sorted { left, right in
+                if left.value.rank != right.value.rank {
+                    return left.value.rank < right.value.rank
+                }
+                return left.key.localizedStandardCompare(right.key) == .orderedAscending
+            }
+            .flatMap { label, group in
+                [BrowserColumnRow.group(label)] + group.entries.map(BrowserColumnRow.entry)
+            }
+    }
+
     mutating func toggleSortOrder() {
         sortAscending.toggle()
-        let ascending = sortAscending
-        entries.sort { left, right in
-            if left.isDirectory != right.isDirectory {
-                return left.isDirectory
+        refreshView()
+    }
+
+    mutating func setSortKey(_ key: BrowserColumnSortKey) {
+        sortKey = key
+        refreshView()
+    }
+
+    mutating func setFilter(_ value: BrowserColumnFilter) {
+        filter = value
+        refreshView()
+    }
+
+    mutating func setGroup(_ value: BrowserColumnGroup) {
+        group = value
+    }
+
+    mutating func resetView() {
+        sortKey = .name
+        sortAscending = true
+        filter = .all
+        group = .none
+        refreshView()
+    }
+
+    mutating func setSearchResults(query: String, entries: [BrowserEntry], truncated: Bool) {
+        searchEntries = entries
+        searchQuery = query
+        searchTruncated = truncated
+        refreshView()
+    }
+
+    mutating func clearSearchResults() {
+        searchEntries = nil
+        searchQuery = nil
+        searchTruncated = false
+        refreshView()
+    }
+
+    private var sourceEntries: [BrowserEntry] {
+        searchEntries ?? directoryEntries
+    }
+
+    private mutating func refreshView() {
+        entries = sourceEntries
+            .filter { filter.matches($0) }
+            .sorted { entryComesBefore($0, $1) }
+        if let selectedPath,
+           !entries.contains(where: { $0.path == selectedPath }) {
+            self.selectedPath = nil
+        }
+    }
+
+    private func entryComesBefore(_ left: BrowserEntry, _ right: BrowserEntry) -> Bool {
+        if left.isDirectory != right.isDirectory {
+            return left.isDirectory
+        }
+
+        let comparison: ComparisonResult
+        switch sortKey {
+        case .name:
+            comparison = comparedNames(left, right)
+        case .modified:
+            switch (left.modifiedUnixMs, right.modifiedUnixMs) {
+            case (nil, nil):
+                return comparedNames(left, right) == .orderedAscending
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            case (let leftValue?, let rightValue?):
+                if leftValue == rightValue {
+                    comparison = comparedNames(left, right)
+                } else {
+                    comparison = leftValue < rightValue ? .orderedAscending : .orderedDescending
+                }
             }
-            var comparison = left.name.localizedStandardCompare(right.name)
-            if comparison == .orderedSame {
-                comparison = left.path.localizedStandardCompare(right.path)
+        case .kind:
+            comparison = left.kindLabel.localizedStandardCompare(right.kindLabel)
+        case .size:
+            if left.size == right.size {
+                comparison = comparedNames(left, right)
+            } else {
+                comparison = left.size < right.size ? .orderedAscending : .orderedDescending
             }
-            return ascending
-                ? comparison == .orderedAscending
-                : comparison == .orderedDescending
+        }
+
+        if comparison == .orderedSame {
+            return false
+        }
+        return sortAscending
+            ? comparison == .orderedAscending
+            : comparison == .orderedDescending
+    }
+
+    private func comparedNames(_ left: BrowserEntry, _ right: BrowserEntry) -> ComparisonResult {
+        let comparison = left.name.localizedStandardCompare(right.name)
+        return comparison == .orderedSame
+            ? left.path.localizedStandardCompare(right.path)
+            : comparison
+    }
+
+    private func groupKey(
+        for entry: BrowserEntry,
+        now: Date
+    ) -> (rank: Int, label: String) {
+        switch group {
+        case .none:
+            return (0, "")
+        case .kind:
+            return entry.isDirectory ? (0, "文件夹") : (1, "文件")
+        case .extensionName:
+            if entry.isDirectory {
+                return (0, "文件夹")
+            }
+            if entry.fileExtension.isEmpty {
+                return (2, "无扩展名")
+            }
+            return (1, entry.fileExtension.uppercased())
+        case .modified:
+            guard let modifiedUnixMs = entry.modifiedUnixMs else {
+                return (4, "未知日期")
+            }
+            let modified = Date(timeIntervalSince1970: TimeInterval(modifiedUnixMs) / 1_000)
+            let age = max(0, now.timeIntervalSince(modified))
+            if age < 24 * 60 * 60 {
+                return (0, "今天")
+            }
+            if age < 7 * 24 * 60 * 60 {
+                return (1, "最近 7 天")
+            }
+            if age < 30 * 24 * 60 * 60 {
+                return (2, "最近 30 天")
+            }
+            return (3, "更早")
         }
     }
 }
@@ -242,6 +539,38 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].toggleSortOrder()
+    }
+
+    func setColumnSortKey(index: Int, key: BrowserColumnSortKey) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].setSortKey(key)
+    }
+
+    func setColumnFilter(index: Int, filter: BrowserColumnFilter) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].setFilter(filter)
+    }
+
+    func setColumnGroup(index: Int, group: BrowserColumnGroup) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].setGroup(group)
+    }
+
+    func resetColumnView(index: Int) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].resetView()
     }
 
     func navigateUp() {
@@ -779,9 +1108,7 @@ final class KiteModel: ObservableObject {
             entries: listing.entries.map(BrowserEntry.init(dto:)),
             skipped: listing.skipped,
             gitAvailable: listing.gitAvailable,
-            svnAvailable: listing.svnAvailable,
-            selectedPath: nil,
-            sortAscending: true
+            svnAvailable: listing.svnAvailable
         )
     }
 
