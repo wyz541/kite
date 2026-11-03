@@ -1910,7 +1910,11 @@ impl KiteApp {
         self.path_bar_scroll_pending = true;
 
         let load_paths = (common..final_index)
-            .map(|index| (index, chain[index].clone()))
+            .map(|index| {
+                let path = chain[index].clone();
+                let rule = preferences.column_view_rule(&path);
+                (index, path, rule)
+            })
             .collect::<Vec<_>>();
         if load_paths.is_empty() {
             self._column_task = Task::ready(());
@@ -1920,7 +1924,7 @@ impl KiteApp {
                     .background_spawn(async move {
                         load_paths
                             .into_iter()
-                            .map(|(index, path)| (index, load_column_pane(path, sort)))
+                            .map(|(index, path, rule)| (index, load_column_pane(path, rule)))
                             .collect::<Vec<_>>()
                     })
                     .await;
