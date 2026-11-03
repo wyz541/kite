@@ -1,5 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::UNIX_EPOCH;
 
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
@@ -30,6 +33,14 @@ pub struct DirectoryListingDto {
     pub skipped: u64,
     pub git_available: bool,
     pub svn_available: bool,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct DirectorySearchDto {
+    pub path: String,
+    pub query: String,
+    pub entries: Vec<DirectoryEntryDto>,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -102,13 +113,17 @@ impl KiteError {
 }
 
 #[derive(Debug, uniffi::Object)]
-pub struct KiteCore;
+pub struct KiteCore {
+    search_cancel: Mutex<Option<Arc<AtomicBool>>>,
+}
 
 #[uniffi::export]
 impl KiteCore {
     #[uniffi::constructor]
     pub fn new() -> Arc<Self> {
-        Arc::new(Self)
+        Arc::new(Self {
+            search_cancel: Mutex::new(None),
+        })
     }
 
     pub fn version(&self) -> String {
@@ -163,6 +178,57 @@ impl KiteCore {
             git_available: vcs.git_available(),
             svn_available: vcs.svn_available(),
         })
+    }
+
+    pub fn search_directory(
+        &self,
+        path: String,
+        query: String,
+    ) -> Result<Option<DirectorySearchDto>, KiteError> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut active = self
+                .search_cancel
+                .lock()
+                .map_err(|_| KiteError::operation("搜索状态锁不可用"))?;
+            *active = Some(cancel.clone());
+        }
+
+        let result = crate::fs::search_directory(
+            &PathBuf::from(&path),
+            &query,
+            SortSpec::default(),
+            cancel.as_ref(),
+        );
+
+        if let Ok(mut active) = self.search_cancel.lock()
+            && active
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &cancel))
+        {
+            *active = None;
+        }
+
+        let Some(snapshot) = result.map_err(KiteError::operation)? else {
+            return Ok(None);
+        };
+        let vcs = load_vcs_snapshot(&snapshot.root);
+        let mut entries = snapshot.entries;
+        apply_statuses(&mut entries, &snapshot.root, &vcs);
+        Ok(Some(DirectorySearchDto {
+            path: snapshot.root.to_string_lossy().into_owned(),
+            query: snapshot.query,
+            entries: entries.iter().map(entry_dto).collect(),
+            truncated: snapshot.truncated,
+        }))
+    }
+
+    pub fn cancel_directory_search(&self) {
+        if let Ok(active) = self.search_cancel.lock()
+            && let Some(cancel) = active.as_ref()
+        {
+            cancel.store(true, Ordering::Relaxed);
+        }
     }
 
     pub fn devices(&self) -> DeviceSnapshotDto {
@@ -379,6 +445,36 @@ mod tests {
         let restored = update_info_from_dto(dto);
 
         assert_eq!(restored, update);
+    }
+
+    #[test]
+    fn core_searches_nested_entries() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-core-search-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let nested = directory.join("nested");
+        std::fs::create_dir_all(&nested).expect("create search fixture");
+        std::fs::write(nested.join("target.txt"), b"search target").expect("write search fixture");
+
+        let core = KiteCore::new();
+        let result = core
+            .search_directory(
+                directory.to_string_lossy().into_owned(),
+                "target".to_string(),
+            )
+            .expect("search succeeds")
+            .expect("search returns a snapshot");
+        let _ = std::fs::remove_dir_all(&directory);
+
+        assert_eq!(result.query, "target");
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].name, "target.txt");
+        assert!(!result.truncated);
     }
 
     #[test]

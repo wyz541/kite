@@ -394,6 +394,7 @@ final class KiteModel: ObservableObject {
     private static let sessionSchemaVersion: UInt32 = 1
 
     private let core: KiteCore
+    private var columnSearchGeneration: UInt64 = 0
 
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var favorites: [FavoriteEntryDto] = []
@@ -404,6 +405,9 @@ final class KiteModel: ObservableObject {
     @Published private(set) var updateInProgress = false
     @Published private(set) var updateStatusMessage: String?
     @Published private(set) var updateDownload: UpdateDownloadState?
+    @Published var activeColumnSearchPath: String?
+    @Published var columnSearchText = ""
+    @Published private(set) var columnSearchLoading = false
 
     init(core: KiteCore = KiteCore()) {
         self.core = core
@@ -456,6 +460,7 @@ final class KiteModel: ObservableObject {
     func newTab(path: String? = nil) {
         do {
             let tab = try makeTab(path: path ?? currentPath)
+            resetColumnSearchUI()
             tabs.append(tab)
             activeTabID = tab.id
             errorMessage = nil
@@ -467,6 +472,7 @@ final class KiteModel: ObservableObject {
     @discardableResult
     func closeActiveTab() -> Bool {
         guard canCloseTab, let index = activeTabIndex else { return false }
+        resetColumnSearchUI()
         let closingID = tabs[index].id
         tabs.remove(at: index)
         if activeTabID == closingID {
@@ -479,6 +485,9 @@ final class KiteModel: ObservableObject {
     func closeTab(id: UUID) {
         guard canCloseTab, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = activeTabID == id
+        if wasActive {
+            resetColumnSearchUI()
+        }
         tabs.remove(at: index)
         if wasActive {
             activeTabID = tabs[min(index, tabs.count - 1)].id
@@ -486,17 +495,20 @@ final class KiteModel: ObservableObject {
     }
 
     func activateTab(id: UUID) {
-        guard tabs.contains(where: { $0.id == id }) else { return }
+        guard tabs.contains(where: { $0.id == id }), activeTabID != id else { return }
+        resetColumnSearchUI()
         activeTabID = id
     }
 
     func nextTab() {
         guard tabs.count > 1, let index = activeTabIndex else { return }
+        resetColumnSearchUI()
         activeTabID = tabs[(index + 1) % tabs.count].id
     }
 
     func previousTab() {
         guard tabs.count > 1, let index = activeTabIndex else { return }
+        resetColumnSearchUI()
         activeTabID = tabs[(index + tabs.count - 1) % tabs.count].id
     }
 
@@ -507,6 +519,7 @@ final class KiteModel: ObservableObject {
         }
         do {
             let tab = try makeTab(path: path, id: tabs[index].id)
+            resetColumnSearchUI()
             tabs[index] = tab
             errorMessage = nil
         } catch {
@@ -571,6 +584,102 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].resetView()
+    }
+
+    func toggleColumnSearch(path: String) {
+        if activeColumnSearchPath == path {
+            clearColumnSearch(path: path)
+            return
+        }
+
+        if let previousPath = activeColumnSearchPath {
+            clearColumnSearch(path: previousPath)
+        }
+
+        resetColumnSearchRequest()
+        activeColumnSearchPath = path
+        columnSearchText = columnQuery(for: path) ?? ""
+    }
+
+    func setColumnSearchText(_ text: String) {
+        columnSearchText = text
+    }
+
+    func submitColumnSearch(path: String) {
+        let query = columnSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            clearColumnSearchResults(for: path)
+            resetColumnSearchRequest()
+            return
+        }
+
+        resetColumnSearchRequest()
+        columnSearchGeneration &+= 1
+        let generation = columnSearchGeneration
+        columnSearchLoading = true
+        let core = self.core
+
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try core.searchDirectory(path: path, query: query)
+                }.value
+
+                guard generation == self.columnSearchGeneration else { return }
+                self.columnSearchLoading = false
+                guard let result else { return }
+                self.applyColumnSearchResult(result, path: path)
+            } catch {
+                guard generation == self.columnSearchGeneration else { return }
+                self.columnSearchLoading = false
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func clearColumnSearch(path: String) {
+        resetColumnSearchRequest()
+        clearColumnSearchResults(for: path)
+        activeColumnSearchPath = nil
+        columnSearchText = ""
+    }
+
+    private func applyColumnSearchResult(_ result: DirectorySearchDto, path: String) {
+        guard let tabIndex = activeTabIndex,
+              let columnIndex = tabs[tabIndex].columns.firstIndex(where: { $0.path == path }) else {
+            return
+        }
+        let entries = result.entries.map(BrowserEntry.init(dto:))
+        tabs[tabIndex].columns[columnIndex].setSearchResults(
+            query: result.query,
+            entries: entries,
+            truncated: result.truncated
+        )
+        errorMessage = nil
+    }
+
+    private func clearColumnSearchResults(for path: String) {
+        guard let tabIndex = activeTabIndex,
+              let columnIndex = tabs[tabIndex].columns.firstIndex(where: { $0.path == path }) else {
+            return
+        }
+        tabs[tabIndex].columns[columnIndex].clearSearchResults()
+    }
+
+    private func columnQuery(for path: String) -> String? {
+        columns.first(where: { $0.path == path })?.searchQuery
+    }
+
+    private func resetColumnSearchRequest() {
+        columnSearchGeneration &+= 1
+        columnSearchLoading = false
+        core.cancelDirectorySearch()
+    }
+
+    private func resetColumnSearchUI() {
+        resetColumnSearchRequest()
+        activeColumnSearchPath = nil
+        columnSearchText = ""
     }
 
     func navigateUp() {
