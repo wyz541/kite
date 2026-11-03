@@ -276,6 +276,8 @@ private struct KiteBrowserColumn: View {
     let columnWidth: CGFloat
     let onToggleDetails: () -> Void
 
+    @FocusState private var searchFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -283,6 +285,11 @@ private struct KiteBrowserColumn: View {
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 0.5)
                 .padding(.horizontal, 10)
+
+            if isSearchOpen {
+                searchBar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
 
             if showsDetails {
                 detailsHeader
@@ -323,6 +330,13 @@ private struct KiteBrowserColumn: View {
         }
         .shadow(color: .black.opacity(0.08), radius: 12, y: 3)
         .animation(.snappy(duration: 0.22), value: showsDetails)
+        .animation(.snappy(duration: 0.18), value: model.activeColumnSearchPath)
+        .onChange(of: model.activeColumnSearchPath) { activePath in
+            searchFocused = activePath == column.path
+        }
+        .onAppear {
+            searchFocused = model.activeColumnSearchPath == column.path
+        }
         .contextMenu {
             KiteDirectoryMenu(model: model, column: column)
         }
@@ -350,6 +364,25 @@ private struct KiteBrowserColumn: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.055), in: Capsule())
+
+            if column.searchTruncated {
+                Text("1000+")
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Button {
+                model.toggleColumnSearch(path: column.path)
+            } label: {
+                Image(systemName: isSearchOpen ? "xmark" : "magnifyingglass")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(isSearchOpen ? Color.accentColor : Color.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(isSearchOpen ? "关闭分栏搜索" : "搜索此分栏")
+            .accessibilityLabel(isSearchOpen ? "关闭分栏搜索" : "搜索此分栏")
 
             Button {
                 model.toggleColumnSort(index: index)
@@ -396,6 +429,58 @@ private struct KiteBrowserColumn: View {
                     .padding(.leading, 13)
                     .padding(.bottom, -1)
             }
+        }
+    }
+
+    private var isSearchOpen: Bool {
+        model.activeColumnSearchPath == column.path
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            TextField(
+                "搜索此分栏",
+                text: Binding(
+                    get: { model.columnSearchText },
+                    set: { model.setColumnSearchText($0) }
+                )
+            )
+            .textFieldStyle(.plain)
+            .focused($searchFocused)
+            .onSubmit {
+                model.submitColumnSearch(path: column.path)
+            }
+
+            if model.columnSearchLoading {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Button {
+                model.clearColumnSearch(path: column.path)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("关闭分栏搜索")
+            .accessibilityLabel("关闭分栏搜索")
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 34)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.28))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.045))
+                .frame(height: 0.5)
+        }
+        .onExitCommand {
+            model.clearColumnSearch(path: column.path)
         }
     }
 
