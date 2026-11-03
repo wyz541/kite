@@ -23,7 +23,7 @@ while IFS= read -r file; do
       ;;
   esac
   case "$file" in
-    apps/macos/Sources/*)
+    apps/macos/*)
       macos_changed=true
       ;;
   esac
