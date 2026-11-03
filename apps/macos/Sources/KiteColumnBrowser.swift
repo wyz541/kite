@@ -786,23 +786,36 @@ private struct KiteBrowserColumn: View {
 
     private var detailsHeader: some View {
         HStack(spacing: KiteColumnDetailsLayout.spacing) {
-            Text("名称")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 29)
+            sortHeaderButton(
+                "名称",
+                key: .name,
+                alignment: .leading,
+                leadingPadding: 29
+            )
 
             if showsDateColumn {
-                Text("日期")
-                    .frame(width: KiteColumnDetailsLayout.dateWidth, alignment: .leading)
+                sortHeaderButton(
+                    "日期",
+                    key: .modified,
+                    width: KiteColumnDetailsLayout.dateWidth
+                )
             }
 
             if showsKindColumn {
-                Text("类型")
-                    .frame(width: KiteColumnDetailsLayout.kindWidth, alignment: .leading)
+                sortHeaderButton(
+                    "类型",
+                    key: .kind,
+                    width: KiteColumnDetailsLayout.kindWidth
+                )
             }
 
             if showsSizeColumn {
-                Text("大小")
-                    .frame(width: KiteColumnDetailsLayout.sizeWidth, alignment: .trailing)
+                sortHeaderButton(
+                    "大小",
+                    key: .size,
+                    width: KiteColumnDetailsLayout.sizeWidth,
+                    alignment: .trailing
+                )
             }
         }
         .font(.system(size: 9.5, weight: .semibold))
@@ -815,6 +828,45 @@ private struct KiteBrowserColumn: View {
                 .fill(Color.primary.opacity(0.045))
                 .frame(height: 0.5)
         }
+    }
+
+    private func sortHeaderButton(
+        _ title: String,
+        key: BrowserColumnSortKey,
+        width: CGFloat? = nil,
+        alignment: Alignment = .leading,
+        leadingPadding: CGFloat = 0
+    ) -> some View {
+        let isSorted = column.sortKey == key
+        return Button {
+            model.toggleColumnSort(index: index, key: key)
+        } label: {
+            HStack(spacing: 3) {
+                Text(title)
+                if isSorted {
+                    Image(systemName: column.sortAscending ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 7.5, weight: .bold))
+                }
+            }
+            .font(.system(size: 9.5, weight: .semibold))
+            .padding(.leading, leadingPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+            .contentShape(Rectangle())
+        }
+        .frame(width: width)
+        .buttonStyle(.plain)
+        .foregroundStyle(isSorted ? Color.secondary : Color.secondary.opacity(0.68))
+        .help(sortHeaderHelp(title, key: key))
+        .accessibilityLabel(sortHeaderHelp(title, key: key))
+    }
+
+    private func sortHeaderHelp(_ title: String, key: BrowserColumnSortKey) -> String {
+        guard column.sortKey == key else {
+            return "按\(title)排序"
+        }
+        return column.sortAscending
+            ? "当前按\(title)升序，点击改为降序"
+            : "当前按\(title)降序，点击改为升序"
     }
 
     private var emptyState: some View {
