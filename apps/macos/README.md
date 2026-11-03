@@ -28,6 +28,7 @@ The script creates `apps/macos/build/Kite.app`.
 - Tab and directory restoration on app relaunch.
 - One breadcrumb and path-entry control with Command+L focus and Command+Up parent navigation.
 - Sidebar for standard locations, favorites, Rust-enumerated volumes, and settings.
+- Sidebar context menus for opening locations, revealing them in Finder, and showing Finder info.
 - Toolbar and context-menu favorite controls.
 - macOS 26 Liquid Glass surfaces, controls, and selected rows.
 - Automatic horizontal positioning of the active directory column.
