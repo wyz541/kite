@@ -313,7 +313,7 @@ struct ContentView: View {
     private var actionControls: some View {
         let selectedEntries = model.globalSearch == nil ? model.selectedColumnEntries : []
         let selectedPaths = selectedEntries.map(\.path)
-        HStack(spacing: 2) {
+        return HStack(spacing: 2) {
             KiteToolbarIconButton(
                 systemName: "magnifyingglass",
                 title: "搜索当前文件夹",
@@ -408,7 +408,7 @@ struct ContentView: View {
         let selectedBytes = selectedEntries
             .filter { !$0.isDirectory }
             .reduce(UInt64(0)) { $0 &+ $1.size }
-        HStack(spacing: 8) {
+        return HStack(spacing: 8) {
             Image(systemName: statusSystemImage)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(statusAccent)
