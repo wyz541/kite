@@ -167,6 +167,46 @@ enum ColumnDisplayRow {
 }
 
 #[derive(Clone)]
+struct KiteFileDrag {
+    paths: Vec<(PathBuf, bool)>,
+    label: SharedString,
+}
+
+struct KiteFileDragPreview {
+    label: SharedString,
+    count: usize,
+    position: Point<Pixels>,
+}
+
+impl Render for KiteFileDragPreview {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = if self.count > 1 {
+            format!("{} · {} 项", self.label, self.count)
+        } else {
+            self.label.to_string()
+        };
+        div()
+            .pl(self.position.x - px(72.))
+            .pt(self.position.y - px(18.))
+            .child(
+                h_flex()
+                    .h(px(36.))
+                    .max_w(px(180.))
+                    .gap_2()
+                    .px_3()
+                    .items_center()
+                    .rounded_md()
+                    .bg(cx.theme().accent)
+                    .text_sm()
+                    .text_color(cx.theme().accent_foreground)
+                    .shadow_md()
+                    .child(Icon::new(IconName::Folder).size_4())
+                    .child(div().min_w_0().truncate().child(label)),
+            )
+    }
+}
+
+#[derive(Clone)]
 struct ColumnPane {
     path: PathBuf,
     directory_entries: Vec<FileEntry>,
@@ -3326,6 +3366,99 @@ impl KiteApp {
         .detach();
     }
 
+    fn drag_payload_for_entry(&self, column: usize, entry: &FileEntry) -> KiteFileDrag {
+        let Some(pane) = self.column_panes.get(column) else {
+            return KiteFileDrag {
+                paths: vec![(entry.path.clone(), entry.is_dir())],
+                label: entry.name.clone().into(),
+            };
+        };
+        let use_selection = pane.selected_paths.len() > 1
+            && pane
+                .selected_paths
+                .iter()
+                .any(|selected| same_path(selected, &entry.path));
+        let entries = if use_selection {
+            pane.entries
+                .iter()
+                .filter(|candidate| pane.is_selected(&candidate.path))
+                .collect::<Vec<_>>()
+        } else {
+            vec![entry]
+        };
+        let paths = entries
+            .iter()
+            .map(|candidate| (candidate.path.clone(), candidate.is_dir()))
+            .collect::<Vec<_>>();
+        let label = if entries.len() == 1 {
+            entries[0].name.clone().into()
+        } else {
+            SharedString::from(format!("{} 个项目", entries.len()))
+        };
+        KiteFileDrag { paths, label }
+    }
+
+    fn transfer_dropped_paths(
+        &mut self,
+        sources: Vec<PathBuf>,
+        destination_dir: PathBuf,
+        move_source: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut sources = sources;
+        sources.sort();
+        sources.dedup();
+        if sources.is_empty() {
+            return;
+        }
+        if shell_fs::is_shell_namespace_path(&destination_dir)
+            || sources
+                .iter()
+                .any(|source| shell_fs::is_shell_namespace_path(source))
+        {
+            self.error = None;
+            self.notice = Some("移动设备项目拖放暂不支持".into());
+            cx.notify();
+            return;
+        }
+
+        self.error = None;
+        self.notice = Some(if move_source {
+            format!("正在移动 {} 项…", sources.len()).into()
+        } else {
+            format!("正在复制 {} 项…", sources.len()).into()
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let mut destinations = Vec::with_capacity(sources.len());
+                    for source in &sources {
+                        destinations.push(transfer_entry(source, &destination_dir, move_source)?);
+                    }
+                    Ok::<_, String>(destinations)
+                })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(destinations) => {
+                    this.error = None;
+                    this.notice = Some(if move_source {
+                        format!("已移动 {} 项", destinations.len()).into()
+                    } else {
+                        format!("已复制 {} 项", destinations.len()).into()
+                    });
+                    this.refresh(window, cx);
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    this.refresh(window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn paste_clipboard_into(
         &mut self,
         destination_dir: PathBuf,
@@ -5258,6 +5391,8 @@ impl KiteApp {
         if let Some(search_bar) = search_bar {
             column = column.child(search_bar);
         }
+        let internal_destination = path.clone();
+        let external_destination = path.clone();
         column
             .child(
                 v_flex()
@@ -5271,6 +5406,31 @@ impl KiteApp {
                     ))
                     .child(body),
             )
+            .drag_over::<KiteFileDrag>(move |style, _, _, _| style.bg(accent.opacity(0.14)))
+            .on_drop(cx.listener(move |this, drag: &KiteFileDrag, window, cx| {
+                let sources = drag
+                    .paths
+                    .iter()
+                    .map(|(path, _)| path.clone())
+                    .collect::<Vec<_>>();
+                this.transfer_dropped_paths(
+                    sources,
+                    internal_destination.clone(),
+                    !window.modifiers().control,
+                    window,
+                    cx,
+                );
+            }))
+            .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(accent.opacity(0.10)))
+            .on_drop(cx.listener(move |this, paths: &ExternalPaths, window, cx| {
+                this.transfer_dropped_paths(
+                    paths.paths().to_vec(),
+                    external_destination.clone(),
+                    false,
+                    window,
+                    cx,
+                );
+            }))
             .context_menu(move |menu, window, cx| {
                 render_context_menu(
                     menu,
@@ -5497,10 +5657,77 @@ impl KiteApp {
                     );
                 }
             }
-            let row = row
+            let drag_payload = self.drag_payload_for_entry(column, &entry);
+            let native_drag_paths = drag_payload
+                .paths
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>();
+            let native_drag_started = Arc::new(AtomicBool::new(false));
+            let mut row = row
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     this.activate_column_entry(column, row_ix, event, window, cx)
                 }))
+                .on_drag(drag_payload, |drag: &KiteFileDrag, position, _, cx| {
+                    cx.new(|_| KiteFileDragPreview {
+                        label: drag.label.clone(),
+                        count: drag.paths.len(),
+                        position,
+                    })
+                })
+                .external_drag_payload::<KiteFileDrag>(|drag, _, _| {
+                    Some(ExternalDragPayload::Files(FileDragPaths::new(
+                        drag.paths.clone(),
+                    )))
+                })
+                .on_drag_move::<KiteFileDrag>(move |event, window, cx| {
+                    let position = event.event.position;
+                    let viewport = window.viewport_size();
+                    let outside = position.x < px(0.)
+                        || position.y < px(0.)
+                        || position.x > viewport.width
+                        || position.y > viewport.height;
+                    if !outside || native_drag_started.swap(true, Ordering::Relaxed) {
+                        return;
+                    }
+                    if let Err(error) = file_clipboard::drag_file_paths(&native_drag_paths) {
+                        eprintln!("failed to start native file drag: {error}");
+                    }
+                    cx.stop_active_drag(window);
+                });
+            if entry.is_dir() {
+                let internal_destination = entry.path.clone();
+                let external_destination = entry.path.clone();
+                row = row
+                    .drag_over::<KiteFileDrag>(move |style, _, _, _| style.bg(accent.opacity(0.28)))
+                    .on_drop(cx.listener(move |this, drag: &KiteFileDrag, window, cx| {
+                        let sources = drag
+                            .paths
+                            .iter()
+                            .map(|(path, _)| path.clone())
+                            .collect::<Vec<_>>();
+                        this.transfer_dropped_paths(
+                            sources,
+                            internal_destination.clone(),
+                            !window.modifiers().control,
+                            window,
+                            cx,
+                        );
+                    }))
+                    .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                        style.bg(accent.opacity(0.20))
+                    })
+                    .on_drop(cx.listener(move |this, paths: &ExternalPaths, window, cx| {
+                        this.transfer_dropped_paths(
+                            paths.paths().to_vec(),
+                            external_destination.clone(),
+                            false,
+                            window,
+                            cx,
+                        );
+                    }));
+            }
+            let row = row
                 // Right-click must not select the row. Selection loads the next
                 // column for folders and starts preview loading for files.
                 .context_menu(move |menu, window, cx| {
