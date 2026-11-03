@@ -8,13 +8,7 @@ enum KitePlatform {
     private static let fileCutPasteboardType = NSPasteboard.PasteboardType(
         "dev.kite.file-cut"
     )
-    static let fileDragContentType = UTType(
-        exportedAs: "com.wyz541.kite.file-items"
-    )
-
-    private struct FileDragPayload: Codable {
-        let paths: [String]
-    }
+    static let fileDragContentType = KiteFileDragProvider.contentType
 
     static func open(_ path: String) {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
@@ -125,33 +119,7 @@ enum KitePlatform {
     }
 
     static func fileDragItemProvider(paths: [String], primaryPath: String) -> NSItemProvider {
-        let provider = NSItemProvider()
-        var seen = Set<String>()
-        let uniquePaths = paths.filter { seen.insert($0).inserted }
-        let primaryURL = URL(fileURLWithPath: primaryPath)
-
-        provider.suggestedName = primaryURL.lastPathComponent
-        provider.registerDataRepresentation(
-            forTypeIdentifier: fileDragContentType.identifier,
-            visibility: .all
-        ) { completion in
-            do {
-                let data = try JSONEncoder().encode(FileDragPayload(paths: uniquePaths))
-                completion(data, nil)
-            } catch {
-                completion(nil, error)
-            }
-            return nil
-        }
-        provider.registerFileRepresentation(
-            forTypeIdentifier: UTType.fileURL.identifier,
-            fileOptions: [],
-            visibility: .all
-        ) { completion in
-            completion(primaryURL, true, nil)
-            return nil
-        }
-        return provider
+        KiteFileDragProvider.makeProvider(paths: paths, primaryPath: primaryPath)
     }
 
     static func loadDroppedFilePaths(
@@ -195,14 +163,9 @@ enum KitePlatform {
         }
 
         if provider.hasItemConformingToTypeIdentifier(fileDragContentType.identifier) {
-            provider.loadDataRepresentation(
-                forTypeIdentifier: fileDragContentType.identifier
-            ) { data, _ in
-                let payload = data.flatMap {
-                    try? JSONDecoder().decode(FileDragPayload.self, from: $0)
-                }
+            KiteFileDragProvider.loadInternalPaths(from: provider) { loadedPaths in
                 DispatchQueue.main.async {
-                    finish(payload?.paths ?? [], true)
+                    finish(loadedPaths ?? [], true)
                 }
             }
             return

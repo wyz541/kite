@@ -13,6 +13,8 @@ Kite 支持内部移动、内部复制、从系统拖入和向系统拖出。
 文件行和文件夹行提供内部拖放数据。
 内部拖放包含当前选中项目。
 指针离开 Kite 窗口后，Kite 启动原生 OLE 文件拖放。
+原生拖放使用 Shell 数据对象。
+Shell 数据对象包含真实文件和文件夹项目。
 原生文件拖放使用复制效果。
 
 ### 拖入
@@ -29,7 +31,8 @@ Kite 支持内部移动、内部复制、从系统拖入和向系统拖出。
 ### 拖出
 
 文件行和文件夹行提供 `NSItemProvider`。
-Provider 同时包含 Kite 内部拖放类型和系统文件 URL。
+Provider 同时包含系统文件 URL 和 Kite 内部拖放类型。
+系统文件 URL 排在内部 JSON 数据之前。
 Kite 内部拖放包含当前选中项目。
 Finder 和其他应用读取系统文件 URL。
 
@@ -57,5 +60,5 @@ Finder 和其他应用读取系统文件 URL。
 - macOS SwiftUI and AppKit build。
 - macOS Core tests。
 - macOS Clippy。
-- macOS Finder drag provider smoke check。
+- macOS Finder drag provider smoke check：`bash apps/macos/test-file-drag.sh`。
 - Windows Explorer drag target smoke check。
