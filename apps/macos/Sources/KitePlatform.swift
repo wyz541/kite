@@ -8,6 +8,13 @@ enum KitePlatform {
     private static let fileCutPasteboardType = NSPasteboard.PasteboardType(
         "dev.kite.file-cut"
     )
+    static let fileDragContentType = UTType(
+        exportedAs: "com.wyz541.kite.file-items"
+    )
+
+    private struct FileDragPayload: Codable {
+        let paths: [String]
+    }
 
     static func open(_ path: String) {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
@@ -81,6 +88,111 @@ enum KitePlatform {
 
     static func clearFilePasteboard() {
         NSPasteboard.general.clearContents()
+    }
+
+    static func fileDragItemProvider(paths: [String], primaryPath: String) -> NSItemProvider {
+        let provider = NSItemProvider()
+        var seen = Set<String>()
+        let uniquePaths = paths.filter { seen.insert($0).inserted }
+        let primaryURL = URL(fileURLWithPath: primaryPath)
+
+        provider.suggestedName = primaryURL.lastPathComponent
+        provider.registerDataRepresentation(
+            forTypeIdentifier: fileDragContentType.identifier,
+            visibility: .all
+        ) { completion in
+            do {
+                let data = try JSONEncoder().encode(FileDragPayload(paths: uniquePaths))
+                completion(data, nil)
+            } catch {
+                completion(nil, error)
+            }
+            return nil
+        }
+        provider.registerFileRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier,
+            fileOptions: [],
+            visibility: .all
+        ) { completion in
+            completion(primaryURL, true, nil)
+            return nil
+        }
+        return provider
+    }
+
+    static func loadDroppedFilePaths(
+        from providers: [NSItemProvider],
+        completion: @escaping ([String], _ isInternal: Bool) -> Void
+    ) {
+        loadDropProvider(
+            providers,
+            index: 0,
+            paths: [],
+            isInternal: false,
+            completion: completion
+        )
+    }
+
+    private static func loadDropProvider(
+        _ providers: [NSItemProvider],
+        index: Int,
+        paths: [String],
+        isInternal: Bool,
+        completion: @escaping ([String], _ isInternal: Bool) -> Void
+    ) {
+        guard index < providers.count else {
+            var seen = Set<String>()
+            let uniquePaths = paths.filter { seen.insert($0).inserted }
+            DispatchQueue.main.async {
+                completion(uniquePaths, isInternal)
+            }
+            return
+        }
+
+        let provider = providers[index]
+        let finish: ([String], Bool) -> Void = { loadedPaths, internalDrop in
+            loadDropProvider(
+                providers,
+                index: index + 1,
+                paths: paths + loadedPaths,
+                isInternal: isInternal || internalDrop,
+                completion: completion
+            )
+        }
+
+        if provider.hasItemConformingToTypeIdentifier(fileDragContentType.identifier) {
+            provider.loadDataRepresentation(
+                forTypeIdentifier: fileDragContentType.identifier
+            ) { data, _ in
+                let payload = data.flatMap {
+                    try? JSONDecoder().decode(FileDragPayload.self, from: $0)
+                }
+                DispatchQueue.main.async {
+                    finish(payload?.paths ?? [], true)
+                }
+            }
+            return
+        }
+
+        provider.loadItem(
+            forTypeIdentifier: UTType.fileURL.identifier,
+            options: nil
+        ) { item, _ in
+            let path: String?
+            if let url = item as? URL {
+                path = url.path
+            } else if let url = item as? NSURL {
+                path = url.path
+            } else if let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil) {
+                path = url.path
+            } else {
+                path = nil
+            }
+            DispatchQueue.main.async {
+                finish(path.map { [$0] } ?? [], false)
+            }
+        }
     }
 
     static func chooseDirectory(prompt: String) -> String? {
