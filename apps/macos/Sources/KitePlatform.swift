@@ -49,6 +49,40 @@ enum KitePlatform {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
+    @MainActor
+    static func showInfo(_ path: String) {
+        let escapedPath = path
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let source = """
+        tell application "Finder"
+            activate
+            open information window of (POSIX file "\(escapedPath)" as alias)
+        end tell
+        """
+
+        guard let script = NSAppleScript(source: source) else {
+            presentInfoError("无法创建 Finder 简介窗口请求。")
+            return
+        }
+
+        var error: NSDictionary?
+        script.executeAndReturnError(&error)
+        guard let error else { return }
+        let message = error[NSAppleScript.errorMessage] as? String
+            ?? "Finder 无法显示此项目的简介。"
+        presentInfoError(message)
+    }
+
+    @MainActor
+    private static func presentInfoError(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "无法显示简介"
+        alert.informativeText = message
+        alert.runModal()
+    }
+
     static func quickLook(_ path: String) {
         quickLookController.show(path)
     }

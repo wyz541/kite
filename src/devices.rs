@@ -31,6 +31,18 @@ pub struct StorageVolume {
     pub total_bytes: Option<u64>,
 }
 
+impl StorageVolume {
+    pub fn capacity_label(&self) -> Option<String> {
+        let free = self.free_bytes?;
+        let total = self.total_bytes?;
+        Some(format!(
+            "{} 可用 / {}",
+            crate::fs::format_size(free),
+            crate::fs::format_size(total)
+        ))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortableDevice {
     pub name: String,
@@ -455,3 +467,37 @@ mod platform {
 }
 
 pub use platform::snapshot;
+
+#[cfg(test)]
+mod tests {
+    use super::{StorageVolume, VolumeKind};
+    use std::path::PathBuf;
+
+    fn volume(free_bytes: Option<u64>, total_bytes: Option<u64>) -> StorageVolume {
+        StorageVolume {
+            path: PathBuf::from("/"),
+            volume_name: Some("System".to_string()),
+            device_name: None,
+            kind: VolumeKind::Fixed,
+            free_bytes,
+            total_bytes,
+        }
+    }
+
+    #[test]
+    fn formats_volume_capacity_as_free_and_total_space() {
+        let detail = volume(
+            Some(300 * 1024 * 1024 * 1024),
+            Some(512 * 1024 * 1024 * 1024),
+        )
+        .capacity_label();
+
+        assert_eq!(detail.as_deref(), Some("300.0 GB 可用 / 512.0 GB"));
+    }
+
+    #[test]
+    fn volume_capacity_requires_free_and_total_space() {
+        assert_eq!(volume(Some(300), None).capacity_label(), None);
+        assert_eq!(volume(None, Some(512)).capacity_label(), None);
+    }
+}
