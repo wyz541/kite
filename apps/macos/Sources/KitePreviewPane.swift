@@ -29,32 +29,12 @@ struct KitePreviewPane: View {
     }
 
     private var header: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "rectangle.righthalf.inset.filled")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Text("预览")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            KiteToolbarIconButton(
-                systemName: "doc.on.doc",
-                title: "复制预览信息"
-            ) {
+        KitePreviewHeader(
+            onCopy: {
                 KitePlatform.copyText(previewInfoText)
-            }
-
-            KiteToolbarIconButton(
-                systemName: "xmark",
-                title: "关闭预览",
-                action: onClose
-            )
-            .scaleEffect(0.9)
-        }
-        .padding(.leading, 2)
+            },
+            onClose: onClose
+        )
     }
 
     private var previewSurface: some View {
@@ -195,6 +175,81 @@ struct KitePreviewPane: View {
         guard let unixMs else { return "未知" }
         let date = Date(timeIntervalSince1970: TimeInterval(unixMs) / 1_000)
         return date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+struct KitePreviewEmptyPane: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            KitePreviewHeader(onClose: onClose)
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.primary.opacity(0.045))
+                        .frame(width: 58, height: 58)
+
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 23, weight: .light))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Text("选择一个项目")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Text("在最后一栏选择文件后，这里会显示预览。")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 20)
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(width: KiteTheme.previewWidth)
+        .frame(maxHeight: .infinity)
+        .kiteGlass(.panel, cornerRadius: KiteTheme.panelRadius)
+    }
+}
+
+private struct KitePreviewHeader: View {
+    var onCopy: (() -> Void)?
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "rectangle.righthalf.inset.filled")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Text("预览")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            if let onCopy {
+                KiteToolbarIconButton(
+                    systemName: "doc.on.doc",
+                    title: "复制预览信息",
+                    action: onCopy
+                )
+            }
+
+            KiteToolbarIconButton(
+                systemName: "xmark",
+                title: "关闭预览",
+                action: onClose
+            )
+            .scaleEffect(0.9)
+        }
+        .padding(.leading, 2)
     }
 }
 
