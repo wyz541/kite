@@ -1122,11 +1122,24 @@ final class KiteModel: ObservableObject {
     }
 
     func handleFileDrop(_ providers: [NSItemProvider], destination: String) {
+        let copiesInternalDrop = NSEvent.modifierFlags.contains(.option)
         KitePlatform.loadDroppedFilePaths(from: providers) { [weak self] paths, isInternal in
             Task { @MainActor in
                 guard let self, !paths.isEmpty else { return }
-                let moveFiles = isInternal && !NSEvent.modifierFlags.contains(.option)
-                self.transferPaths(paths, to: destination, moveFiles: moveFiles)
+                guard isInternal else {
+                    self.transferPaths(paths, to: destination, moveFiles: false)
+                    return
+                }
+
+                switch KiteFileDragProvider.internalDragOperation(
+                    copyRequested: copiesInternalDrop
+                ) {
+                case .cut:
+                    self.cutFiles(paths)
+                case .copy:
+                    self.copyFiles(paths)
+                }
+                self.pasteFiles(into: destination)
             }
         }
     }
