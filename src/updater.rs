@@ -534,7 +534,8 @@ pub fn install_windows_update(
     fs::create_dir_all(&updates).map_err(|error| format!("无法创建更新目录：{error}"))?;
     let helper = updates.join(format!("apply-{version}-{}.ps1", std::process::id()));
     let log = updates.join("update.log");
-    fs::write(&helper, WINDOWS_UPDATE_HELPER)
+    let helper_contents = format!("\u{feff}{WINDOWS_UPDATE_HELPER}");
+    fs::write(&helper, helper_contents.as_bytes())
         .map_err(|error| format!("无法写入更新助手：{error}"))?;
 
     let powershell = std::env::var_os("SystemRoot")
@@ -596,12 +597,35 @@ function Show-UpdateError([string]$Message) {
     } catch {
     }
 }
+function Stop-KiteProcesses {
+    $processName = [IO.Path]::GetFileNameWithoutExtension($Target)
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $processes = @(Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID })
+        if ($processes.Count -eq 0) { return }
+        foreach ($process in $processes) {
+            try {
+                Write-UpdateLog "Stopping Kite process $($process.Id) before update"
+                Stop-Process -Id $process.Id -Force -ErrorAction Stop
+            } catch {
+                Write-UpdateLog "Unable to stop Kite process $($process.Id): $($_.Exception.Message)"
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    $remaining = @(Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID })
+    if ($remaining.Count -gt 0) {
+        throw "无法结束现有 Kite 进程。请关闭所有 Kite 窗口后重试。"
+    }
+}
 $backup = "$Target.old"
 $targetDirectory = Split-Path -Parent $Target
 try {
     Write-UpdateLog "Starting update from $Source to $Target"
     $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($process) { $process.WaitForExit(60000) | Out-Null }
+    if ($process) { $process.WaitForExit(10000) | Out-Null }
+    Write-UpdateLog "Stopping existing Kite processes before update"
+    Stop-KiteProcesses
     $stream = $null
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
         try {
@@ -610,6 +634,7 @@ try {
             break
         } catch {
             if ($attempt -eq 119) { throw }
+            Stop-KiteProcesses
             Start-Sleep -Milliseconds 250
         }
     }
@@ -747,6 +772,44 @@ mod tests {
             .expect("restore update target directory permissions");
         let _ = fs::remove_dir_all(&directory);
         assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_update_helper_stops_existing_kite_processes() {
+        assert!(WINDOWS_UPDATE_HELPER.contains("function Stop-KiteProcesses"));
+        assert!(WINDOWS_UPDATE_HELPER.contains("Stop-Process -Id "));
+        assert!(WINDOWS_UPDATE_HELPER.contains("-Force -ErrorAction Stop"));
+        assert!(WINDOWS_UPDATE_HELPER.contains("Stopping existing Kite processes before update"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_update_helper_has_valid_powershell_syntax() {
+        let path = std::env::temp_dir().join(format!(
+            "kite-update-helper-{}-{}.ps1",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let helper_contents = format!("\u{feff}{WINDOWS_UPDATE_HELPER}");
+        fs::write(&path, helper_contents.as_bytes()).expect("write update helper syntax fixture");
+        let command = format!(
+            "$null = [scriptblock]::Create((Get-Content -Raw -LiteralPath '{}')); if ($?) {{ exit 0 }} else {{ exit 1 }}",
+            path.display()
+        );
+        let status = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .status()
+            .expect("run PowerShell syntax check");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            status.success(),
+            "update helper contains invalid PowerShell syntax"
+        );
     }
 
     #[test]
