@@ -590,8 +590,10 @@ private struct KiteBrowserRow: View {
 
     private var metadataSize: String {
         guard !entry.isDirectory else { return "—" }
-        let megabytes = Double(entry.size) / 1_000_000
-        return String(format: "%.2f MB", megabytes)
+        return ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: entry.size),
+            countStyle: .file
+        )
     }
 
     private var accessibilityLabel: String {
