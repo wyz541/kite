@@ -18,7 +18,7 @@ use windows::Win32::System::Ole::{
 };
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
 use windows::Win32::UI::Shell::{
-    Common::ITEMIDLIST, DROPFILES, DragQueryFileW, HDROP, ILFindLastID, ILFree, SHCreateDataObject,
+    Common::ITEMIDLIST, DROPFILES, DragQueryFileW, HDROP, ILFree, SHCreateDataObject,
     SHParseDisplayName,
 };
 use windows::core::{BOOL, HRESULT, Owned, PCWSTR, implement, w};
@@ -86,40 +86,21 @@ pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
 }
 
 fn shell_drag_data_object(paths: &[PathBuf]) -> Result<(Vec<ShellPidl>, IDataObject), String> {
-    let parent = shared_parent(paths)?;
-    let parent_pidl = ShellPidl::parse(parent)?;
-    let mut full_pidls = Vec::with_capacity(paths.len());
-    for path in paths {
-        full_pidls.push(ShellPidl::parse(path)?);
+    if paths.is_empty() {
+        return Err("没有可拖动的文件".to_string());
     }
-    let child_pidls = full_pidls
+    let pidls = paths
         .iter()
-        .map(|pidl| unsafe { ILFindLastID(pidl.as_ptr()) as *const ITEMIDLIST })
-        .collect::<Vec<_>>();
+        .map(|path| ShellPidl::parse(path.as_path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let raw_pidls = pidls.iter().map(|pidl| pidl.as_ptr()).collect::<Vec<_>>();
+    // A null parent means every PIDL is a full desktop-rooted path. This works for
+    // different source folders and avoids parent-relative data for drag targets.
     let data_object = unsafe {
-        SHCreateDataObject(
-            Some(parent_pidl.as_ptr()),
-            Some(&child_pidls),
-            None::<&IDataObject>,
-        )
-        .map_err(|error| format!("无法创建系统文件拖放数据：{error}"))?
+        SHCreateDataObject(None, Some(&raw_pidls), None::<&IDataObject>)
+            .map_err(|error| format!("无法创建系统文件拖放数据：{error}"))?
     };
-
-    let mut pidls = Vec::with_capacity(paths.len() + 1);
-    pidls.push(parent_pidl);
-    pidls.extend(full_pidls);
     Ok((pidls, data_object))
-}
-
-fn shared_parent(paths: &[PathBuf]) -> Result<&Path, String> {
-    let parent = paths
-        .first()
-        .and_then(|path| path.parent())
-        .ok_or_else(|| "文件路径缺少父文件夹".to_string())?;
-    if paths.iter().any(|path| path.parent() != Some(parent)) {
-        return Err("一次只能拖动同一文件夹中的项目".to_string());
-    }
-    Ok(parent)
 }
 
 struct ShellPidl(*mut ITEMIDLIST);
@@ -335,9 +316,9 @@ impl Drop for LockedGlobal {
 
 #[cfg(test)]
 mod tests {
-    use super::{DROPFILES, drop_files_bytes, shared_parent};
+    use super::{DROPFILES, drop_files_bytes};
     use std::mem::size_of;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     #[test]
     fn drop_files_payload_contains_utf16_paths() {
@@ -368,25 +349,5 @@ mod tests {
         let decoded = String::from_utf16(wide).expect("decode drop files");
         assert!(decoded.contains(r"C:\one.txt"));
         assert!(decoded.contains(r"C:\two.txt"));
-    }
-
-    #[test]
-    fn accepts_sibling_paths_from_one_folder() {
-        let paths = [
-            PathBuf::from(r"C:\folder\one.txt"),
-            PathBuf::from(r"C:\folder\two.txt"),
-        ];
-
-        assert_eq!(shared_parent(&paths).unwrap(), Path::new(r"C:\folder"));
-    }
-
-    #[test]
-    fn rejects_native_drag_paths_from_different_folders() {
-        let paths = [
-            PathBuf::from(r"C:\one\a.txt"),
-            PathBuf::from(r"C:\two\b.txt"),
-        ];
-
-        assert!(shared_parent(&paths).is_err());
     }
 }
