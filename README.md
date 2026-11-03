@@ -260,6 +260,7 @@ cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 - [图标系统](docs/design/icon-system.md)
 - [搜索实现调研](docs/RUST_SEARCH_ENGINE_RESEARCH.md)
 - [文本编辑器调研](docs/TEXT_EDITOR_RESEARCH.md)
+- [发布对齐检查](docs/architecture/release-parity.md)
 - [截图隐私规则](docs/SCREENSHOT_POLICY.md)
 
 ## 参与贡献
