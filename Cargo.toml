@@ -1,6 +1,6 @@
 [package]
 name = "kite-explorer"
-version = "0.6.36"
+version = "0.6.37"
 edition = "2024"
 description = "A fast, native cross-platform file manager with a shared Rust Core, Windows GPUI UI, and native macOS SwiftUI UI with Liquid Glass"
 license = "MIT"
@@ -29,6 +29,7 @@ atomicwrites = "0.4.4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dunce = "1"
 dirs = "6"
+ignore = "0.4.33"
 open = "5"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -38,7 +39,6 @@ thiserror = "2"
 trash = "5"
 uniffi = "0.32.2"
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
-walkdir = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 futures-channel = "0.3"

@@ -260,6 +260,25 @@ macOS 与 Windows 使用相同的详细信息交互和宽度规则。
 点击任意文件夹段可返回对应层级。
 点击路径栏时，Kite 复用已加载的上级栏目。未变化的栏目不重新加载。
 
+### 分栏显示规则与搜索
+
+Windows 分栏视图的每个标题栏提供搜索按钮和更多按钮。
+更多按钮只显示分栏显示规则。
+显示规则包括排序、筛选、分组和重置。
+右键菜单继续提供文件操作。
+
+点击搜索按钮后，分栏展开搜索栏。
+搜索栏按 Enter 搜索当前分栏目录及其子目录。
+搜索结果显示在原分栏内。
+搜索失败或取消不会覆盖目录列表。
+按 Esc 关闭分栏搜索。
+
+Windows 全局工具栏搜索栏搜索当前目录及其子目录。
+全局搜索和分栏搜索使用同一套并行文件遍历引擎。
+引擎使用 `ignore` 和 ripgrep 的并行目录遍历实现。
+搜索任务可取消，结果上限为 1000 项。
+Rust 搜索引擎调研见 `docs/RUST_SEARCH_ENGINE_RESEARCH.md`。
+
 Windows 使用 `Alt+P` 切换路径栏。
 该快捷键对应 macOS 的 Option 组合键。
 
@@ -485,7 +504,7 @@ cargo run --features windows-ui -- "C:\Work\Project"
 .\build.ps1
 ```
 
-`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.36-windows-x64.zip`。
+`build.ps1` 生成 `dist\Kite.exe` 和 `dist\Kite-v0.6.37-windows-x64.zip`。
 
 ### macOS 构建
 

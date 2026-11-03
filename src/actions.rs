@@ -63,6 +63,33 @@ pub struct ContextMenuAction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnPaneCommand {
+    SortNameAscending,
+    SortNameDescending,
+    SortModifiedNewest,
+    SortModifiedOldest,
+    SortKind,
+    SortSizeDescending,
+    FilterAll,
+    FilterFolders,
+    FilterFiles,
+    FilterMedia,
+    FilterDocuments,
+    GroupNone,
+    GroupKind,
+    GroupExtension,
+    GroupModified,
+    ResetView,
+}
+
+#[derive(Clone, Debug, PartialEq, Action)]
+#[action(namespace = kite, no_json)]
+pub struct ColumnPaneAction {
+    pub path: PathBuf,
+    pub command: ColumnPaneCommand,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VcsMenuCommand {
     GitAdd,
     GitUnstage,

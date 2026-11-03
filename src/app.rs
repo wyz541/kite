@@ -16,9 +16,9 @@ use crate::devices::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
 use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::file_clipboard::{self, ClipboardMode, FileClipboard};
 use crate::fs::{
-    DirectorySnapshot, FileEntry, SortSpec, create_file, create_folder, format_size,
-    load_directory, open_file, recycle_entry, rename_entry, search_directory, transfer_entry,
-    validate_name, worse_status,
+    DirectorySnapshot, FileEntry, SortKey, SortSpec, create_file, create_folder, format_size,
+    load_directory, open_file, recycle_entry, rename_entry, search_directory, sort_entries,
+    transfer_entry, validate_name, worse_status,
 };
 use crate::platform::{default_root_path, root_directory};
 use crate::preview_window::PreviewWindow;
@@ -35,7 +35,7 @@ use gpui_kit::base::{SelectableText, TextSelectionHandle};
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
@@ -129,15 +129,265 @@ pub(crate) enum TabRequest {
     Previous,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ColumnFilter {
+    #[default]
+    All,
+    Folders,
+    Files,
+    Media,
+    Documents,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ColumnGroup {
+    #[default]
+    None,
+    Kind,
+    Extension,
+    Modified,
+}
+
+#[derive(Clone)]
+enum ColumnDisplayRow {
+    Group(SharedString),
+    Entry(FileEntry),
+}
+
 #[derive(Clone)]
 struct ColumnPane {
     path: PathBuf,
+    directory_entries: Vec<FileEntry>,
+    search_entries: Option<Vec<FileEntry>>,
     entries: Vec<FileEntry>,
     selected_path: Option<PathBuf>,
+    sort: SortSpec,
+    filter: ColumnFilter,
+    group: ColumnGroup,
+    search_query: Option<String>,
+    search_truncated: bool,
     loading: bool,
     skipped: usize,
     git_available: bool,
     svn_available: bool,
+}
+
+impl ColumnPane {
+    fn new(
+        path: PathBuf,
+        directory_entries: Vec<FileEntry>,
+        skipped: usize,
+        loading: bool,
+        git_available: bool,
+        svn_available: bool,
+        sort: SortSpec,
+    ) -> Self {
+        let mut pane = Self {
+            path,
+            directory_entries,
+            search_entries: None,
+            entries: Vec::new(),
+            selected_path: None,
+            sort,
+            filter: ColumnFilter::All,
+            group: ColumnGroup::None,
+            search_query: None,
+            search_truncated: false,
+            loading,
+            skipped,
+            git_available,
+            svn_available,
+        };
+        pane.refresh_view();
+        pane
+    }
+
+    fn source_entries(&self) -> &[FileEntry] {
+        self.search_entries
+            .as_deref()
+            .unwrap_or(self.directory_entries.as_slice())
+    }
+
+    fn refresh_view(&mut self) {
+        let mut entries = self
+            .source_entries()
+            .iter()
+            .filter(|entry| self.filter.matches(entry))
+            .cloned()
+            .collect::<Vec<_>>();
+        sort_entries(&mut entries, self.sort);
+        self.entries = entries;
+        if self.selected_path.as_ref().is_some_and(|selected| {
+            !self
+                .entries
+                .iter()
+                .any(|entry| same_path(&entry.path, selected))
+        }) {
+            self.selected_path = None;
+        }
+    }
+
+    fn set_directory_entries(&mut self, entries: Vec<FileEntry>, skipped: usize) {
+        self.directory_entries = entries;
+        self.search_entries = None;
+        self.search_query = None;
+        self.search_truncated = false;
+        self.skipped = skipped;
+        self.loading = false;
+        self.refresh_view();
+    }
+
+    fn set_search_results(&mut self, query: String, entries: Vec<FileEntry>, truncated: bool) {
+        self.search_entries = Some(entries);
+        self.search_query = Some(query);
+        self.search_truncated = truncated;
+        self.refresh_view();
+    }
+
+    fn clear_search_results(&mut self) {
+        self.search_entries = None;
+        self.search_query = None;
+        self.search_truncated = false;
+        self.refresh_view();
+    }
+
+    fn display_rows(&self) -> Vec<ColumnDisplayRow> {
+        if self.group == ColumnGroup::None {
+            return self
+                .entries
+                .iter()
+                .cloned()
+                .map(ColumnDisplayRow::Entry)
+                .collect();
+        }
+
+        let now = SystemTime::now();
+        let mut groups = std::collections::BTreeMap::<(u8, String), Vec<FileEntry>>::new();
+        for entry in &self.entries {
+            let (rank, label) = self.group_key(entry, now);
+            groups.entry((rank, label)).or_default().push(entry.clone());
+        }
+
+        let mut rows = Vec::new();
+        for ((_, label), mut entries) in groups {
+            sort_entries(&mut entries, self.sort);
+            rows.push(ColumnDisplayRow::Group(SharedString::from(label)));
+            rows.extend(entries.into_iter().map(ColumnDisplayRow::Entry));
+        }
+        rows
+    }
+
+    fn visible_row_count(&self) -> usize {
+        if self.group == ColumnGroup::None {
+            return self.entries.len();
+        }
+        let now = SystemTime::now();
+        let groups = self
+            .entries
+            .iter()
+            .map(|entry| self.group_key(entry, now))
+            .collect::<std::collections::BTreeSet<_>>();
+        self.entries.len() + groups.len()
+    }
+
+    fn entry_at_visible_row(&self, row: usize) -> Option<FileEntry> {
+        self.display_rows().get(row).and_then(|row| match row {
+            ColumnDisplayRow::Entry(entry) => Some(entry.clone()),
+            ColumnDisplayRow::Group(_) => None,
+        })
+    }
+
+    fn group_key(&self, entry: &FileEntry, now: SystemTime) -> (u8, String) {
+        match self.group {
+            ColumnGroup::None => (0, String::new()),
+            ColumnGroup::Kind => {
+                if entry.is_dir() {
+                    (0, "文件夹".to_string())
+                } else {
+                    (1, "文件".to_string())
+                }
+            }
+            ColumnGroup::Extension => {
+                if entry.is_dir() {
+                    (0, "文件夹".to_string())
+                } else if entry.extension.is_empty() {
+                    (2, "无扩展名".to_string())
+                } else {
+                    (1, entry.extension.to_uppercase())
+                }
+            }
+            ColumnGroup::Modified => {
+                let Some(modified) = entry.modified else {
+                    return (4, "未知日期".to_string());
+                };
+                let age = now.duration_since(modified).unwrap_or_default();
+                if age < Duration::from_secs(24 * 60 * 60) {
+                    (0, "今天".to_string())
+                } else if age < Duration::from_secs(7 * 24 * 60 * 60) {
+                    (1, "最近 7 天".to_string())
+                } else if age < Duration::from_secs(30 * 24 * 60 * 60) {
+                    (2, "最近 30 天".to_string())
+                } else {
+                    (3, "更早".to_string())
+                }
+            }
+        }
+    }
+}
+
+impl ColumnFilter {
+    fn matches(self, entry: &FileEntry) -> bool {
+        match self {
+            Self::All => true,
+            Self::Folders => entry.is_dir(),
+            Self::Files => !entry.is_dir(),
+            Self::Media => {
+                !entry.is_dir()
+                    && matches!(
+                        entry.extension.as_str(),
+                        "png"
+                            | "jpg"
+                            | "jpeg"
+                            | "gif"
+                            | "webp"
+                            | "svg"
+                            | "bmp"
+                            | "ico"
+                            | "mp3"
+                            | "wav"
+                            | "flac"
+                            | "aac"
+                            | "ogg"
+                            | "mp4"
+                            | "mkv"
+                            | "mov"
+                            | "avi"
+                            | "webm"
+                    )
+            }
+            Self::Documents => {
+                !entry.is_dir()
+                    && matches!(
+                        entry.extension.as_str(),
+                        "txt"
+                            | "md"
+                            | "log"
+                            | "ini"
+                            | "toml"
+                            | "yaml"
+                            | "yml"
+                            | "json"
+                            | "pdf"
+                            | "doc"
+                            | "docx"
+                            | "xls"
+                            | "xlsx"
+                            | "ppt"
+                            | "pptx"
+                    )
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -206,6 +456,7 @@ pub struct KiteApp {
     portable_devices: Vec<PortableDevice>,
     address_input: Entity<InputState>,
     search_input: Entity<InputState>,
+    column_search_input: Entity<InputState>,
     table: Entity<TableState<FileTableDelegate>>,
     focus_handle: FocusHandle,
     active_search: Option<SearchState>,
@@ -222,8 +473,13 @@ pub struct KiteApp {
     search_generation: u64,
     vcs_generation: u64,
     search_cancel: Option<Arc<AtomicBool>>,
+    column_search_path: Option<PathBuf>,
+    column_search_loading: bool,
+    column_search_generation: u64,
+    column_search_cancel: Option<Arc<AtomicBool>>,
     _load_task: Task<()>,
     _search_task: Task<()>,
+    _column_search_task: Task<()>,
     _vcs_task: Task<()>,
     view_mode: ViewMode,
     show_path_bar: bool,
@@ -353,7 +609,12 @@ impl KiteApp {
         });
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("搜索当前文件夹")
+                .placeholder("全局搜索当前文件夹")
+                .clean_on_escape()
+        });
+        let column_search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("搜索此分栏")
                 .clean_on_escape()
         });
         let table = cx.new(|cx| {
@@ -410,6 +671,22 @@ impl KiteApp {
                 InputEvent::Change => {}
             },
         );
+        let column_search_subscription = cx.subscribe_in(
+            &column_search_input,
+            window,
+            |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => {
+                    let value = this.column_search_input.read(cx).value().to_string();
+                    this.submit_column_search(value, window, cx);
+                }
+                InputEvent::Change
+                    if this.column_search_input.read(cx).value().trim().is_empty() =>
+                {
+                    this.clear_column_search_results(window, cx);
+                }
+                _ => {}
+            },
+        );
         let table_subscription = cx.subscribe_in(&table, window, Self::on_table_event);
 
         let mut app = Self {
@@ -423,6 +700,7 @@ impl KiteApp {
             portable_devices,
             address_input,
             search_input,
+            column_search_input,
             table,
             focus_handle: cx.focus_handle(),
             active_search: None,
@@ -439,8 +717,13 @@ impl KiteApp {
             search_generation: 0,
             vcs_generation: 0,
             search_cancel: None,
+            column_search_path: None,
+            column_search_loading: false,
+            column_search_generation: 0,
+            column_search_cancel: None,
             _load_task: Task::ready(()),
             _search_task: Task::ready(()),
+            _column_search_task: Task::ready(()),
             _vcs_task: Task::ready(()),
             view_mode,
             show_path_bar,
@@ -465,6 +748,7 @@ impl KiteApp {
             _subscriptions: vec![
                 address_subscription,
                 search_subscription,
+                column_search_subscription,
                 table_subscription,
             ],
         };
@@ -618,6 +902,7 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_column_search(window, cx);
         self.pending_file_selection = pending_file_selection;
         self.clear_column_preview();
         self.cancel_search();
@@ -793,12 +1078,13 @@ impl KiteApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_column_search(window, cx);
         self.clear_column_preview();
         self.pending_file_selection = None;
         let Some((entries, skipped)) = self
             .column_panes
             .get(column)
-            .map(|pane| (pane.entries.clone(), pane.skipped))
+            .map(|pane| (pane.directory_entries.clone(), pane.skipped))
         else {
             return;
         };
@@ -934,6 +1220,212 @@ impl KiteApp {
         }
     }
 
+    fn toggle_column_search(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .column_search_path
+            .as_ref()
+            .is_some_and(|active| same_path(active, &path))
+        {
+            self.close_column_search(window, cx);
+            return;
+        }
+
+        self.cancel_column_search_task();
+        self.column_search_path = Some(path);
+        for pane in &mut self.column_panes {
+            pane.clear_search_results();
+        }
+        self.column_search_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn submit_column_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        let query = query.trim().to_string();
+        if query.is_empty() {
+            self.clear_column_search_results(window, cx);
+            return;
+        }
+        let Some(root) = self.column_search_path.clone() else {
+            return;
+        };
+        let sort = self
+            .column_panes
+            .iter()
+            .find(|pane| same_path(&pane.path, &root))
+            .map(|pane| pane.sort)
+            .unwrap_or_default();
+
+        self.cancel_column_search_task();
+        let generation = self.column_search_generation;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.column_search_cancel = Some(cancel.clone());
+        self.column_search_loading = true;
+        self.error = None;
+        cx.notify();
+
+        self._column_search_task = cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(
+                    async move { search_directory(&root, &query, sort, cancel.as_ref()) },
+                )
+                .await;
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.column_search_generation != generation {
+                    return;
+                }
+                this.column_search_cancel = None;
+                this.column_search_loading = false;
+                match result {
+                    Ok(Some(snapshot)) => {
+                        if let Some(pane) = this
+                            .column_panes
+                            .iter_mut()
+                            .find(|pane| same_path(&pane.path, &snapshot.root))
+                        {
+                            pane.set_search_results(
+                                snapshot.query,
+                                snapshot.entries,
+                                snapshot.truncated,
+                            );
+                        }
+                        this.clear_hidden_column_selection();
+                        this.column_scroll_pending = true;
+                        this.error = None;
+                        this.refresh_vcs_statuses(snapshot.root, cx);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        this.error = Some(error.into());
+                    }
+                }
+                this.column_search_input.update(cx, |input, cx| {
+                    input.focus(window, cx);
+                });
+                cx.notify();
+            });
+        });
+    }
+
+    fn cancel_column_search_task(&mut self) {
+        if let Some(cancel) = self.column_search_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.column_search_loading = false;
+        self.column_search_generation = self.column_search_generation.wrapping_add(1);
+        self._column_search_task = Task::ready(());
+    }
+
+    fn clear_column_search_results(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_column_search_task();
+        for pane in &mut self.column_panes {
+            pane.clear_search_results();
+        }
+        self.column_search_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        self.clear_hidden_column_selection();
+        cx.notify();
+    }
+
+    fn close_column_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_column_search_results(window, cx);
+        self.column_search_path = None;
+        cx.notify();
+    }
+
+    fn clear_hidden_column_selection(&mut self) {
+        let selection_is_visible = self.column_selected_path.as_ref().is_some_and(|selected| {
+            self.column_panes.iter().any(|pane| {
+                pane.entries
+                    .iter()
+                    .any(|entry| same_path(&entry.path, selected))
+            })
+        });
+        if !selection_is_visible {
+            self.column_selected_path = None;
+            self.clear_column_preview();
+        }
+    }
+
+    fn on_column_pane_action(
+        &mut self,
+        action: &ColumnPaneAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self
+            .column_panes
+            .iter()
+            .position(|pane| same_path(&pane.path, &action.path))
+        else {
+            return;
+        };
+        let Some(pane) = self.column_panes.get_mut(index) else {
+            return;
+        };
+
+        match action.command {
+            ColumnPaneCommand::SortNameAscending => {
+                pane.sort = SortSpec {
+                    key: crate::fs::SortKey::Name,
+                    ascending: true,
+                }
+            }
+            ColumnPaneCommand::SortNameDescending => {
+                pane.sort = SortSpec {
+                    key: crate::fs::SortKey::Name,
+                    ascending: false,
+                }
+            }
+            ColumnPaneCommand::SortModifiedNewest => {
+                pane.sort = SortSpec {
+                    key: crate::fs::SortKey::Modified,
+                    ascending: false,
+                }
+            }
+            ColumnPaneCommand::SortModifiedOldest => {
+                pane.sort = SortSpec {
+                    key: crate::fs::SortKey::Modified,
+                    ascending: true,
+                }
+            }
+            ColumnPaneCommand::SortKind => {
+                pane.sort = SortSpec {
+                    key: crate::fs::SortKey::Kind,
+                    ascending: true,
+                }
+            }
+            ColumnPaneCommand::SortSizeDescending => {
+                pane.sort = SortSpec {
+                    key: crate::fs::SortKey::Size,
+                    ascending: false,
+                }
+            }
+            ColumnPaneCommand::FilterAll => pane.filter = ColumnFilter::All,
+            ColumnPaneCommand::FilterFolders => pane.filter = ColumnFilter::Folders,
+            ColumnPaneCommand::FilterFiles => pane.filter = ColumnFilter::Files,
+            ColumnPaneCommand::FilterMedia => pane.filter = ColumnFilter::Media,
+            ColumnPaneCommand::FilterDocuments => pane.filter = ColumnFilter::Documents,
+            ColumnPaneCommand::GroupNone => pane.group = ColumnGroup::None,
+            ColumnPaneCommand::GroupKind => pane.group = ColumnGroup::Kind,
+            ColumnPaneCommand::GroupExtension => pane.group = ColumnGroup::Extension,
+            ColumnPaneCommand::GroupModified => pane.group = ColumnGroup::Modified,
+            ColumnPaneCommand::ResetView => {
+                pane.sort = SortSpec::default();
+                pane.filter = ColumnFilter::All;
+                pane.group = ColumnGroup::None;
+            }
+        }
+        pane.refresh_view();
+        self.clear_hidden_column_selection();
+        self.column_scroll_pending = true;
+        cx.notify();
+    }
+
     fn invalidate_vcs(&mut self) {
         self.vcs_generation = self.vcs_generation.wrapping_add(1);
         self._vcs_task = Task::ready(());
@@ -965,9 +1457,13 @@ impl KiteApp {
                     .iter_mut()
                     .find(|pane| same_path(&pane.path, &root))
                 {
-                    apply_statuses(&mut pane.entries, &root, &snapshot);
+                    apply_statuses(&mut pane.directory_entries, &root, &snapshot);
+                    if let Some(search_entries) = pane.search_entries.as_mut() {
+                        apply_statuses(search_entries, &root, &snapshot);
+                    }
                     pane.git_available = snapshot.git_available();
                     pane.svn_available = snapshot.svn_available();
+                    pane.refresh_view();
                 }
                 cx.notify();
             });
@@ -986,15 +1482,7 @@ impl KiteApp {
         let sort = self.table.read(cx).delegate().sort_spec();
         self.column_panes = chain
             .iter()
-            .map(|path| ColumnPane {
-                path: path.clone(),
-                entries: Vec::new(),
-                selected_path: None,
-                loading: true,
-                skipped: 0,
-                git_available: false,
-                svn_available: false,
-            })
+            .map(|path| ColumnPane::new(path.clone(), Vec::new(), 0, true, false, false, sort))
             .collect();
         self.column_selected_path = None;
         self.column_scroll_pending = true;
@@ -1046,24 +1534,23 @@ impl KiteApp {
         let mut entries = Some(entries);
         let mut panes = self.column_panes[..common].to_vec();
 
+        let sort = self.table.read(cx).delegate().sort_spec();
         for (index, path) in chain.iter().enumerate().skip(common) {
             let ready_entries = (index == final_index).then(|| entries.take().unwrap_or_default());
-            panes.push(ColumnPane {
-                path: path.clone(),
-                entries: ready_entries.unwrap_or_default(),
-                selected_path: None,
-                loading: index != final_index,
-                skipped: if index == final_index { skipped } else { 0 },
+            panes.push(ColumnPane::new(
+                path.clone(),
+                ready_entries.unwrap_or_default(),
+                if index == final_index { skipped } else { 0 },
+                index != final_index,
                 git_available,
                 svn_available,
-            });
+                sort,
+            ));
         }
         if let Some(entries) = entries
             && let Some(last) = panes.get_mut(final_index)
         {
-            last.entries = entries;
-            last.skipped = skipped;
-            last.loading = false;
+            last.set_directory_entries(entries, skipped);
         }
 
         self.column_panes = panes;
@@ -1084,7 +1571,6 @@ impl KiteApp {
         if load_paths.is_empty() {
             self._column_task = Task::ready(());
         } else {
-            let sort = self.table.read(cx).delegate().sort_spec();
             self._column_task = cx.spawn(async move |this, cx| {
                 let loaded = cx
                     .background_spawn(async move {
@@ -1114,7 +1600,8 @@ impl KiteApp {
         cx.notify();
     }
 
-    fn show_list_view(&mut self, _: &ShowListView, _: &mut Window, cx: &mut Context<Self>) {
+    fn show_list_view(&mut self, _: &ShowListView, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_column_search(window, cx);
         self.clear_column_preview();
         if self.view_mode == ViewMode::List {
             return;
@@ -1147,6 +1634,7 @@ impl KiteApp {
         if query.is_empty() {
             return;
         }
+        self.close_column_search(window, cx);
         if shell_fs::is_shell_namespace_path(&self.current_dir) {
             self.notice = Some("移动设备内搜索暂不支持".into());
             self.error = None;
@@ -2077,9 +2565,15 @@ impl KiteApp {
                 return false;
             };
             let Some(row) = self.column_panes[column]
-                .entries
+                .display_rows()
                 .iter()
-                .position(|entry| !entry.is_dir() && same_path(&entry.path, path))
+                .position(|row| {
+                    matches!(
+                        row,
+                        ColumnDisplayRow::Entry(entry)
+                            if !entry.is_dir() && same_path(&entry.path, path)
+                    )
+                })
             else {
                 return false;
             };
@@ -2106,8 +2600,7 @@ impl KiteApp {
         let Some(entry) = self
             .column_panes
             .get(column)
-            .and_then(|pane| pane.entries.get(row))
-            .cloned()
+            .and_then(|pane| pane.entry_at_visible_row(row))
         else {
             return;
         };
@@ -2215,8 +2708,7 @@ impl KiteApp {
         let Some(entry) = self
             .column_panes
             .get(column)
-            .and_then(|pane| pane.entries.get(row))
-            .cloned()
+            .and_then(|pane| pane.entry_at_visible_row(row))
         else {
             return;
         };
@@ -2785,6 +3277,8 @@ impl KiteApp {
             cx.notify();
         } else if self.modal.is_some() {
             self.close_modal(window, cx);
+        } else if self.column_search_path.is_some() {
+            self.close_column_search(window, cx);
         } else if self.active_search.is_some() {
             self.clear_search(window, cx);
         } else if self.search_visible {
@@ -3853,12 +4347,23 @@ impl KiteApp {
         };
         let path = pane.path.clone();
         let loading = pane.loading;
-        let count = pane.entries.len();
+        let entry_count = pane.entries.len();
+        let row_count = pane.visible_row_count();
+        let sort = pane.sort;
+        let filter = pane.filter;
+        let group = pane.group;
+        let search_query = pane.search_query.clone();
+        let search_truncated = pane.search_truncated;
         let vertical_scroll = self
             .column_vertical_scrolls
             .get(index)
             .map(|state| state.handle.clone())
             .unwrap_or_default();
+        let search_open = self
+            .column_search_path
+            .as_ref()
+            .is_some_and(|search_path| same_path(search_path, &path));
+        let search_loading = search_open && self.column_search_loading;
         let active = same_path(&path, &self.current_dir);
         let details_visible =
             active && self.show_column_details && index + 1 == self.column_panes.len();
@@ -3874,9 +4379,19 @@ impl KiteApp {
         let can_paste = self.clipboard.borrow().is_some() || file_clipboard::has_files();
         let column_menu_target = column_context_menu_target(pane, can_paste);
         let action_context = self.focus_handle.clone();
+        let menu_path = path.clone();
+        let search_path = path.clone();
+        let close_search_path = path.clone();
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
         let accent = cx.theme().accent;
+        let empty_label = if search_query.is_some() {
+            "无搜索结果"
+        } else if filter != ColumnFilter::All {
+            "筛选后无项目"
+        } else {
+            "空文件夹"
+        };
         let body = if loading {
             v_flex()
                 .flex_1()
@@ -3886,19 +4401,19 @@ impl KiteApp {
                 .text_color(muted)
                 .child("正在读取…")
                 .into_any_element()
-        } else if count == 0 {
+        } else if entry_count == 0 {
             v_flex()
                 .flex_1()
                 .items_center()
                 .justify_center()
                 .text_xs()
                 .text_color(muted)
-                .child("空文件夹")
+                .child(empty_label)
                 .into_any_element()
         } else {
             uniform_list(
                 SharedString::from(format!("column-list-{index}-{}", path.display())),
-                count,
+                row_count,
                 cx.processor(move |this, range, window, cx| {
                     this.render_column_rows(index, range, details_visible, window, cx)
                 }),
@@ -3909,8 +4424,6 @@ impl KiteApp {
             .track_scroll(&vertical_scroll)
             .into_any_element()
         };
-        let header_menu_target = column_menu_target.clone();
-        let header_action_context = action_context.clone();
         let mut header = h_flex()
             .h(px(36.))
             .w_full()
@@ -3935,6 +4448,12 @@ impl KiteApp {
                     .text_color(if active { cx.theme().foreground } else { muted })
                     .child(title),
             )
+            .when(search_loading, |this| {
+                this.child(div().text_xs().text_color(muted).child("搜索中…"))
+            })
+            .when(search_truncated, |this| {
+                this.child(div().text_xs().text_color(muted).child("1000+"))
+            })
             .child(
                 div()
                     .px_1()
@@ -3943,47 +4462,53 @@ impl KiteApp {
                     .bg(muted.opacity(0.14))
                     .text_xs()
                     .text_color(muted)
-                    .child(count.to_string()),
+                    .child(entry_count.to_string()),
             );
         if active {
-            header = header
-                .child(
-                    Button::new(("toggle-column-details", index))
-                        .ghost()
-                        .compact()
-                        .icon(IconName::Grid2x2)
-                        .tooltip(if details_visible {
-                            "隐藏详细信息"
-                        } else {
-                            "显示详细信息"
-                        })
-                        .accessibility_label(if details_visible {
-                            "隐藏详细信息"
-                        } else {
-                            "显示详细信息"
-                        })
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.toggle_column_details(cx)
-                        })),
-                )
-                .child(
-                    Button::new(("column-more", index))
-                        .ghost()
-                        .compact()
-                        .icon(IconName::Ellipsis)
-                        .tooltip("文件夹操作")
-                        .accessibility_label("文件夹操作")
-                        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
-                            render_context_menu(
-                                menu,
-                                &header_menu_target,
-                                header_action_context.clone(),
-                                window,
-                                cx,
-                            )
-                        }),
-                );
+            header = header.child(
+                Button::new(("toggle-column-details", index))
+                    .ghost()
+                    .compact()
+                    .icon(IconName::Grid2x2)
+                    .tooltip(if details_visible {
+                        "隐藏详细信息"
+                    } else {
+                        "显示详细信息"
+                    })
+                    .accessibility_label(if details_visible {
+                        "隐藏详细信息"
+                    } else {
+                        "显示详细信息"
+                    })
+                    .on_click(
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_column_details(cx)),
+                    ),
+            );
         }
+        header = header
+            .child(
+                Button::new(("column-search", index))
+                    .ghost()
+                    .compact()
+                    .icon(IconName::Search)
+                    .tooltip("搜索此分栏")
+                    .accessibility_label("搜索此分栏")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.toggle_column_search(search_path.clone(), window, cx)
+                    })),
+            )
+            .child(
+                Button::new(("column-more", index))
+                    .ghost()
+                    .compact()
+                    .icon(IconName::Ellipsis)
+                    .tooltip("分栏显示规则")
+                    .accessibility_label("分栏显示规则")
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+                        build_column_control_menu(menu, &menu_path, sort, filter, group, window, cx)
+                    }),
+            );
+
         let details_header = details_visible.then(|| {
             h_flex()
                 .h(px(24.))
@@ -4002,6 +4527,41 @@ impl KiteApp {
                 .child(div().w(px(DETAILED_KIND_WIDTH)).child("类型"))
                 .child(div().w(px(DETAILED_SIZE_WIDTH)).text_right().child("大小"))
         });
+
+        let search_bar = search_open.then(|| {
+            h_flex()
+                .h(px(34.))
+                .w_full()
+                .px_2()
+                .gap_1()
+                .items_center()
+                .bg(cx.theme().status_bar)
+                .border_b_1()
+                .border_color(border)
+                .child(
+                    Input::new(&self.column_search_input)
+                        .aria_label("搜索当前分栏")
+                        .prefix(Icon::new(IconName::Search).size_3())
+                        .cleanable(true)
+                        .flex_1(),
+                )
+                .child(
+                    Button::new(("column-close-search", index))
+                        .ghost()
+                        .compact()
+                        .icon(IconName::X)
+                        .tooltip("关闭分栏搜索 (Esc)")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.column_search_path.as_ref().is_some_and(|active_path| {
+                                same_path(active_path, &close_search_path)
+                            }) {
+                                this.close_column_search(window, cx);
+                            }
+                        })),
+                )
+                .into_any_element()
+        });
+
         let mut column = v_flex()
             .id(("column", index))
             .w(px(column_width))
@@ -4016,13 +4576,16 @@ impl KiteApp {
         if let Some(details_header) = details_header {
             column = column.child(details_header);
         }
+        if let Some(search_bar) = search_bar {
+            column = column.child(search_bar);
+        }
         column
             .child(
                 v_flex()
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .when(!loading && count > 0, |this| {
+                    .when(!loading && entry_count > 0, |this| {
                         this.on_scroll_wheel(cx.listener(
                             move |this, event: &ScrollWheelEvent, window, cx| {
                                 this.handle_column_scroll_wheel(index, event, window, cx)
@@ -4122,7 +4685,7 @@ impl KiteApp {
         let Some(pane) = self.column_panes.get(column) else {
             return Vec::new();
         };
-        let entries = pane.entries.clone();
+        let display_rows = pane.display_rows();
         let column_path = pane.path.clone();
         let selected_path = pane.selected_path.clone();
         let loading = pane.loading;
@@ -4136,8 +4699,29 @@ impl KiteApp {
         let action_context = self.focus_handle.clone();
         let mut rows = Vec::new();
         for row_ix in range {
-            let Some(entry) = entries.get(row_ix).cloned() else {
+            let Some(display_row) = display_rows.get(row_ix) else {
                 continue;
+            };
+            let entry = match display_row {
+                ColumnDisplayRow::Group(label) => {
+                    rows.push(
+                        div()
+                            .id(("column-group", column * 100_000 + row_ix))
+                            .h(px(30.))
+                            .w_full()
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(muted)
+                            .bg(cx.theme().status_bar)
+                            .child(label.clone())
+                            .into_any_element(),
+                    );
+                    continue;
+                }
+                ColumnDisplayRow::Entry(entry) => entry.clone(),
             };
             let selected = selected_path
                 .as_ref()
@@ -4905,27 +5489,199 @@ fn load_column_pane(path: PathBuf, sort: SortSpec) -> ColumnPane {
         .map(|snapshot| (snapshot.entries, snapshot.skipped))
         .unwrap_or_default();
     if shell_fs::is_shell_namespace_path(&path) {
-        return ColumnPane {
-            path,
-            entries,
-            selected_path: None,
-            loading: false,
-            skipped,
-            git_available: false,
-            svn_available: false,
-        };
+        return ColumnPane::new(path, entries, skipped, false, false, false, sort);
     }
     let snapshot = load_vcs_snapshot(&path);
     apply_statuses(&mut entries, &path, &snapshot);
-    ColumnPane {
+    ColumnPane::new(
         path,
         entries,
-        selected_path: None,
-        loading: false,
         skipped,
-        git_available: snapshot.git_available(),
-        svn_available: snapshot.svn_available(),
-    }
+        false,
+        snapshot.git_available(),
+        snapshot.svn_available(),
+        sort,
+    )
+}
+
+fn column_pane_action(path: &Path, command: ColumnPaneCommand) -> Box<dyn Action> {
+    Box::new(ColumnPaneAction {
+        path: path.to_path_buf(),
+        command,
+    })
+}
+
+fn build_column_control_menu(
+    menu: PopupMenu,
+    path: &Path,
+    sort: SortSpec,
+    filter: ColumnFilter,
+    group: ColumnGroup,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let sort_path = path.to_path_buf();
+    let filter_path = path.to_path_buf();
+    let group_path = path.to_path_buf();
+    let reset_path = path.to_path_buf();
+    let is_default =
+        sort == SortSpec::default() && filter == ColumnFilter::All && group == ColumnGroup::None;
+
+    menu.min_w(px(250.))
+        .submenu_with_icon(
+            Some(Icon::new(IconName::ArrowUpDown).size_4()),
+            "排序",
+            window,
+            cx,
+            move |menu, _, _| {
+                let action_path = sort_path.clone();
+                menu.item(
+                    PopupMenuItem::new("名称：升序")
+                        .checked(sort.key == SortKey::Name && sort.ascending)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SortNameAscending,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("名称：降序")
+                        .checked(sort.key == SortKey::Name && !sort.ascending)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SortNameDescending,
+                        )),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("修改日期：最新优先")
+                        .checked(sort.key == SortKey::Modified && !sort.ascending)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SortModifiedNewest,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("修改日期：最旧优先")
+                        .checked(sort.key == SortKey::Modified && sort.ascending)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SortModifiedOldest,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("类型")
+                        .checked(sort.key == SortKey::Kind)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SortKind,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("大小：从大到小")
+                        .checked(sort.key == SortKey::Size && !sort.ascending)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::SortSizeDescending,
+                        )),
+                )
+            },
+        )
+        .submenu_with_icon(
+            Some(Icon::new(IconName::ListFilter).size_4()),
+            "筛选",
+            window,
+            cx,
+            move |menu, _, _| {
+                let action_path = filter_path.clone();
+                menu.item(
+                    PopupMenuItem::new("全部项目")
+                        .checked(filter == ColumnFilter::All)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::FilterAll,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("仅文件夹")
+                        .checked(filter == ColumnFilter::Folders)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::FilterFolders,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("仅文件")
+                        .checked(filter == ColumnFilter::Files)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::FilterFiles,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("媒体文件")
+                        .checked(filter == ColumnFilter::Media)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::FilterMedia,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("文档文件")
+                        .checked(filter == ColumnFilter::Documents)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::FilterDocuments,
+                        )),
+                )
+            },
+        )
+        .submenu_with_icon(
+            Some(Icon::new(IconName::Group).size_4()),
+            "分组规则",
+            window,
+            cx,
+            move |menu, _, _| {
+                let action_path = group_path.clone();
+                menu.item(
+                    PopupMenuItem::new("不分组")
+                        .checked(group == ColumnGroup::None)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::GroupNone,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("按类型")
+                        .checked(group == ColumnGroup::Kind)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::GroupKind,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("按扩展名")
+                        .checked(group == ColumnGroup::Extension)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::GroupExtension,
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new("按修改日期")
+                        .checked(group == ColumnGroup::Modified)
+                        .action(column_pane_action(
+                            &action_path,
+                            ColumnPaneCommand::GroupModified,
+                        )),
+                )
+            },
+        )
+        .separator()
+        .menu_with_disabled(
+            "重置分栏视图",
+            column_pane_action(&reset_path, ColumnPaneCommand::ResetView),
+            is_default,
+        )
 }
 
 fn column_context_menu_target(pane: &ColumnPane, can_paste: bool) -> ContextMenuTarget {
@@ -5156,6 +5912,7 @@ impl Render for KiteApp {
                 cx.listener(|this, _: &OpenSelection, window, cx| this.open_selected(window, cx)),
             )
             .on_action(cx.listener(Self::on_context_menu_action))
+            .on_action(cx.listener(Self::on_column_pane_action))
             .on_action(cx.listener(Self::show_list_view))
             .on_action(cx.listener(Self::show_columns_view))
             .on_action(cx.listener(Self::toggle_path_bar))
@@ -5451,21 +6208,107 @@ mod launch_target_tests {
 #[cfg(test)]
 mod path_bar_tests {
     use super::{
-        ColumnPane, column_chain, column_context_menu_target, column_count_after_file_selection,
-        common_column_prefix, loaded_column_index, path_after_recycle, path_after_rename,
+        ColumnDisplayRow, ColumnFilter, ColumnGroup, ColumnPane, column_chain,
+        column_context_menu_target, column_count_after_file_selection, common_column_prefix,
+        loaded_column_index, path_after_recycle, path_after_rename,
     };
+    use crate::fs::{EntryKind, FileEntry, SortSpec};
     use std::path::{Path, PathBuf};
 
     fn pane(path: &str, loading: bool) -> ColumnPane {
-        ColumnPane {
-            path: PathBuf::from(path),
-            entries: Vec::new(),
-            selected_path: None,
+        ColumnPane::new(
+            PathBuf::from(path),
+            Vec::new(),
+            0,
             loading,
-            skipped: 0,
-            git_available: false,
-            svn_available: false,
+            false,
+            false,
+            crate::fs::SortSpec::default(),
+        )
+    }
+
+    fn entry(path: &str, kind: EntryKind) -> FileEntry {
+        let path = PathBuf::from(path);
+        FileEntry {
+            extension: path
+                .extension()
+                .map(|value| value.to_string_lossy().to_lowercase())
+                .unwrap_or_default(),
+            name: path
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path,
+            kind,
+            size: 0,
+            modified: None,
+            git_status: None,
+            svn_status: None,
         }
+    }
+
+    #[test]
+    fn column_filter_and_grouping_change_visible_rows() {
+        let root = PathBuf::from(r"C:\repo");
+        let mut column = ColumnPane::new(
+            root.clone(),
+            vec![
+                entry(r"C:\repo\src", EntryKind::Directory),
+                entry(r"C:\repo\notes.txt", EntryKind::File),
+                entry(r"C:\repo\photo.png", EntryKind::File),
+            ],
+            0,
+            false,
+            false,
+            false,
+            SortSpec::default(),
+        );
+
+        column.filter = ColumnFilter::Documents;
+        column.refresh_view();
+        assert_eq!(column.entries.len(), 1);
+        assert_eq!(column.entries[0].name, "notes.txt");
+
+        column.filter = ColumnFilter::All;
+        column.group = ColumnGroup::Extension;
+        column.refresh_view();
+        let rows = column.display_rows();
+        let groups = rows
+            .iter()
+            .filter_map(|row| match row {
+                ColumnDisplayRow::Group(label) => Some(label.to_string()),
+                ColumnDisplayRow::Entry(_) => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(groups, vec!["文件夹", "PNG", "TXT"]);
+    }
+
+    #[test]
+    fn column_search_results_restore_the_directory_listing() {
+        let root = PathBuf::from(r"C:\repo");
+        let mut column = ColumnPane::new(
+            root.clone(),
+            vec![entry(r"C:\repo\notes.txt", EntryKind::File)],
+            0,
+            false,
+            false,
+            false,
+            SortSpec::default(),
+        );
+
+        column.set_search_results(
+            "target".to_string(),
+            vec![entry(r"C:\repo\nested\target.md", EntryKind::File)],
+            true,
+        );
+        assert_eq!(column.search_query.as_deref(), Some("target"));
+        assert!(column.search_truncated);
+        assert_eq!(column.entries[0].name, "target.md");
+
+        column.clear_search_results();
+        assert!(column.search_query.is_none());
+        assert!(!column.search_truncated);
+        assert_eq!(column.entries[0].name, "notes.txt");
     }
 
     #[test]
