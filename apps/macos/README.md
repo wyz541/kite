@@ -39,6 +39,7 @@ The script creates `apps/macos/build/Kite.app`.
 - Finder reveal requests for the current user file viewer.
 - AppKit sharing service picker.
 - Quick Look panel.
+- File and folder drag and drop with Finder integration.
 - macOS pasteboard.
 - macOS Trash API.
 - UniFFI-generated Swift bindings.

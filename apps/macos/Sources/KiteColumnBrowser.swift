@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct KiteColumnBrowser: View {
     @ObservedObject var model: KiteModel
@@ -463,6 +464,15 @@ private struct KiteBrowserColumn: View {
         .onAppear {
             searchFocused = model.activeColumnSearchPath == column.path
         }
+        .modifier(
+            KiteFileDropModifier(
+                destination: column.path,
+                cornerRadius: 20
+            ) { providers in
+                model.handleFileDrop(providers, destination: column.path)
+                return true
+            }
+        )
         .contextMenu {
             KiteDirectoryMenu(model: model, column: column)
         }
@@ -841,6 +851,37 @@ private struct KiteBrowserColumn: View {
     }
 }
 
+private struct KiteFileDropModifier: ViewModifier {
+    let destination: String?
+    let cornerRadius: CGFloat
+    let handleDrop: ([NSItemProvider]) -> Bool
+
+    @State private var isTargeted = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let destination {
+            content
+                .onDrop(
+                    of: [KitePlatform.fileDragContentType, .fileURL],
+                    isTargeted: $isTargeted
+                ) { providers in
+                    handleDrop(providers)
+                }
+                .overlay {
+                    if isTargeted {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(Color.accentColor, lineWidth: 1.5)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .accessibilityHint("可将文件或文件夹拖到这里：\(destination)")
+        } else {
+            content
+        }
+    }
+}
+
 private struct KiteBrowserRow: View {
     @ObservedObject var model: KiteModel
     let entry: BrowserEntry
@@ -907,6 +948,21 @@ private struct KiteBrowserRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .onDrag {
+            KitePlatform.fileDragItemProvider(
+                paths: model.dragPaths(column: columnIndex, entry: entry),
+                primaryPath: entry.path
+            )
+        }
+        .modifier(
+            KiteFileDropModifier(
+                destination: entry.isDirectory ? entry.path : nil,
+                cornerRadius: 9
+            ) { providers in
+                model.handleFileDrop(providers, destination: entry.path)
+                return true
+            }
+        )
         .simultaneousGesture(
             TapGesture(count: 2).onEnded {
                 if !entry.isDirectory {

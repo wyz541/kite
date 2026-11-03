@@ -35,6 +35,19 @@
     <string>0.6.44</string>
     <key>CFBundleVersion</key>
     <string>0.6.44</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>Kite File Drag Items</string>
+            <key>UTTypeIdentifier</key>
+            <string>com.wyz541.kite.file-items</string>
+        </dict>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>

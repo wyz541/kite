@@ -3,15 +3,21 @@ use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{HANDLE, HGLOBAL, POINT};
+use windows::Win32::Foundation::{
+    DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HANDLE, HGLOBAL, POINT, S_OK,
+};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
-use windows::Win32::System::Ole::{CF_HDROP, DROPEFFECT_COPY, DROPEFFECT_MOVE};
+use windows::Win32::System::Ole::{
+    CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, DoDragDrop, IDropSource,
+    IDropSource_Impl, OleGetClipboard,
+};
+use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
 use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, HDROP};
-use windows::core::{BOOL, Owned, PCWSTR, w};
+use windows::core::{BOOL, HRESULT, Owned, PCWSTR, implement, w};
 
 const DRAGDROP_GET_FILES_COUNT: u32 = 0xFFFF_FFFF;
 
@@ -57,6 +63,44 @@ pub(crate) fn write_file_clipboard(paths: &[PathBuf], mode: ClipboardMode) -> Re
         ClipboardMode::Cut => DROPEFFECT_MOVE.0,
     })?;
     Ok(())
+}
+
+pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
+    write_file_clipboard(paths, ClipboardMode::Copy)?;
+    unsafe {
+        let data_object =
+            OleGetClipboard().map_err(|error| format!("无法创建文件拖放数据：{error}"))?;
+        let drop_source: IDropSource = KiteDropSource.into();
+        let mut effect = DROPEFFECT_COPY;
+        DoDragDrop(
+            &data_object,
+            &drop_source,
+            DROPEFFECT_COPY,
+            &mut effect as *mut DROPEFFECT,
+        )
+        .ok()
+        .map_err(|error| format!("文件拖放失败：{error}"))
+    }
+}
+
+#[implement(IDropSource)]
+struct KiteDropSource;
+
+#[allow(non_snake_case)]
+impl IDropSource_Impl for KiteDropSource_Impl {
+    fn QueryContinueDrag(&self, escape_pressed: BOOL, key_state: MODIFIERKEYS_FLAGS) -> HRESULT {
+        if escape_pressed.as_bool() {
+            DRAGDROP_S_CANCEL
+        } else if key_state.0 & MK_LBUTTON.0 == 0 {
+            DRAGDROP_S_DROP
+        } else {
+            S_OK
+        }
+    }
+
+    fn GiveFeedback(&self, _effect: DROPEFFECT) -> HRESULT {
+        DRAGDROP_S_USEDEFAULTCURSORS
+    }
 }
 
 pub(crate) fn clear_if_matches(paths: &[PathBuf]) {
