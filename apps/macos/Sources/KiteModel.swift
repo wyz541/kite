@@ -25,7 +25,7 @@ struct BrowserEntry: Identifiable, Hashable {
     }
 }
 
-enum BrowserColumnSortKey: String, CaseIterable, Identifiable {
+enum BrowserColumnSortKey: String, CaseIterable, Identifiable, Codable {
     case name
     case modified
     case kind
@@ -78,7 +78,7 @@ enum BrowserColumnFilter: String, CaseIterable, Identifiable {
     }
 }
 
-enum BrowserColumnGroup: String, CaseIterable, Identifiable {
+enum BrowserColumnGroup: String, CaseIterable, Identifiable, Codable {
     case none
     case kind
     case extensionName
@@ -97,15 +97,45 @@ enum BrowserColumnGroup: String, CaseIterable, Identifiable {
 }
 
 enum BrowserColumnRow: Identifiable {
-    case group(String)
+    case group(title: String, count: Int, isCollapsed: Bool)
     case entry(BrowserEntry)
 
     var id: String {
         switch self {
-        case .group(let title): return "group:\(title)"
+        case .group(let title, _, _): return "group:\(title)"
         case .entry(let entry): return "entry:\(entry.path)"
         }
     }
+}
+
+struct StoredColumnViewRule: Codable, Equatable {
+    var sortKey: BrowserColumnSortKey
+    var sortAscending: Bool
+    var group: BrowserColumnGroup
+    var collapsedGroups: Set<String>
+
+    static let `default` = StoredColumnViewRule(
+        sortKey: .name,
+        sortAscending: true,
+        group: .none,
+        collapsedGroups: []
+    )
+
+    var withoutCollapsedGroups: StoredColumnViewRule {
+        var rule = self
+        rule.collapsedGroups = []
+        return rule
+    }
+}
+
+struct StoredColumnViewRules: Codable, Equatable {
+    var defaultRule: StoredColumnViewRule
+    var rules: [String: StoredColumnViewRule]
+
+    static let `default` = StoredColumnViewRules(
+        defaultRule: .default,
+        rules: [:]
+    )
 }
 
 enum BrowserSelectionMode: Equatable {
@@ -158,6 +188,7 @@ struct BrowserColumn: Identifiable {
     var sortAscending: Bool
     var filter: BrowserColumnFilter
     var group: BrowserColumnGroup
+    var collapsedGroups: Set<String>
     var searchQuery: String?
     var searchTruncated: Bool
 
@@ -167,7 +198,8 @@ struct BrowserColumn: Identifiable {
         skipped: UInt64,
         gitAvailable: Bool,
         svnAvailable: Bool,
-        selectedPath: String? = nil
+        selectedPath: String? = nil,
+        rule: StoredColumnViewRule = .default
     ) {
         self.path = path
         self.directoryEntries = entries
@@ -179,10 +211,11 @@ struct BrowserColumn: Identifiable {
         self.selectedPath = selectedPath
         self.selectedPaths = selectedPath.map { [$0] } ?? []
         self.selectionAnchorPath = selectedPath
-        self.sortKey = .name
-        self.sortAscending = true
+        self.sortKey = rule.sortKey
+        self.sortAscending = rule.sortAscending
         self.filter = .all
-        self.group = .none
+        self.group = rule.group
+        self.collapsedGroups = rule.collapsedGroups
         self.searchQuery = nil
         self.searchTruncated = false
         refreshView()
@@ -230,8 +263,28 @@ struct BrowserColumn: Identifiable {
                 return left.key.localizedStandardCompare(right.key) == .orderedAscending
             }
             .flatMap { label, group in
-                [BrowserColumnRow.group(label)] + group.entries.map(BrowserColumnRow.entry)
+                let isCollapsed = collapsedGroups.contains(label)
+                var rows = [
+                    BrowserColumnRow.group(
+                        title: label,
+                        count: group.entries.count,
+                        isCollapsed: isCollapsed
+                    )
+                ]
+                if !isCollapsed {
+                    rows.append(contentsOf: group.entries.map(BrowserColumnRow.entry))
+                }
+                return rows
             }
+    }
+
+    var storedRule: StoredColumnViewRule {
+        StoredColumnViewRule(
+            sortKey: sortKey,
+            sortAscending: sortAscending,
+            group: group,
+            collapsedGroups: collapsedGroups
+        )
     }
 
     mutating func toggleSortOrder() {
@@ -250,7 +303,19 @@ struct BrowserColumn: Identifiable {
     }
 
     mutating func setGroup(_ value: BrowserColumnGroup) {
+        if group != value {
+            collapsedGroups.removeAll()
+        }
         group = value
+    }
+
+    mutating func toggleGroupCollapse(_ title: String) {
+        if collapsedGroups.contains(title) {
+            collapsedGroups.remove(title)
+        } else {
+            collapsedGroups.insert(title)
+            pruneSelectionToVisibleRows()
+        }
     }
 
     mutating func resetView() {
@@ -258,7 +323,25 @@ struct BrowserColumn: Identifiable {
         sortAscending = true
         filter = .all
         group = .none
+        collapsedGroups.removeAll()
         refreshView()
+    }
+
+    private mutating func pruneSelectionToVisibleRows() {
+        let visiblePaths = Set(displayRows.compactMap { row -> String? in
+            guard case .entry(let entry) = row else { return nil }
+            return entry.path
+        })
+        selectedPaths.formIntersection(visiblePaths)
+        if let selectedPath, !visiblePaths.contains(selectedPath) {
+            self.selectedPath = nil
+        }
+        if let selectionAnchorPath, !visiblePaths.contains(selectionAnchorPath) {
+            self.selectionAnchorPath = nil
+        }
+        if selectedPath == nil {
+            selectedPath = selectedPaths.first
+        }
     }
 
     mutating func setSearchResults(query: String, entries: [BrowserEntry], truncated: Bool) {
@@ -469,8 +552,11 @@ struct UpdateDownloadState: Equatable {
 final class KiteModel: ObservableObject {
     private static let sessionSchemaVersion: UInt32 = 1
     private static let columnSearchDebounceNanoseconds: UInt64 = 180_000_000
+    private static let columnViewRulesDefaultsKey = "kite.macos.column-view-rules-v1"
+    private static let maxStoredColumnRules = 512
 
     private let core: KiteCore
+    private var storedColumnViewRules: StoredColumnViewRules
     private var columnSearchGeneration: UInt64 = 0
     private var globalSearchGeneration: UInt64 = 0
     private var columnSearchDebounceTask: Task<Void, Never>?
@@ -493,7 +579,9 @@ final class KiteModel: ObservableObject {
     @Published private(set) var globalSearchLoading = false
 
     init(core: KiteCore = KiteCore()) {
+        let storedColumnViewRules = Self.loadStoredColumnViewRules()
         self.core = core
+        self.storedColumnViewRules = storedColumnViewRules
         self.favorites = core.favorites()
         self.volumes = core.devices().volumes
         restoreOrCreateTabs()
@@ -658,6 +746,7 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].toggleSortOrder()
+        persistColumnViewRule(index: index)
     }
 
     func setColumnSortKey(index: Int, key: BrowserColumnSortKey) {
@@ -666,6 +755,7 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].setSortKey(key)
+        persistColumnViewRule(index: index)
     }
 
     func setColumnFilter(index: Int, filter: BrowserColumnFilter) {
@@ -682,6 +772,16 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].setGroup(group)
+        persistColumnViewRule(index: index)
+    }
+
+    func toggleColumnGroup(index: Int, title: String) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        tabs[tabIndex].columns[index].toggleGroupCollapse(title)
+        persistColumnViewRule(index: index)
     }
 
     func resetColumnView(index: Int) {
@@ -690,6 +790,7 @@ final class KiteModel: ObservableObject {
             return
         }
         tabs[tabIndex].columns[index].resetView()
+        persistColumnViewRule(index: index)
     }
 
     func toggleColumnSearch(path: String) {
@@ -1466,8 +1567,60 @@ final class KiteModel: ObservableObject {
             entries: listing.entries.map(BrowserEntry.init(dto:)),
             skipped: listing.skipped,
             gitAvailable: listing.gitAvailable,
-            svnAvailable: listing.svnAvailable
+            svnAvailable: listing.svnAvailable,
+            rule: storedColumnViewRule(for: listing.path)
         )
+    }
+
+    private func storedColumnViewRule(for path: String) -> StoredColumnViewRule {
+        let key = normalizedRulePath(path)
+        if let rule = storedColumnViewRules.rules[key] {
+            return rule
+        }
+        return storedColumnViewRules.defaultRule.withoutCollapsedGroups
+    }
+
+    private func persistColumnViewRule(index: Int) {
+        guard let tabIndex = activeTabIndex,
+              tabs[tabIndex].columns.indices.contains(index) else {
+            return
+        }
+        let column = tabs[tabIndex].columns[index]
+        let rule = column.storedRule
+        storedColumnViewRules.rules[normalizedRulePath(column.path)] = rule
+        storedColumnViewRules.defaultRule = rule.withoutCollapsedGroups
+        pruneStoredColumnViewRules()
+        saveStoredColumnViewRules()
+    }
+
+    private func normalizedRulePath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private func pruneStoredColumnViewRules() {
+        let overflow = storedColumnViewRules.rules.count - Self.maxStoredColumnRules
+        guard overflow > 0 else { return }
+        for key in storedColumnViewRules.rules.keys.sorted().prefix(overflow) {
+            storedColumnViewRules.rules.removeValue(forKey: key)
+        }
+    }
+
+    private static func loadStoredColumnViewRules() -> StoredColumnViewRules {
+        guard let data = UserDefaults.standard.data(forKey: columnViewRulesDefaultsKey),
+              var rules = try? JSONDecoder().decode(StoredColumnViewRules.self, from: data) else {
+            return .default
+        }
+        rules.defaultRule = rules.defaultRule.withoutCollapsedGroups
+        return rules
+    }
+
+    private func saveStoredColumnViewRules() {
+        do {
+            let data = try JSONEncoder().encode(storedColumnViewRules)
+            UserDefaults.standard.set(data, forKey: Self.columnViewRulesDefaultsKey)
+        } catch {
+            errorMessage = "无法保存分栏显示规则：\(error.localizedDescription)"
+        }
     }
 
     private func columnTitle(for path: String) -> String {

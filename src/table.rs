@@ -5,6 +5,7 @@ use gpui_kit::*;
 
 use crate::context_menu::{ContextMenuCapabilities, ContextMenuTarget, render_context_menu};
 use crate::fs::{FileEntry, SortKey, SortSpec, VcsStatus, sort_entries};
+use crate::ui_preferences;
 use crate::vcs::{VcsSnapshot, apply_statuses};
 use gpui_kit::assets::IconName;
 
@@ -117,29 +118,45 @@ impl TableDelegate for FileTableDelegate {
     }
 
     fn column(&self, col_ix: usize, _: &App) -> Column {
+        let initial_sort = |key: SortKey| -> ColumnSort {
+            if self.sort.key == key {
+                if self.sort.ascending {
+                    ColumnSort::Ascending
+                } else {
+                    ColumnSort::Descending
+                }
+            } else {
+                ColumnSort::Default
+            }
+        };
         match col_ix {
             0 => Column::new("name", "名称")
                 .width(px(420.))
                 .min_width(px(220.))
                 .fixed_left()
-                .sortable(),
+                .sortable()
+                .sort(initial_sort(SortKey::Name)),
             1 => Column::new("vcs", "版本控制")
                 .width(px(130.))
                 .min_width(px(100.))
-                .sortable(),
+                .sortable()
+                .sort(initial_sort(SortKey::Vcs)),
             2 => Column::new("modified", "修改日期")
                 .width(px(165.))
                 .min_width(px(130.))
-                .sortable(),
+                .sortable()
+                .sort(initial_sort(SortKey::Modified)),
             3 => Column::new("kind", "类型")
                 .width(px(145.))
                 .min_width(px(110.))
-                .sortable(),
+                .sortable()
+                .sort(initial_sort(SortKey::Kind)),
             4 => Column::new("size", "大小")
                 .width(px(100.))
                 .min_width(px(80.))
                 .text_right()
-                .sortable(),
+                .sortable()
+                .sort(initial_sort(SortKey::Size)),
             _ => Column::new("unknown", ""),
         }
     }
@@ -163,6 +180,9 @@ impl TableDelegate for FileTableDelegate {
             ColumnSort::Ascending => self.set_sort(key, true),
             ColumnSort::Descending => self.set_sort(key, false),
             ColumnSort::Default => self.set_sort(SortKey::Name, true),
+        }
+        if let Err(error) = ui_preferences::save_default_column_sort(self.sort) {
+            eprintln!("failed to persist sort order: {error}");
         }
         cx.notify();
     }
