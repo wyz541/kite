@@ -70,7 +70,7 @@ struct KiteColumnBrowser: View {
                         scrollToActiveColumn(
                             proxy,
                             viewportWidth: viewport.size.width,
-                            animated: true
+                            animated: false
                         )
                     }
                     .onChange(of: model.selectedColumnEntry?.path) { _ in
@@ -103,24 +103,42 @@ struct KiteColumnBrowser: View {
                     .onChange(of: showsSizeColumn) { _ in
                         scrollToActiveColumn(proxy, viewportWidth: viewport.size.width, animated: true)
                     }
+                    .onChange(of: viewport.size.width) { width in
+                        scrollToActiveColumn(
+                            proxy,
+                            viewportWidth: width,
+                            animated: false
+                        )
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
 
-            if showsPreview, let selectedEntry = model.selectedColumnEntry {
-                KitePreviewPane(model: model, entry: selectedEntry) {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        showsPreview = false
-                    }
-                }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+            if showsPreview {
+                previewPane
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                    .clipped()
             }
         }
-        .animation(.snappy(duration: 0.22), value: showsPreview)
         .animation(.snappy(duration: 0.22), value: showsColumnDetails)
         .animation(.snappy(duration: 0.22), value: detailedColumnWidth)
         .task(id: detailsMeasurementKey) {
             await measureDetailedColumnWidth()
+        }
+    }
+
+    @ViewBuilder
+    private var previewPane: some View {
+        if let selectedEntry = model.selectedColumnEntry {
+            KitePreviewPane(model: model, entry: selectedEntry) {
+                showsPreview = false
+            }
+        } else {
+            KitePreviewEmptyPane {
+                showsPreview = false
+            }
         }
     }
 
