@@ -209,7 +209,9 @@ function Find-FileRow {
         foreach ($element in $elements) {
             try {
                 $rect = $element.Current.BoundingRectangle
-                if ($element.Current.Name -like "*$FileName*" -and
+                $name_matches = $element.Current.Name -like "*$FileName*"
+                $is_list_row = $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::DataItem
+                if (($name_matches -or $is_list_row) -and
                     $rect.Width -gt 60 -and
                     $rect.Height -ge 12 -and
                     $rect.Height -le 80 -and
