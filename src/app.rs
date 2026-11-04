@@ -5439,10 +5439,10 @@ impl KiteApp {
                                 .min_w_0()
                                 .pl(px(24.))
                                 .gap_1()
+                                .child("名称")
                                 .when(sort_key == SortKey::Name, |this| {
                                     this.child(column_sort_header_icon(sort_ascending))
-                                })
-                                .child("名称"),
+                                }),
                         ),
                 );
             if layout.show_date_column {
@@ -5474,10 +5474,10 @@ impl KiteApp {
                                 .w_full()
                                 .min_w_0()
                                 .gap_1()
+                                .child("日期")
                                 .when(sort_key == SortKey::Modified, |this| {
                                     this.child(column_sort_header_icon(sort_ascending))
-                                })
-                                .child("日期"),
+                                }),
                         ),
                 );
             }
@@ -5510,10 +5510,10 @@ impl KiteApp {
                                 .w_full()
                                 .min_w_0()
                                 .gap_1()
+                                .child("类型")
                                 .when(sort_key == SortKey::Kind, |this| {
                                     this.child(column_sort_header_icon(sort_ascending))
-                                })
-                                .child("类型"),
+                                }),
                         ),
                 );
             }
@@ -5547,10 +5547,10 @@ impl KiteApp {
                                 .min_w_0()
                                 .justify_end()
                                 .gap_1()
+                                .child("大小")
                                 .when(sort_key == SortKey::Size, |this| {
                                     this.child(column_sort_header_icon(sort_ascending))
-                                })
-                                .child("大小"),
+                                }),
                         ),
                 );
             }

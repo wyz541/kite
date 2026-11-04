@@ -841,6 +841,7 @@ private struct KiteBrowserColumn: View {
         return Button {
             model.toggleColumnSort(index: index, key: key)
         } label: {
+            // Keep the title before the sort indicator to match the Windows table headers.
             HStack(spacing: 3) {
                 Text(title)
                 if isSorted {
