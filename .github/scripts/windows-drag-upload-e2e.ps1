@@ -44,6 +44,8 @@ public static class KiteDragNative {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     public const uint LeftDown = 0x0002;
     public const uint LeftUp = 0x0004;
@@ -254,6 +256,9 @@ function Invoke-NativeDrag {
         Start-Sleep -Milliseconds 25
     }
     Start-Sleep -Milliseconds 300
+    $point = [KiteDragNative+POINT]::new()
+    [KiteDragNative]::GetCursorPos([ref]$point) | Out-Null
+    Write-Host "Cursor before drop: ($($point.X),$($point.Y))"
     [KiteDragNative]::mouse_event([KiteDragNative]::LeftUp, 0, 0, 0, [UIntPtr]::Zero)
 }
 

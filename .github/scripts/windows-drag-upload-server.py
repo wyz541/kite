@@ -51,8 +51,32 @@ HTML = r'''<!doctype html>
       }
     }
 
-    input.addEventListener('dragover', event => event.preventDefault());
-    input.addEventListener('drop', () => setTimeout(() => uploadFiles('drop'), 250));
+    async function logDragEvent(type, event) {
+      try {
+        await fetch('/drag-event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            browser,
+            type,
+            types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
+            files: event.dataTransfer ? event.dataTransfer.files.length : 0,
+          }),
+        });
+      } catch (_) {}
+    }
+    input.addEventListener('dragenter', event => {
+      event.preventDefault();
+      logDragEvent('dragenter', event);
+    });
+    input.addEventListener('dragover', event => {
+      event.preventDefault();
+      logDragEvent('dragover', event);
+    });
+    input.addEventListener('drop', event => {
+      logDragEvent('drop', event);
+      setTimeout(() => uploadFiles('drop'), 250);
+    });
     input.addEventListener('change', () => uploadFiles('change'));
   </script>
 </body>
@@ -78,13 +102,27 @@ class UploadHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/upload":
+        path = urlparse(self.path).path
+        if path not in ("/upload", "/drag-event"):
             self.send_error(404)
             return
         try:
             content_type = self.headers.get("Content-Type", "")
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length)
+            if path == "/drag-event":
+                value = json.loads(raw.decode("utf-8"))
+                record = {
+                    "kind": "drag-event",
+                    "browser": value.get("browser", "unknown"),
+                    "type": value.get("type", "unknown"),
+                    "types": value.get("types", []),
+                    "file_count": value.get("files", 0),
+                }
+                with self.server.log_path.open("a", encoding="utf-8") as log:
+                    log.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+                self._json(200, {"ok": True})
+                return
             message = BytesParser(policy=policy.default).parsebytes(
                 f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("ascii") + raw
             )
@@ -108,6 +146,7 @@ class UploadHandler(BaseHTTPRequestHandler):
             if not files:
                 raise ValueError("upload contained no files")
             record = {
+                "kind": "upload",
                 "browser": fields.get("browser", "unknown"),
                 "event": fields.get("event", "unknown"),
                 "files": files,
