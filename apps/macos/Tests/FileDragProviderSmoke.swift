@@ -5,6 +5,11 @@ import UniformTypeIdentifiers
 @main
 enum FileDragProviderSmoke {
     static func main() async throws {
+        guard KiteFileDragProvider.internalDragOperation(copyRequested: false) == .cut,
+              KiteFileDragProvider.internalDragOperation(copyRequested: true) == .copy else {
+            throw SmokeError("internal drag must use cut + paste or copy + paste")
+        }
+
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("kite-file-drag-smoke-\(UUID().uuidString)")
         let file = root.appendingPathComponent("sample.txt")

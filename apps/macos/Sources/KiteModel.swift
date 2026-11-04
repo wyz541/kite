@@ -185,9 +185,9 @@ struct BrowserColumn: Identifiable {
     var directoryEntries: [BrowserEntry]
     var searchEntries: [BrowserEntry]?
     var entries: [BrowserEntry]
-    let skipped: UInt64
-    let gitAvailable: Bool
-    let svnAvailable: Bool
+    var skipped: UInt64
+    var gitAvailable: Bool
+    var svnAvailable: Bool
     var selectedPath: String?
     var selectedPaths: Set<String>
     var selectionAnchorPath: String?
@@ -375,6 +375,19 @@ struct BrowserColumn: Identifiable {
         searchEntries = nil
         searchQuery = nil
         searchTruncated = false
+        refreshView()
+    }
+
+    mutating func updateListing(
+        entries: [BrowserEntry],
+        skipped: UInt64,
+        gitAvailable: Bool,
+        svnAvailable: Bool
+    ) {
+        directoryEntries = entries
+        self.skipped = skipped
+        self.gitAvailable = gitAvailable
+        self.svnAvailable = svnAvailable
         refreshView()
     }
 
@@ -1020,8 +1033,7 @@ final class KiteModel: ObservableObject {
             reloadVolumes()
             return
         }
-        loadRoot(currentPath)
-        reloadVolumes()
+        refreshVisibleColumns()
     }
 
     func reloadVolumes() {
@@ -1080,7 +1092,7 @@ final class KiteModel: ObservableObject {
                     KitePlatform.clearFilePasteboard()
                 }
                 errorMessage = nil
-                refreshIfShowing(directory)
+                refreshVisibleColumns()
             } catch {
                 if moveFiles, completed > 0 {
                     let remaining = Array(paths.dropFirst(completed))
@@ -1090,7 +1102,7 @@ final class KiteModel: ObservableObject {
                         KitePlatform.writeFilePasteboard(remaining, cut: true)
                     }
                 }
-                refreshIfShowing(directory)
+                refreshVisibleColumns()
                 errorMessage = completed > 0
                     ? "已处理 \(completed) 项，后续操作失败：\(error.localizedDescription)"
                     : error.localizedDescription
@@ -1122,11 +1134,24 @@ final class KiteModel: ObservableObject {
     }
 
     func handleFileDrop(_ providers: [NSItemProvider], destination: String) {
+        let copiesInternalDrop = NSEvent.modifierFlags.contains(.option)
         KitePlatform.loadDroppedFilePaths(from: providers) { [weak self] paths, isInternal in
             Task { @MainActor in
                 guard let self, !paths.isEmpty else { return }
-                let moveFiles = isInternal && !NSEvent.modifierFlags.contains(.option)
-                self.transferPaths(paths, to: destination, moveFiles: moveFiles)
+                guard isInternal else {
+                    self.transferPaths(paths, to: destination, moveFiles: false)
+                    return
+                }
+
+                switch KiteFileDragProvider.internalDragOperation(
+                    copyRequested: copiesInternalDrop
+                ) {
+                case .cut:
+                    self.cutFiles(paths)
+                case .copy:
+                    self.copyFiles(paths)
+                }
+                self.pasteFiles(into: destination)
             }
         }
     }
@@ -1178,12 +1203,28 @@ final class KiteModel: ObservableObject {
         }
     }
 
-    private func refreshIfShowing(_ directory: String) {
-        let current = URL(fileURLWithPath: currentPath).standardizedFileURL
-        let destination = URL(fileURLWithPath: directory).standardizedFileURL
-        if current.path == destination.path {
-            refresh()
+    private func refreshVisibleColumns() {
+        guard let tabIndex = activeTabIndex, !tabs[tabIndex].columns.isEmpty else {
+            return
         }
+
+        do {
+            var refreshedColumns = tabs[tabIndex].columns
+            for index in refreshedColumns.indices {
+                let listing = try core.listDirectory(path: refreshedColumns[index].path)
+                refreshedColumns[index].updateListing(
+                    entries: listing.entries.map(BrowserEntry.init(dto:)),
+                    skipped: listing.skipped,
+                    gitAvailable: listing.gitAvailable,
+                    svnAvailable: listing.svnAvailable
+                )
+            }
+            tabs[tabIndex].columns = refreshedColumns
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        reloadVolumes()
     }
 
     func moveToTrash(_ entry: BrowserEntry) {
