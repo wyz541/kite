@@ -21,7 +21,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
     CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, DoDragDrop, IDropSource,
-    IDropSource_Impl,
+    IDropSource_Impl, OleInitialize, OleUninitialize,
 };
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
 use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, HDROP, SHCreateStdEnumFmtEtc};
@@ -83,6 +83,22 @@ pub(crate) fn write_file_clipboard(paths: &[PathBuf], mode: ClipboardMode) -> Re
 }
 
 pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
+    let paths = paths.to_vec();
+    std::thread::Builder::new()
+        .name("kite-file-drag".to_string())
+        .spawn(move || {
+            unsafe { OleInitialize(None) }
+                .map_err(|error| format!("无法初始化 OLE 拖放线程：{error}"))?;
+            let result = drag_file_paths_on_sta(&paths);
+            unsafe { OleUninitialize() };
+            result
+        })
+        .map_err(|error| format!("无法启动 OLE 拖放线程：{error}"))?
+        .join()
+        .map_err(|_| "OLE 拖放线程异常退出".to_string())?
+}
+
+fn drag_file_paths_on_sta(paths: &[PathBuf]) -> Result<(), String> {
     trace_drag(&format!(
         "creating CF_HDROP data object for {} path(s): {:?}",
         paths.len(),
