@@ -1124,7 +1124,7 @@ impl KiteApp {
         };
         self.directory_watcher = Some(watcher);
         self._directory_watch_task = cx.spawn(async move |this, cx| {
-            while receiver.recv().await.is_some() {
+            while receiver.recv().await.is_ok() {
                 cx.background_executor()
                     .timer(COLUMN_AUTO_REFRESH_DEBOUNCE)
                     .await;
