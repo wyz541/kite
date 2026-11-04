@@ -8,10 +8,15 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: platform-parity-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   platform-parity:
     name: Platform parity
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

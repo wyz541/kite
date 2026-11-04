@@ -1,0 +1,85 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - build.rs
+      - .cargo/**
+      - src/**
+      - build.ps1
+      - .github/workflows/windows.yml
+      - .github/scripts/**
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - build.rs
+      - .cargo/**
+      - src/**
+      - build.ps1
+      - .github/workflows/windows.yml
+      - .github/scripts/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows GPUI
+    # PRs run the full build only when the ci:full label is added.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install Python for drag upload E2E
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --features windows-ui -- -D warnings
+
+      - name: Build release binary
+        run: cargo build --locked --release --features windows-ui
+
+      - name: Run Chrome and Edge drag upload E2E
+        shell: pwsh
+        run: ./.github/scripts/windows-drag-upload-e2e.ps1 -KiteExe target/release/kite-explorer.exe -OutputDir "$env:RUNNER_TEMP\windows-drag-e2e"
+
+      - name: Upload Windows drag E2E logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-drag-e2e
+          path: ${{ runner.temp }}/windows-drag-e2e
+          if-no-files-found: ignore
+          retention-days: 1

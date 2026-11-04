@@ -5,18 +5,44 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_DIR="$ROOT/apps/macos/build/Kite.app"
 CONTENTS="$APP_DIR/Contents"
 GEN_DIR="$ROOT/apps/macos/Generated"
+PROFILE="${KITE_BUILD_PROFILE:-release}"
+
+case "$PROFILE" in
+    release)
+        TARGET_DIR="$ROOT/target/release"
+        ;;
+    debug)
+        TARGET_DIR="$ROOT/target/debug"
+        ;;
+    *)
+        echo "Unsupported KITE_BUILD_PROFILE: $PROFILE" >&2
+        exit 2
+        ;;
+esac
 
 cd "$ROOT"
-cargo build --release --locked --lib
+if [[ "$PROFILE" == "release" ]]; then
+    cargo build --release --locked --lib
+else
+    cargo build --locked --lib
+fi
 
 rm -rf "$GEN_DIR" "$APP_DIR"
 mkdir -p "$GEN_DIR" "$CONTENTS/MacOS" "$CONTENTS/Frameworks" "$CONTENTS/Resources"
 
-cargo run --release --locked --features uniffi-bindgen --bin uniffi-bindgen -- \
-    generate \
-    --library "$ROOT/target/release/libkite_core.dylib" \
-    --language swift \
-    --out-dir "$GEN_DIR"
+if [[ "$PROFILE" == "release" ]]; then
+    cargo run --release --locked --features uniffi-bindgen --bin uniffi-bindgen -- \
+        generate \
+        --library "$TARGET_DIR/libkite_core.dylib" \
+        --language swift \
+        --out-dir "$GEN_DIR"
+else
+    cargo run --locked --features uniffi-bindgen --bin uniffi-bindgen -- \
+        generate \
+        --library "$TARGET_DIR/libkite_core.dylib" \
+        --language swift \
+        --out-dir "$GEN_DIR"
+fi
 
 xcrun swiftc \
     -O \
@@ -25,7 +51,7 @@ xcrun swiftc \
     -I "$GEN_DIR" \
     -Xcc -fmodule-map-file="$GEN_DIR/kite_coreFFI.modulemap" \
     -Xcc -I"$GEN_DIR" \
-    -L "$ROOT/target/release" \
+    -L "$TARGET_DIR" \
     -lkite_core \
     -framework AppKit \
     -framework QuickLookUI \
@@ -37,7 +63,7 @@ xcrun swiftc \
 
 cp "$ROOT/apps/macos/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/assets/kite.icns" "$CONTENTS/Resources/AppIcon.icns"
-cp "$ROOT/target/release/libkite_core.dylib" "$CONTENTS/Frameworks/"
+cp "$TARGET_DIR/libkite_core.dylib" "$CONTENTS/Frameworks/"
 install_name_tool -id @rpath/libkite_core.dylib "$CONTENTS/Frameworks/libkite_core.dylib"
 
 CORE_LINK="$(otool -L "$CONTENTS/MacOS/Kite" | awk '/libkite_core\.dylib/ { print $1; exit }')"
