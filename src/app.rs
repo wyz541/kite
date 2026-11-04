@@ -5904,6 +5904,11 @@ impl KiteApp {
                 })
                 .on_drag_move::<KiteFileDrag>(move |event, window, cx| {
                     let position = event.event.position;
+                    file_clipboard::trace_drag(&format!(
+                        "GPUI drag move at ({:.1},{:.1})",
+                        position.x.as_f32(),
+                        position.y.as_f32()
+                    ));
                     let viewport = window.viewport_size();
                     let outside = position.x < px(0.)
                         || position.y < px(0.)
