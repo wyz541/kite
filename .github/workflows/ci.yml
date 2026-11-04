@@ -1,17 +1,48 @@
-name: Cross-platform CI
+name: Core CI
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - build.rs
+      - .cargo/**
+      - src/**
+      - build.ps1
+      - README.md
+      - .github/workflows/ci.yml
+      - .github/scripts/**
   pull_request:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - build.rs
+      - .cargo/**
+      - src/**
+      - build.ps1
+      - README.md
+      - .github/workflows/ci.yml
+      - .github/scripts/**
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: core-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  windows:
-    name: Windows GPUI
-    runs-on: windows-latest
+  checks:
+    name: Linux checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -19,12 +50,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-
-      - name: Install Python for drag upload E2E
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
+          components: rustfmt
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -37,94 +63,3 @@ jobs:
 
       - name: Run core tests
         run: cargo test --locked --lib
-
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets --features windows-ui -- -D warnings
-
-      - name: Build release binary
-        run: cargo build --locked --release --features windows-ui
-
-      - name: Run Chrome and Edge drag upload E2E
-        shell: pwsh
-        run: ./.github/scripts/windows-drag-upload-e2e.ps1 -KiteExe target/release/kite-explorer.exe -OutputDir "$env:RUNNER_TEMP\windows-drag-e2e"
-
-      - name: Upload Windows drag E2E logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-drag-e2e
-          path: ${{ runner.temp }}/windows-drag-e2e
-          if-no-files-found: error
-
-      - name: Upload Windows binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: kite-windows
-          path: target/release/kite-explorer.exe
-          if-no-files-found: error
-
-  macos:
-    name: macOS SwiftUI + AppKit
-    runs-on: macos-26
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run core tests
-        run: cargo test --locked --lib
-
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test directory watcher
-        run: bash apps/macos/test-directory-watcher.sh
-
-      - name: Verify native UI boundary
-        run: |
-          cargo tree --locked > "$RUNNER_TEMP/macos-dependencies.txt"
-          if grep -E '(^|[^[:alnum:]_-])(gpui|egui)([^[:alnum:]_-]|$)' "$RUNNER_TEMP/macos-dependencies.txt"; then
-            echo "::error::macOS dependency graph contains gpui or egui"
-            exit 1
-          fi
-          if grep -R -E -i 'gpui|egui' apps/macos/Sources; then
-            echo "::error::macOS Swift sources contain gpui or egui"
-            exit 1
-          fi
-
-      - name: Verify Liquid Glass SDK
-        run: |
-          xcodebuild -version
-          SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
-          echo "macOS SDK: $SDK_VERSION"
-          case "$SDK_VERSION" in
-            26.*|27.*) ;;
-            *)
-              echo "::error::Liquid Glass requires the macOS 26 SDK or newer"
-              exit 1
-              ;;
-          esac
-          grep -q "glassEffect" apps/macos/Sources/GlassSurface.swift
-
-      - name: Build SwiftUI application
-        run: bash apps/macos/build.sh
-
-      - name: Package macOS application
-        run: ditto -c -k --sequesterRsrc --keepParent apps/macos/build/Kite.app Kite-macOS-arm64.zip
-
-      - name: Upload macOS application
-        uses: actions/upload-artifact@v4
-        with:
-          name: kite-macos
-          path: Kite-macOS-arm64.zip
-          if-no-files-found: error
