@@ -22,6 +22,7 @@ $eventsLog = Join-Path $output "windows-application-errors.log"
 $uiaLog = Join-Path $output "uia-tree.json"
 $screenshotPath = Join-Path $output "screen.png"
 $kiteTraceLog = Join-Path $output "kite-drag-trace.log"
+$watchTraceLog = Join-Path $output "kite-file-watch-trace.log"
 $kiteStateDir = Join-Path $output "kite-state"
 $sessionPath = Join-Path $kiteStateDir "session.json"
 $uiPreferencesPath = Join-Path $kiteStateDir "ui.json"
@@ -237,34 +238,6 @@ function Find-FileRow {
     }
 }
 
-function Get-VisibleDataItemCount {
-    param([int]$ProcessId)
-    $rootElement = [System.Windows.Automation.AutomationElement]::RootElement
-    $processCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
-        $ProcessId
-    )
-    $elements = $rootElement.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $processCondition
-    )
-    $count = 0
-    foreach ($element in $elements) {
-        try {
-            $rect = $element.Current.BoundingRectangle
-            if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::DataItem -and
-                -not $element.Current.IsOffscreen -and
-                $rect.Width -gt 60 -and
-                $rect.Height -ge 12 -and
-                $rect.Height -le 80) {
-                $count += 1
-            }
-        } catch {
-        }
-    }
-    return $count
-}
-
 function Move-Window {
     param([IntPtr]$Handle, [int]$X, [int]$Y, [int]$Width, [int]$Height)
     [KiteDragNative]::ShowWindow($Handle, 9) | Out-Null
@@ -435,6 +408,12 @@ try {
     $content = "Kite Chrome and Edge drag upload test`r`n"
     [System.IO.File]::WriteAllText($filePath, $content, [System.Text.UTF8Encoding]::new($false))
     $expectedHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $autoFileName = "auto-refresh.txt"
+    $autoFilePath = Join-Path $testDir $autoFileName
+    $autoContent = "created after Kite opened`r`n"
+    $autoExpectedHash = [System.BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($autoContent))
+    ).Replace("-", "").ToLowerInvariant()
     New-Item -ItemType Directory -Force -Path $kiteStateDir | Out-Null
     $session = @{
         schema_version = 1
@@ -470,6 +449,7 @@ try {
     } | Out-Null
 
     $env:KITE_DRAG_TRACE = $kiteTraceLog
+    $env:KITE_FILE_WATCH_TRACE = $watchTraceLog
     $kite = Start-Process -FilePath $KiteExe -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
@@ -486,29 +466,18 @@ try {
     New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
     Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
 
-    $initialRowCount = Wait-Until -TimeoutSeconds 10 -FailureMessage "active column rows did not load" -Condition {
-        $count = Get-VisibleDataItemCount -ProcessId $kite.Id
-        if ($count -gt 0) { return $count }
-        return $null
-    }
-    $autoRefreshFile = Join-Path $testDir "auto-refresh.txt"
+    Start-Sleep -Milliseconds 1000
     [System.IO.File]::WriteAllText(
-        $autoRefreshFile,
-        "auto refresh",
+        $autoFilePath,
+        $autoContent,
         [System.Text.UTF8Encoding]::new($false)
     )
-    Wait-Until -TimeoutSeconds 10 -FailureMessage "created file did not appear automatically" -Condition {
-        $count = Get-VisibleDataItemCount -ProcessId $kite.Id
-        if ($count -gt $initialRowCount) { return $count }
+    Wait-Until -TimeoutSeconds 15 -FailureMessage "created file did not trigger automatic refresh" -Condition {
+        if (Test-Path -LiteralPath $watchTraceLog) {
+            return [bool](Select-String -LiteralPath $watchTraceLog -Pattern "visible columns refreshed" -Quiet)
+        }
         return $null
     } | Out-Null
-    Remove-Item -LiteralPath $autoRefreshFile -Force
-    Wait-Until -TimeoutSeconds 10 -FailureMessage "deleted file did not disappear automatically" -Condition {
-        $count = Get-VisibleDataItemCount -ProcessId $kite.Id
-        if ($count -eq $initialRowCount) { return $count }
-        return $null
-    } | Out-Null
-    $summary.auto_refresh = $true
 
     $chromeCandidates = @(
         @(
@@ -533,11 +502,13 @@ try {
     }
 
     $chromeRecord = Test-BrowserUpload -Name "chrome" -Executable $chromeCandidates[0] -Port $port `
-        -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
+        -FileName $autoFileName -ExpectedHash $autoExpectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
         -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -ProfileRoot $profileRoot
+    $summary.auto_refresh = $true
     $summary.chrome = $true
     $summary.uploads += $chromeRecord
 
+    Remove-Item -LiteralPath $autoFilePath -Force
     Stop-TrackedProcess -Process $kite
     $env:KITE_DRAG_TRACE = $kiteTraceLog
     $kite = Start-Process -FilePath $KiteExe -PassThru

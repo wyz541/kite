@@ -1202,6 +1202,7 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
+        let mut refreshed_paths = Vec::new();
         for (index, path, result) in refreshed {
             let Ok(refreshed_pane) = result else {
                 continue;
@@ -1212,11 +1213,17 @@ impl KiteApp {
             if !same_path(&pane.path, &path) || !same_path(&pane.path, &refreshed_pane.path) {
                 continue;
             }
-            changed |= pane.apply_directory_refresh(refreshed_pane);
+            if pane.apply_directory_refresh(refreshed_pane) {
+                changed = true;
+                refreshed_paths.push(path);
+            }
         }
         if !changed {
             return;
         }
+        crate::file_watcher::trace_directory_refresh(&format!(
+            "visible columns refreshed: {refreshed_paths:?}"
+        ));
 
         if self.truncate_columns_after_missing_selection() {
             self.column_scroll_pending = true;
