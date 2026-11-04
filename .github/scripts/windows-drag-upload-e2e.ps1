@@ -205,7 +205,8 @@ function Find-FileRow {
             [System.Windows.Automation.TreeScope]::Descendants,
             $processCondition
         )
-        $matches = @()
+        $namedMatches = @()
+        $fallbackRows = @()
         foreach ($element in $elements) {
             try {
                 $rect = $element.Current.BoundingRectangle
@@ -216,15 +217,22 @@ function Find-FileRow {
                     $rect.Height -ge 12 -and
                     $rect.Height -le 80 -and
                     -not $element.Current.IsOffscreen) {
-                    $matches += $element
+                    if ($name_matches) {
+                        $namedMatches += $element
+                    } elseif ($is_list_row) {
+                        $fallbackRows += $element
+                    }
                 }
             } catch {
             }
         }
-        if ($matches.Count -eq 0) {
-            return $null
+        if ($namedMatches.Count -gt 0) {
+            return $namedMatches | Sort-Object { $_.Current.BoundingRectangle.Width * $_.Current.BoundingRectangle.Height } -Descending | Select-Object -First 1
         }
-        return $matches | Sort-Object { $_.Current.BoundingRectangle.Width * $_.Current.BoundingRectangle.Height } -Descending | Select-Object -First 1
+        if ($fallbackRows.Count -gt 0) {
+            return $fallbackRows | Sort-Object @{ Expression = { $_.Current.BoundingRectangle.X }; Descending = $true }, @{ Expression = { $_.Current.BoundingRectangle.Y }; Descending = $false } | Select-Object -First 1
+        }
+        return $null
     }
 }
 
@@ -390,7 +398,8 @@ function Test-BrowserUpload {
 }
 
 try {
-    $testDir = Join-Path $env:RUNNER_TEMP "kite-drag-e2e-$([Guid]::NewGuid().ToString('N'))"
+    $testRoot = [System.IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+    $testDir = Join-Path $testRoot "kite-drag-e2e-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $testDir | Out-Null
     $fileName = "drag-test.txt"
     $filePath = Join-Path $testDir $fileName
@@ -404,7 +413,7 @@ try {
         tabs = @(
             @{
                 current_directory = $testDir
-                view_mode = "list"
+                view_mode = "columns"
                 show_path_bar = $true
             }
         )
