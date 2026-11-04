@@ -13,11 +13,13 @@ Kite 支持内部移动、内部复制、从系统拖入和向系统拖出。
 文件行和文件夹行提供内部拖放数据。
 内部拖放包含当前选中项目。
 指针离开 Kite 窗口后，Kite 结束 GPUI 内部拖动。
-Kite 在当前事件返回后启动原生 OLE 文件拖放。
-`DoDragDrop` 不在 `on_drag_move` 回调栈内运行。
-原生拖放使用文件数据对象。
-文件数据对象提供 `CF_HDROP`。
-文件数据对象提供 `Preferred DropEffect`。
+Kite 向窗口投递 `WM_APP` 消息。
+Windows 消息泵在当前事件返回后处理该消息。
+消息处理程序调用 `SHDoDragDrop`。
+`SHDoDragDrop` 使用 Kite 的真实窗口句柄。
+消息处理程序让 Shell 创建默认拖动源。
+原生拖放使用系统文件数据对象。
+系统文件数据对象提供 `CF_HDROP`。
 `CF_HDROP` 包含真实文件和文件夹的完整路径。
 原生文件拖放使用复制效果。
 
