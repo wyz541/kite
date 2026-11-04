@@ -365,7 +365,7 @@ function Test-BrowserUpload {
             $kiteWindow = [System.Windows.Automation.AutomationElement]::FromHandle($KiteHandle)
             $rect = $kiteWindow.Current.BoundingRectangle
             # The E2E directory contains one file in the rightmost active column.
-            $fromX = [int]($script:ScreenWidth - 220)
+            $fromX = [int]($rect.Left + ($rect.Width * 0.75))
             $fromY = [int]($rect.Top + 211)
         }
         $toX = [int]($BrowserX + ($BrowserWidth / 2))
