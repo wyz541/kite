@@ -350,7 +350,11 @@ function Test-BrowserUpload {
     try {
         [KiteDragNative]::ShowWindow($KiteHandle, 9) | Out-Null
         [KiteDragNative]::SetForegroundWindow($KiteHandle) | Out-Null
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 750
+        # Use one deterministic list pane so the file row cannot be clipped by
+        # a restored multi-column path chain.
+        [System.Windows.Forms.SendKeys]::SendWait("^1")
+        Start-Sleep -Milliseconds 1000
         $row = $null
         try {
             $row = Find-FileRow -ProcessId $KiteProcess.Id -FileName $FileName -TimeoutSeconds 8
