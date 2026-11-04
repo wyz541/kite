@@ -35,6 +35,7 @@ use tabs::KiteWindow;
 
 #[cfg(windows)]
 fn main() {
+    file_clipboard::trace_drag("Kite process started");
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
