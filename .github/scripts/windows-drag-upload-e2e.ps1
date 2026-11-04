@@ -371,7 +371,6 @@ try {
     $browserX = $screen.Width - $browserWidth - 20
     $browserY = $screen.Height - $browserHeight - 80
     Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $screen.Width -Height $windowHeight
-    Find-FileRow -ProcessId $kite.Id -FileName $fileName -TimeoutSeconds 30 | Out-Null
 
     $chromeCandidates = @(
         @(
