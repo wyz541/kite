@@ -182,9 +182,19 @@ impl IDataObject_Impl for KiteFileDataObject_Impl {
     fn GetData(&self, pformatetc: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
         let status = self.this.validate_format(pformatetc);
         if status.is_err() {
+            trace_drag(&format!(
+                "GetData rejected cf={} result={:#010x}",
+                format_id(pformatetc),
+                status.0
+            ));
             return Err(status.into());
         }
         let bytes = self.this.data_for_format(unsafe { &*pformatetc });
+        trace_drag(&format!(
+            "GetData served cf={} bytes={}",
+            unsafe { (*pformatetc).cfFormat },
+            bytes.len()
+        ));
         Ok(STGMEDIUM {
             tymed: TYMED_HGLOBAL.0 as u32,
             u: STGMEDIUM_0 {
@@ -203,7 +213,13 @@ impl IDataObject_Impl for KiteFileDataObject_Impl {
     }
 
     fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
-        self.this.validate_format(pformatetc)
+        let status = self.this.validate_format(pformatetc);
+        trace_drag(&format!(
+            "QueryGetData cf={} result={:#010x}",
+            format_id(pformatetc),
+            status.0
+        ));
+        status
     }
 
     fn GetCanonicalFormatEtc(
@@ -230,6 +246,7 @@ impl IDataObject_Impl for KiteFileDataObject_Impl {
     }
 
     fn EnumFormatEtc(&self, dwdirection: u32) -> windows::core::Result<IEnumFORMATETC> {
+        trace_drag(&format!("EnumFormatEtc direction={dwdirection}"));
         if dwdirection != DATADIR_GET.0 as u32 {
             return Err(E_NOTIMPL.into());
         }
@@ -251,6 +268,14 @@ impl IDataObject_Impl for KiteFileDataObject_Impl {
 
     fn EnumDAdvise(&self) -> windows::core::Result<IEnumSTATDATA> {
         Err(OLE_E_ADVISENOTSUPPORTED.into())
+    }
+}
+
+fn format_id(format: *const FORMATETC) -> u16 {
+    if format.is_null() {
+        0
+    } else {
+        unsafe { (*format).cfFormat }
     }
 }
 
