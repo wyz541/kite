@@ -593,6 +593,11 @@ final class KiteModel: ObservableObject {
     private var columnSearchGeneration: UInt64 = 0
     private var globalSearchGeneration: UInt64 = 0
     private var columnSearchDebounceTask: Task<Void, Never>?
+    private var columnAutoRefreshGeneration: UInt64 = 0
+    private var columnAutoRefreshTask: Task<Void, Never>?
+    private lazy var columnDirectoryWatcher = DirectoryWatcher { [weak self] in
+        self?.directoryContentsDidChange()
+    }
 
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var favorites: [FavoriteEntryDto] = []
@@ -618,6 +623,7 @@ final class KiteModel: ObservableObject {
         self.favorites = core.favorites()
         self.volumes = core.devices().volumes
         restoreOrCreateTabs()
+        syncColumnDirectoryWatchers()
     }
 
     var activeTab: BrowserTab? {
@@ -1036,6 +1042,89 @@ final class KiteModel: ObservableObject {
         refreshVisibleColumns()
     }
 
+    func syncColumnDirectoryWatchers() {
+        columnDirectoryWatcher.update(paths: columns.map(\.path))
+    }
+
+    private func directoryContentsDidChange() {
+        scheduleAutomaticColumnRefresh()
+    }
+
+    private func scheduleAutomaticColumnRefresh() {
+        guard let tabIndex = activeTabIndex, !tabs[tabIndex].columns.isEmpty else {
+            return
+        }
+
+        let tabID = tabs[tabIndex].id
+        let paths = tabs[tabIndex].columns.map(\.path)
+        let core = self.core
+        columnAutoRefreshGeneration &+= 1
+        let generation = columnAutoRefreshGeneration
+        columnAutoRefreshTask?.cancel()
+        columnAutoRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled, let self else { return }
+
+            let listings = await Task.detached(priority: .utility) {
+                paths.map { path in
+                    try? core.listDirectory(path: path)
+                }
+            }.value
+            guard !Task.isCancelled,
+                  self.columnAutoRefreshGeneration == generation,
+                  self.activeTabID == tabID,
+                  let currentIndex = self.activeTabIndex,
+                  self.tabs[currentIndex].columns.map(\.path) == paths else {
+                return
+            }
+
+            var changed = false
+            for (index, listing) in listings.enumerated() {
+                guard let listing,
+                      self.tabs[currentIndex].columns.indices.contains(index),
+                      self.tabs[currentIndex].columns[index].path == listing.path else {
+                    continue
+                }
+                let column = self.tabs[currentIndex].columns[index]
+                self.tabs[currentIndex].columns[index].updateListing(
+                    entries: listing.entries.map(BrowserEntry.init(dto:)),
+                    skipped: listing.skipped,
+                    gitAvailable: listing.gitAvailable,
+                    svnAvailable: listing.svnAvailable
+                )
+                let updated = self.tabs[currentIndex].columns[index]
+                changed = changed
+                    || column.directoryEntries != updated.directoryEntries
+                    || column.skipped != updated.skipped
+                    || column.gitAvailable != updated.gitAvailable
+                    || column.svnAvailable != updated.svnAvailable
+            }
+
+            if changed {
+                self.trimColumnsAfterMissingSelection(tabIndex: currentIndex)
+            }
+            self.syncColumnDirectoryWatchers()
+        }
+    }
+
+    private func trimColumnsAfterMissingSelection(tabIndex: Int) {
+        guard tabs.indices.contains(tabIndex) else { return }
+        var keepCount = tabs[tabIndex].columns.count
+        for index in 1..<tabs[tabIndex].columns.count {
+            let childPath = tabs[tabIndex].columns[index].path
+            let parentColumn = tabs[tabIndex].columns[index - 1]
+            let keepsChild = parentColumn.selectedPath == childPath
+                && parentColumn.entries.contains { $0.path == childPath && $0.isDirectory }
+            if !keepsChild {
+                keepCount = index
+                break
+            }
+        }
+        if keepCount < tabs[tabIndex].columns.count {
+            tabs[tabIndex].columns.removeSubrange(keepCount..<tabs[tabIndex].columns.count)
+        }
+    }
+
     func reloadVolumes() {
         volumes = core.devices().volumes
     }
@@ -1224,6 +1313,7 @@ final class KiteModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+        syncColumnDirectoryWatchers()
         reloadVolumes()
     }
 

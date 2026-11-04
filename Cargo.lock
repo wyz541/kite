@@ -3530,6 +3530,7 @@ dependencies = [
  "futures-channel",
  "gpui-kit",
  "ignore",
+ "notify",
  "open",
  "raw-window-handle",
  "semver",

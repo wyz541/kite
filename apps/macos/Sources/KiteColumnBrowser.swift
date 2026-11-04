@@ -59,8 +59,10 @@ struct KiteColumnBrowser: View {
                             viewportWidth: viewport.size.width,
                             animated: false
                         )
+                        model.syncColumnDirectoryWatchers()
                     }
                     .onChange(of: model.columns.map(\.id)) { _ in
+                        model.syncColumnDirectoryWatchers()
                         scrollToActiveColumn(
                             proxy,
                             viewportWidth: viewport.size.width,

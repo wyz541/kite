@@ -87,6 +87,7 @@ macOS 可与 Finder 共享文件剪贴板。
 - 页签、返回、前进、上一级和可编辑面包屑。
 - 侧边栏快速访问、收藏、设备和磁盘入口。
 - 会话恢复，包括页签、路径和视图模式。
+- 分栏监听目录变化，自动刷新新增、删除和重命名项目。
 - macOS 和 Windows 支持分栏排序方向切换。
 - 详细信息模式下，点击名称、日期、类型或大小表头排序，再次点击切换方向。
 - 支持文件类型筛选、分组和显示规则重置。
@@ -144,6 +145,7 @@ macOS 可与 Finder 共享文件剪贴板。
 | 分栏排序方向 | 已支持 | 已支持 |
 | 分栏排序字段、筛选和分组 | 已支持 | 已支持 |
 | 分栏递归搜索 | 已支持 | 已支持 |
+| 分栏目录变化自动刷新 | 已支持 | 已支持 |
 | 全局工具栏搜索 | 已支持 | 已支持 |
 | 分栏批量选择 | 已支持 | 已支持 |
 | 批量复制、剪切和删除 | 已支持 | 已支持 |
@@ -274,6 +276,7 @@ cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 - [收藏架构](docs/architecture/favorites.md)
 - [macOS 分栏显示规则](docs/architecture/macos-column-rules.md)
 - [macOS 分栏搜索](docs/architecture/macos-column-search.md)
+- [分栏自动刷新](docs/architecture/auto-refresh.md)
 - [图标系统](docs/design/icon-system.md)
 - [搜索实现调研](docs/RUST_SEARCH_ENGINE_RESEARCH.md)
 - [文本编辑器调研](docs/TEXT_EDITOR_RESEARCH.md)
