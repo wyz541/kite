@@ -19,6 +19,8 @@ $serverOut = Join-Path $output "server.stdout.log"
 $serverErr = Join-Path $output "server.stderr.log"
 $summaryPath = Join-Path $output "summary.json"
 $eventsLog = Join-Path $output "windows-application-errors.log"
+$uiaLog = Join-Path $output "uia-tree.json"
+$screenshotPath = Join-Path $output "screen.png"
 
 if (-not (Test-Path -LiteralPath $KiteExe)) {
     $candidate = Join-Path $root $KiteExe
@@ -104,6 +106,53 @@ function Wait-ProcessWindow {
             return $Process.MainWindowHandle
         }
         return $null
+    }
+}
+
+function Save-E2EDiagnostics {
+    param([int]$ProcessId)
+    try {
+        Add-Type -AssemblyName System.Drawing
+        $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        } finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+    } catch {
+        Write-Warning "screen capture failed: $_"
+    }
+    try {
+        $rootElement = [System.Windows.Automation.AutomationElement]::RootElement
+        $processCondition = [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+            $ProcessId
+        )
+        $rows = @()
+        foreach ($element in $rootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $processCondition)) {
+            try {
+                $rect = $element.Current.BoundingRectangle
+                $rows += [pscustomobject]@{
+                    name = $element.Current.Name
+                    automation_id = $element.Current.AutomationId
+                    control_type = $element.Current.ControlType.ProgrammaticName
+                    class_name = $element.Current.ClassName
+                    offscreen = $element.Current.IsOffscreen
+                    x = $rect.X
+                    y = $rect.Y
+                    width = $rect.Width
+                    height = $rect.Height
+                }
+            } catch {
+            }
+        }
+        $rows | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $uiaLog -Encoding utf8
+    } catch {
+        Write-Warning "UIA dump failed: $_"
     }
 }
 
@@ -303,9 +352,12 @@ try {
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $half = [int]($screen.Width / 2)
     $windowHeight = [Math]::Max(600, $screen.Height - 80)
-    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $half -Height $windowHeight
+    $browserWidth = [Math]::Min(420, [int]($screen.Width / 2))
+    $browserHeight = [Math]::Min(360, $windowHeight)
+    $browserX = $screen.Width - $browserWidth - 20
+    $browserY = $screen.Height - $browserHeight - 80
+    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $screen.Width -Height $windowHeight
     Find-FileRow -ProcessId $kite.Id -FileName $fileName -TimeoutSeconds 30 | Out-Null
 
     $chromeCandidates = @(
@@ -332,13 +384,13 @@ try {
 
     $chromeRecord = Test-BrowserUpload -Name "chrome" -Executable $chromeCandidates[0] -Port $port `
         -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
-        -BrowserX $half -BrowserY 0 -BrowserWidth ($screen.Width - $half) -BrowserHeight $windowHeight -TempDir $testDir
+        -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -TempDir $testDir
     $summary.chrome = $true
     $summary.uploads += $chromeRecord
 
     $edgeRecord = Test-BrowserUpload -Name "edge" -Executable $edgeCandidates[0] -Port $port `
         -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
-        -BrowserX $half -BrowserY 0 -BrowserWidth ($screen.Width - $half) -BrowserHeight $windowHeight -TempDir $testDir
+        -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -TempDir $testDir
     $summary.edge = $true
     $summary.uploads += $edgeRecord
 
@@ -348,6 +400,9 @@ try {
     }
 } catch {
     $failure = $_
+    if ($null -ne $kite -and -not $kite.HasExited) {
+        Save-E2EDiagnostics -ProcessId $kite.Id
+    }
     Write-Error $_
 } finally {
     try {
