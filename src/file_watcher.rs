@@ -1,7 +1,18 @@
 use std::collections::BTreeSet;
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+pub fn trace_directory_refresh(message: &str) {
+    let Some(path) = std::env::var_os("KITE_FILE_WATCH_TRACE") else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{message}");
+    }
+}
 
 pub struct DirectoryWatcher {
     watcher: RecommendedWatcher,
