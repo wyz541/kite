@@ -78,11 +78,12 @@ function Stop-TrackedProcesses {
     }
 }
 
-function Stop-BrowserProcess {
+function Stop-TrackedProcess {
     param([System.Diagnostics.Process]$Process)
     if ($null -eq $Process) {
         return
     }
+    $trackedProcesses.Remove($Process.Id) | Out-Null
     & taskkill.exe /PID $Process.Id /T /F *> $null
     Start-Sleep -Milliseconds 750
 }
@@ -379,7 +380,7 @@ function Test-BrowserUpload {
         Write-Host "$Name upload verified: $($record.files[0].name) ($($record.files[0].size) bytes)"
         return $record
     } finally {
-        Stop-BrowserProcess -Process $browser.Process
+        Stop-TrackedProcess -Process $browser.Process
     }
 }
 
@@ -410,17 +411,8 @@ try {
         }
     } | Out-Null
 
-    $previousTrace = $env:KITE_DRAG_TRACE
     $env:KITE_DRAG_TRACE = $kiteTraceLog
-    try {
-        $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
-    } finally {
-        if ($null -eq $previousTrace) {
-            Remove-Item Env:KITE_DRAG_TRACE -ErrorAction SilentlyContinue
-        } else {
-            $env:KITE_DRAG_TRACE = $previousTrace
-        }
-    }
+    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -463,6 +455,13 @@ try {
         -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -ProfileRoot $profileRoot
     $summary.chrome = $true
     $summary.uploads += $chromeRecord
+
+    Stop-TrackedProcess -Process $kite
+    $env:KITE_DRAG_TRACE = $kiteTraceLog
+    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    Track-Process $kite | Out-Null
+    $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
+    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
 
     $edgeRecord = Test-BrowserUpload -Name "edge" -Executable $edgeCandidates[0] -Port $port `
         -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
