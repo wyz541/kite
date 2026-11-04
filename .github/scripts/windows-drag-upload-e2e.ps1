@@ -308,10 +308,23 @@ function Test-BrowserUpload {
     [KiteDragNative]::ShowWindow($KiteHandle, 9) | Out-Null
     [KiteDragNative]::SetForegroundWindow($KiteHandle) | Out-Null
     Start-Sleep -Milliseconds 500
-    $row = Find-FileRow -ProcessId $KiteProcess.Id -FileName $FileName
-    $rect = $row.Current.BoundingRectangle
-    $fromX = [int]($rect.Left + ($rect.Width / 2))
-    $fromY = [int]($rect.Top + ($rect.Height / 2))
+    $row = $null
+    try {
+        $row = Find-FileRow -ProcessId $KiteProcess.Id -FileName $FileName -TimeoutSeconds 8
+    } catch {
+        Write-Warning "UIA file row unavailable; using controlled Kite column coordinates"
+    }
+    if ($null -ne $row) {
+        $rect = $row.Current.BoundingRectangle
+        $fromX = [int]($rect.Left + ($rect.Width / 2))
+        $fromY = [int]($rect.Top + ($rect.Height / 2))
+    } else {
+        $kiteWindow = [System.Windows.Automation.AutomationElement]::FromHandle($KiteHandle)
+        $rect = $kiteWindow.Current.BoundingRectangle
+        # The E2E directory contains one file in the rightmost active column.
+        $fromX = [int]($rect.Left + $rect.Width - 135)
+        $fromY = [int]($rect.Top + 211)
+    }
     $toX = [int]($BrowserX + ($BrowserWidth / 2))
     $toY = [int]($BrowserY + ($BrowserHeight / 2))
     Write-Host "Dragging $FileName from ($fromX,$fromY) to $Name ($toX,$toY)"
