@@ -47,7 +47,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::{FluentBuilder as _, StatefulInteractiveElement as _};
 use gpui_kit::*;
-use kite_core::file_watcher::DirectoryWatcher;
+use kite_core::file_watcher::{DirectoryWatcher, trace_directory_refresh};
 
 const SIDEBAR_WIDTH: f32 = 218.;
 const TOOLBAR_CONTROL_HEIGHT: f32 = 40.;
@@ -1221,9 +1221,7 @@ impl KiteApp {
         if !changed {
             return;
         }
-        crate::file_watcher::trace_directory_refresh(&format!(
-            "visible columns refreshed: {refreshed_paths:?}"
-        ));
+        trace_directory_refresh(&format!("visible columns refreshed: {refreshed_paths:?}"));
 
         if self.truncate_columns_after_missing_selection() {
             self.column_scroll_pending = true;
