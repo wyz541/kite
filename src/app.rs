@@ -47,6 +47,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::{FluentBuilder as _, StatefulInteractiveElement as _};
 use gpui_kit::*;
+use kite_core::file_watcher::{DirectoryWatcher, trace_directory_refresh};
 
 const SIDEBAR_WIDTH: f32 = 218.;
 const TOOLBAR_CONTROL_HEIGHT: f32 = 40.;
@@ -58,6 +59,7 @@ const DETAILED_DATE_WIDTH: f32 = 84.;
 const DETAILED_KIND_WIDTH: f32 = 70.;
 const DETAILED_SIZE_WIDTH: f32 = 64.;
 const COLUMN_SEARCH_DEBOUNCE: Duration = Duration::from_millis(180);
+const COLUMN_AUTO_REFRESH_DEBOUNCE: Duration = Duration::from_millis(180);
 
 #[derive(Clone, Copy, Debug)]
 enum NavigationIntent {
@@ -411,6 +413,24 @@ impl ColumnPane {
         self.refresh_view();
     }
 
+    fn apply_directory_refresh(&mut self, refreshed: ColumnPane) -> bool {
+        let changed = self.directory_entries != refreshed.directory_entries
+            || self.skipped != refreshed.skipped
+            || self.git_available != refreshed.git_available
+            || self.svn_available != refreshed.svn_available;
+        if !changed {
+            return false;
+        }
+
+        self.directory_entries = refreshed.directory_entries;
+        self.skipped = refreshed.skipped;
+        self.git_available = refreshed.git_available;
+        self.svn_available = refreshed.svn_available;
+        self.loading = false;
+        self.refresh_view();
+        true
+    }
+
     fn set_search_results(&mut self, query: String, entries: Vec<FileEntry>, truncated: bool) {
         self.search_entries = Some(entries);
         self.search_query = Some(query);
@@ -719,6 +739,10 @@ pub struct KiteApp {
     path_bar_scroll_pending: bool,
     column_generation: u64,
     _column_task: Task<()>,
+    directory_watcher: Option<DirectoryWatcher>,
+    _directory_watch_task: Task<()>,
+    _column_refresh_task: Task<()>,
+    column_refresh_generation: u64,
     _device_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -975,6 +999,10 @@ impl KiteApp {
             path_bar_scroll_pending: false,
             column_generation: 0,
             _column_task: Task::ready(()),
+            directory_watcher: None,
+            _directory_watch_task: Task::ready(()),
+            _column_refresh_task: Task::ready(()),
+            column_refresh_generation: 0,
             _device_task: Task::ready(()),
             _subscriptions: vec![
                 address_subscription,
@@ -983,6 +1011,8 @@ impl KiteApp {
                 table_subscription,
             ],
         };
+        app.start_device_watcher(cx);
+        app.start_directory_watcher(cx);
         app.request_load_with_file_selection(
             home,
             NavigationIntent::Initial,
@@ -990,7 +1020,6 @@ impl KiteApp {
             window,
             cx,
         );
-        app.start_device_watcher(cx);
         app
     }
 
@@ -1080,6 +1109,156 @@ impl KiteApp {
                 }
             }
         });
+    }
+
+    fn start_directory_watcher(&mut self, cx: &mut Context<Self>) {
+        let (sender, mut receiver) = futures_channel::mpsc::unbounded();
+        let watcher = match DirectoryWatcher::new(move |_| {
+            let _ = sender.unbounded_send(());
+        }) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                eprintln!("failed to start directory watcher: {error}");
+                return;
+            }
+        };
+        self.directory_watcher = Some(watcher);
+        self._directory_watch_task = cx.spawn(async move |this, cx| {
+            while receiver.recv().await.is_ok() {
+                cx.background_executor()
+                    .timer(COLUMN_AUTO_REFRESH_DEBOUNCE)
+                    .await;
+                while receiver.try_recv().is_ok() {}
+                if this
+                    .update(cx, |this, cx| {
+                        this.refresh_columns_after_directory_change(cx)
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        self.sync_directory_watchers();
+    }
+
+    fn sync_directory_watchers(&mut self) {
+        let paths = if self.view_mode == ViewMode::Columns && self.active_search.is_none() {
+            self.column_panes
+                .iter()
+                .map(|pane| pane.path.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if let Some(watcher) = self.directory_watcher.as_mut() {
+            watcher.set_paths(paths);
+        }
+    }
+
+    fn refresh_columns_after_directory_change(&mut self, cx: &mut Context<Self>) {
+        if self.view_mode != ViewMode::Columns
+            || self.active_search.is_some()
+            || self.column_panes.is_empty()
+        {
+            return;
+        }
+
+        if let Some(watcher) = self.directory_watcher.as_mut() {
+            watcher.rearm_paths(self.column_panes.iter().map(|pane| pane.path.clone()));
+        }
+
+        self.column_refresh_generation = self.column_refresh_generation.wrapping_add(1);
+        let generation = self.column_refresh_generation;
+        let load_paths = self
+            .column_panes
+            .iter()
+            .enumerate()
+            .map(|(index, pane)| (index, pane.path.clone(), pane.view_rule()))
+            .collect::<Vec<_>>();
+        self._column_refresh_task = cx.spawn(async move |this, cx| {
+            let refreshed = cx
+                .background_spawn(async move {
+                    load_paths
+                        .into_iter()
+                        .map(|(index, path, rule)| {
+                            (index, path.clone(), try_load_column_pane(path, rule))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.column_refresh_generation != generation {
+                    return;
+                }
+                this.apply_column_refresh(refreshed, cx);
+            });
+        });
+    }
+
+    fn apply_column_refresh(
+        &mut self,
+        refreshed: Vec<(usize, PathBuf, Result<ColumnPane, String>)>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+        let mut refreshed_paths = Vec::new();
+        for (index, path, result) in refreshed {
+            let Ok(refreshed_pane) = result else {
+                continue;
+            };
+            let Some(pane) = self.column_panes.get_mut(index) else {
+                continue;
+            };
+            if !same_path(&pane.path, &path) || !same_path(&pane.path, &refreshed_pane.path) {
+                continue;
+            }
+            if pane.apply_directory_refresh(refreshed_pane) {
+                changed = true;
+                refreshed_paths.push(path);
+            }
+        }
+        if !changed {
+            return;
+        }
+        trace_directory_refresh(&format!("visible columns refreshed: {refreshed_paths:?}"));
+
+        if self.truncate_columns_after_missing_selection() {
+            self.column_scroll_pending = true;
+        }
+        self.clear_hidden_column_selection();
+        if self.show_preview {
+            self.clear_column_preview();
+            if let Some(entry) = self.selected_last_column_file() {
+                self.start_column_preview(entry, cx);
+            }
+        }
+        self.sync_directory_watchers();
+        cx.notify();
+    }
+
+    fn truncate_columns_after_missing_selection(&mut self) -> bool {
+        let mut keep = 1;
+        for index in 1..self.column_panes.len() {
+            let child_path = self.column_panes[index].path.clone();
+            let parent_keeps_child = self.column_panes[index - 1]
+                .selected_path
+                .as_ref()
+                .is_some_and(|selected| same_path(selected, &child_path))
+                && self.column_panes[index - 1]
+                    .entries
+                    .iter()
+                    .any(|entry| entry.is_dir() && same_path(&entry.path, &child_path));
+            if !parent_keeps_child {
+                break;
+            }
+            keep = index + 1;
+        }
+        if keep == self.column_panes.len() {
+            return false;
+        }
+        self.column_panes.truncate(keep);
+        true
     }
 
     fn apply_device_snapshot(&mut self, snapshot: DeviceSnapshot, cx: &mut Context<Self>) {
@@ -1867,10 +2046,14 @@ impl KiteApp {
     fn invalidate_columns(&mut self) {
         self.column_generation = self.column_generation.wrapping_add(1);
         self._column_task = Task::ready(());
+        self.column_refresh_generation = self.column_refresh_generation.wrapping_add(1);
+        self._column_refresh_task = Task::ready(());
     }
 
     fn load_columns(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         self.column_generation = self.column_generation.wrapping_add(1);
+        self.column_refresh_generation = self.column_refresh_generation.wrapping_add(1);
+        self._column_refresh_task = Task::ready(());
         let generation = self.column_generation;
         let chain = column_chain(&root);
         let preferences = ui_preferences::load_ui_preferences();
@@ -1893,6 +2076,7 @@ impl KiteApp {
                 )
             })
             .collect();
+        self.sync_directory_watchers();
         self.column_selected_path = None;
         self.column_scroll_pending = true;
         self.path_bar_scroll_pending = true;
@@ -1919,6 +2103,7 @@ impl KiteApp {
                     panes[index].set_single_selection(child_path);
                 }
                 this.column_panes = panes;
+                this.sync_directory_watchers();
                 this.column_scroll_pending = true;
                 this.path_bar_scroll_pending = true;
                 cx.notify();
@@ -1934,6 +2119,8 @@ impl KiteApp {
         cx: &mut Context<Self>,
     ) {
         self.column_generation = self.column_generation.wrapping_add(1);
+        self.column_refresh_generation = self.column_refresh_generation.wrapping_add(1);
+        self._column_refresh_task = Task::ready(());
         let generation = self.column_generation;
         let chain = column_chain(&root);
         let common = common_column_prefix(&self.column_panes, &chain);
@@ -1964,6 +2151,7 @@ impl KiteApp {
         }
 
         self.column_panes = panes;
+        self.sync_directory_watchers();
         for index in 0..self.column_panes.len().saturating_sub(1) {
             let child_path = self.column_panes[index + 1].path.clone();
             self.column_panes[index].set_single_selection(child_path);
@@ -2023,6 +2211,7 @@ impl KiteApp {
         self.view_mode = ViewMode::List;
         self.column_selected_path = None;
         self.invalidate_columns();
+        self.sync_directory_watchers();
         if self.active_search.is_none() {
             self.refresh_vcs_statuses(self.current_dir.clone(), cx);
         }
@@ -6667,15 +6856,21 @@ fn common_column_prefix(panes: &[ColumnPane], chain: &[PathBuf]) -> usize {
 }
 
 fn load_column_pane(path: PathBuf, rule: ColumnViewRule) -> ColumnPane {
+    try_load_column_pane(path.clone(), rule.clone())
+        .unwrap_or_else(|_| ColumnPane::new(path, Vec::new(), 0, false, false, false, rule))
+}
+
+fn try_load_column_pane(path: PathBuf, rule: ColumnViewRule) -> Result<ColumnPane, String> {
     let (mut entries, skipped) = load_directory_snapshot(&path, rule.sort)
-        .map(|snapshot| (snapshot.entries, snapshot.skipped))
-        .unwrap_or_default();
+        .map(|snapshot| (snapshot.entries, snapshot.skipped))?;
     if shell_fs::is_shell_namespace_path(&path) {
-        return ColumnPane::new(path, entries, skipped, false, false, false, rule);
+        return Ok(ColumnPane::new(
+            path, entries, skipped, false, false, false, rule,
+        ));
     }
     let snapshot = load_vcs_snapshot(&path);
     apply_statuses(&mut entries, &path, &snapshot);
-    ColumnPane::new(
+    Ok(ColumnPane::new(
         path,
         entries,
         skipped,
@@ -6683,7 +6878,7 @@ fn load_column_pane(path: PathBuf, rule: ColumnViewRule) -> ColumnPane {
         snapshot.git_available(),
         snapshot.svn_available(),
         rule,
-    )
+    ))
 }
 
 fn column_pane_action(path: &Path, command: ColumnPaneCommand) -> Box<dyn Action> {

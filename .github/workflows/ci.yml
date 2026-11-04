@@ -87,6 +87,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
+      - name: Test directory watcher
+        run: bash apps/macos/test-directory-watcher.sh
+
       - name: Verify native UI boundary
         run: |
           cargo tree --locked > "$RUNNER_TEMP/macos-dependencies.txt"

@@ -22,6 +22,7 @@ $eventsLog = Join-Path $output "windows-application-errors.log"
 $uiaLog = Join-Path $output "uia-tree.json"
 $screenshotPath = Join-Path $output "screen.png"
 $kiteTraceLog = Join-Path $output "kite-drag-trace.log"
+$watchTraceLog = Join-Path $output "kite-file-watch-trace.log"
 $kiteStateDir = Join-Path $output "kite-state"
 $sessionPath = Join-Path $kiteStateDir "session.json"
 $uiPreferencesPath = Join-Path $kiteStateDir "ui.json"
@@ -61,6 +62,7 @@ public static class KiteDragNative {
 $trackedProcesses = [System.Collections.Generic.List[int]]::new()
 $summary = [ordered]@{
     kite = $KiteExe
+    auto_refresh = $false
     chrome = $false
     edge = $false
     uploads = @()
@@ -406,6 +408,12 @@ try {
     $content = "Kite Chrome and Edge drag upload test`r`n"
     [System.IO.File]::WriteAllText($filePath, $content, [System.Text.UTF8Encoding]::new($false))
     $expectedHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $autoFileName = "auto-refresh.txt"
+    $autoFilePath = Join-Path $testDir $autoFileName
+    $autoContent = "created after Kite opened`r`n"
+    $autoExpectedHash = [System.BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($autoContent))
+    ).Replace("-", "").ToLowerInvariant()
     New-Item -ItemType Directory -Force -Path $kiteStateDir | Out-Null
     $session = @{
         schema_version = 1
@@ -441,6 +449,7 @@ try {
     } | Out-Null
 
     $env:KITE_DRAG_TRACE = $kiteTraceLog
+    $env:KITE_FILE_WATCH_TRACE = $watchTraceLog
     $kite = Start-Process -FilePath $KiteExe -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
@@ -456,6 +465,19 @@ try {
     $profileRoot = Join-Path $env:RUNNER_TEMP "kite-drag-browser-profiles-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
     Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
+
+    Start-Sleep -Milliseconds 1000
+    [System.IO.File]::WriteAllText(
+        $autoFilePath,
+        $autoContent,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    Wait-Until -TimeoutSeconds 15 -FailureMessage "created file did not trigger automatic refresh" -Condition {
+        if (Test-Path -LiteralPath $watchTraceLog) {
+            return [bool](Select-String -LiteralPath $watchTraceLog -Pattern "visible columns refreshed" -Quiet)
+        }
+        return $null
+    } | Out-Null
 
     $chromeCandidates = @(
         @(
@@ -480,11 +502,13 @@ try {
     }
 
     $chromeRecord = Test-BrowserUpload -Name "chrome" -Executable $chromeCandidates[0] -Port $port `
-        -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
+        -FileName $autoFileName -ExpectedHash $autoExpectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
         -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -ProfileRoot $profileRoot
+    $summary.auto_refresh = $true
     $summary.chrome = $true
     $summary.uploads += $chromeRecord
 
+    Remove-Item -LiteralPath $autoFilePath -Force
     Stop-TrackedProcess -Process $kite
     $env:KITE_DRAG_TRACE = $kiteTraceLog
     $kite = Start-Process -FilePath $KiteExe -PassThru
