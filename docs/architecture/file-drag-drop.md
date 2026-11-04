@@ -12,7 +12,9 @@ Kite 支持内部移动、内部复制、从系统拖入和向系统拖出。
 
 文件行和文件夹行提供内部拖放数据。
 内部拖放包含当前选中项目。
-指针离开 Kite 窗口后，Kite 启动原生 OLE 文件拖放。
+指针离开 Kite 窗口后，Kite 结束 GPUI 内部拖动。
+Kite 在当前事件返回后启动原生 OLE 文件拖放。
+`DoDragDrop` 不在 `on_drag_move` 回调栈内运行。
 原生拖放使用 Shell 数据对象。
 Shell 数据对象包含真实文件和文件夹项目。
 Shell 数据对象使用桌面为根的完整 PIDL。
@@ -68,3 +70,4 @@ Finder 和其他应用读取系统文件 URL。
 - macOS Clippy。
 - macOS Finder drag provider smoke check：`bash apps/macos/test-file-drag.sh`。
 - Windows Explorer drag target smoke check。
+- Windows Chrome and Edge upload E2E：`.github/scripts/windows-drag-upload-e2e.ps1`。
