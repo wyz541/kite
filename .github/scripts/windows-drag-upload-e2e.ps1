@@ -241,6 +241,10 @@ function Invoke-NativeDrag {
     param([int]$FromX, [int]$FromY, [int]$ToX, [int]$ToY)
     [KiteDragNative]::SetCursorPos($FromX, $FromY) | Out-Null
     Start-Sleep -Milliseconds 200
+    # Prime activation and selection. The browser may still own foreground focus.
+    [KiteDragNative]::mouse_event([KiteDragNative]::LeftDown, 0, 0, 0, [UIntPtr]::Zero)
+    [KiteDragNative]::mouse_event([KiteDragNative]::LeftUp, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
     [KiteDragNative]::mouse_event([KiteDragNative]::LeftDown, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 150
     for ($step = 1; $step -le 30; $step++) {
