@@ -12,17 +12,23 @@ macOS 13 through 15 use a native material fallback.
 macOS needs stable Rust, Xcode 26 or newer, and Xcode Command Line Tools.
 The deployment target is macOS 13.
 
+GitHub Actions does not run macOS builds. A local build is the required verification.
+
+Run the complete local verification with:
+
+```bash
+bash apps/macos/verify.sh
+```
+
+The script checks formatting, runs core tests, runs Clippy, runs the macOS smoke tests, and builds the release application.
+
+To build only the application, run:
+
 ```bash
 bash apps/macos/build.sh
 ```
 
-The script creates `apps/macos/build/Kite.app`.
-
-Run the file drag provider regression check with:
-
-```bash
-bash apps/macos/test-file-drag.sh
-```
+The build script creates `apps/macos/build/Kite.app`.
 
 ## Current native coverage
 
