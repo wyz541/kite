@@ -1,18 +1,16 @@
 use std::ffi::c_void;
 use std::fs::OpenOptions;
 use std::io::Write as _;
-use std::mem::{ManuallyDrop, size_of};
+use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{
-    DATA_S_SAMEFORMATETC, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS,
-    DV_E_DVASPECT, DV_E_FORMATETC, DV_E_LINDEX, DV_E_TYMED, E_NOTIMPL, E_OUTOFMEMORY, E_POINTER,
-    GlobalFree, HANDLE, HGLOBAL, OLE_E_ADVISENOTSUPPORTED, POINT, S_OK,
+    DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, E_OUTOFMEMORY, GlobalFree,
+    HANDLE, HGLOBAL, POINT, S_OK,
 };
 use windows::Win32::System::Com::{
-    DATADIR_GET, DVASPECT_CONTENT, FORMATETC, IAdviseSink, IDataObject, IDataObject_Impl,
-    IEnumFORMATETC, IEnumSTATDATA, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+    DVASPECT_CONTENT, FORMATETC, IBindCtx, IDataObject, TYMED_HGLOBAL,
 };
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
@@ -21,10 +19,13 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
     CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, DoDragDrop, IDropSource,
-    IDropSource_Impl, OleInitialize, OleUninitialize,
+    IDropSource_Impl,
 };
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
-use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, HDROP, SHCreateStdEnumFmtEtc};
+use windows::Win32::UI::Shell::{
+    BHID_DataObject, Common::ITEMIDLIST, DROPFILES, DragQueryFileW, HDROP, ILFree,
+    SHCreateShellItemArrayFromIDLists, SHParseDisplayName,
+};
 use windows::core::{BOOL, HRESULT, PCWSTR, implement, w};
 
 const DRAGDROP_GET_FILES_COUNT: u32 = 0xFFFF_FFFF;
@@ -83,29 +84,28 @@ pub(crate) fn write_file_clipboard(paths: &[PathBuf], mode: ClipboardMode) -> Re
 }
 
 pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
-    let paths = paths.to_vec();
-    std::thread::Builder::new()
-        .name("kite-file-drag".to_string())
-        .spawn(move || {
-            unsafe { OleInitialize(None) }
-                .map_err(|error| format!("无法初始化 OLE 拖放线程：{error}"))?;
-            let result = drag_file_paths_on_sta(&paths);
-            unsafe { OleUninitialize() };
-            result
-        })
-        .map_err(|error| format!("无法启动 OLE 拖放线程：{error}"))?
-        .join()
-        .map_err(|_| "OLE 拖放线程异常退出".to_string())?
-}
-
-fn drag_file_paths_on_sta(paths: &[PathBuf]) -> Result<(), String> {
     trace_drag(&format!(
-        "creating CF_HDROP data object for {} path(s): {:?}",
+        "creating shell data object for {} path(s): {:?}",
         paths.len(),
         paths
     ));
-    let data_object: IDataObject = KiteFileDataObject::new(paths)?.into();
+    let data_object = shell_drag_data_object(paths)?;
     unsafe {
+        let format = FORMATETC {
+            cfFormat: CF_HDROP.0,
+            ptd: std::ptr::null_mut(),
+            dwAspect: DVASPECT_CONTENT.0,
+            lindex: -1,
+            tymed: TYMED_HGLOBAL.0 as u32,
+        };
+        let format_status = data_object.QueryGetData(&format);
+        trace_drag(&format!(
+            "shell data object CF_HDROP status={:#010x}",
+            format_status.0
+        ));
+        if format_status.is_err() {
+            return Err("系统拖放数据不支持 CF_HDROP".to_string());
+        }
         let drop_source: IDropSource = KiteDropSource.into();
         let mut effect = DROPEFFECT_COPY;
         trace_drag("calling DoDragDrop");
@@ -125,174 +125,52 @@ fn drag_file_paths_on_sta(paths: &[PathBuf]) -> Result<(), String> {
     }
 }
 
-#[implement(IDataObject)]
-struct KiteFileDataObject {
-    paths: Vec<PathBuf>,
-    preferred_drop_effect_format: u16,
-}
-
-impl KiteFileDataObject {
-    fn new(paths: &[PathBuf]) -> Result<Self, String> {
-        if paths.is_empty() {
-            return Err("没有可拖动的文件".to_string());
-        }
-        let preferred_drop_effect_format = register_format(w!("Preferred DropEffect"))?
-            .try_into()
-            .map_err(|_| "系统剪贴板格式超出范围".to_string())?;
-        Ok(Self {
-            paths: paths.to_vec(),
-            preferred_drop_effect_format,
-        })
+fn shell_drag_data_object(paths: &[PathBuf]) -> Result<IDataObject, String> {
+    if paths.is_empty() {
+        return Err("没有可拖动的文件".to_string());
     }
-
-    fn format(cf_format: u16) -> FORMATETC {
-        FORMATETC {
-            cfFormat: cf_format,
-            ptd: std::ptr::null_mut(),
-            dwAspect: DVASPECT_CONTENT.0,
-            lindex: -1,
-            tymed: TYMED_HGLOBAL.0 as u32,
-        }
-    }
-
-    fn formats(&self) -> Vec<FORMATETC> {
-        vec![
-            Self::format(CF_HDROP.0),
-            Self::format(self.preferred_drop_effect_format),
-        ]
-    }
-
-    fn validate_format(&self, pformatetc: *const FORMATETC) -> HRESULT {
-        if pformatetc.is_null() {
-            return E_POINTER;
-        }
-        let format = unsafe { &*pformatetc };
-        if format.cfFormat != CF_HDROP.0 && format.cfFormat != self.preferred_drop_effect_format {
-            return DV_E_FORMATETC;
-        }
-        if format.dwAspect != DVASPECT_CONTENT.0 {
-            return DV_E_DVASPECT;
-        }
-        if format.lindex != -1 {
-            return DV_E_LINDEX;
-        }
-        if !format.ptd.is_null() {
-            return DV_E_FORMATETC;
-        }
-        if format.tymed & TYMED_HGLOBAL.0 as u32 == 0 {
-            return DV_E_TYMED;
-        }
-        S_OK
-    }
-
-    fn data_for_format(&self, format: &FORMATETC) -> Vec<u8> {
-        if format.cfFormat == CF_HDROP.0 {
-            drop_files_bytes(&self.paths)
-        } else {
-            DROPEFFECT_COPY.0.to_le_bytes().to_vec()
-        }
+    let pidls = paths
+        .iter()
+        .map(|path| ShellPidl::parse(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let raw_pidls = pidls.iter().map(ShellPidl::as_ptr).collect::<Vec<_>>();
+    unsafe {
+        let items = SHCreateShellItemArrayFromIDLists(&raw_pidls)
+            .map_err(|error| format!("无法创建 Shell 项目数组：{error}"))?;
+        items
+            .BindToHandler(None::<&IBindCtx>, &BHID_DataObject)
+            .map_err(|error| format!("无法创建系统文件拖放数据：{error}"))
     }
 }
 
-#[allow(non_snake_case)]
-impl IDataObject_Impl for KiteFileDataObject_Impl {
-    fn GetData(&self, pformatetc: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
-        let status = self.this.validate_format(pformatetc);
-        if status.is_err() {
-            trace_drag(&format!(
-                "GetData rejected cf={} result={:#010x}",
-                format_id(pformatetc),
-                status.0
-            ));
-            return Err(status.into());
+struct ShellPidl(*mut ITEMIDLIST);
+
+impl ShellPidl {
+    fn parse(path: &Path) -> Result<Self, String> {
+        let wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut pidl = std::ptr::null_mut();
+        unsafe {
+            SHParseDisplayName(PCWSTR(wide.as_ptr()), None::<&IBindCtx>, &mut pidl, 0, None)
+                .map_err(|error| format!("无法解析文件路径 {}：{error}", path.display()))?;
         }
-        let bytes = self.this.data_for_format(unsafe { &*pformatetc });
-        trace_drag(&format!(
-            "GetData served cf={} bytes={}",
-            unsafe { (*pformatetc).cfFormat },
-            bytes.len()
-        ));
-        Ok(STGMEDIUM {
-            tymed: TYMED_HGLOBAL.0 as u32,
-            u: STGMEDIUM_0 {
-                hGlobal: hglobal_from_bytes(&bytes)?,
-            },
-            pUnkForRelease: ManuallyDrop::new(None),
-        })
-    }
-
-    fn GetDataHere(
-        &self,
-        _pformatetc: *const FORMATETC,
-        _pmedium: *mut STGMEDIUM,
-    ) -> windows::core::Result<()> {
-        Err(E_NOTIMPL.into())
-    }
-
-    fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
-        let status = self.this.validate_format(pformatetc);
-        trace_drag(&format!(
-            "QueryGetData cf={} result={:#010x}",
-            format_id(pformatetc),
-            status.0
-        ));
-        status
-    }
-
-    fn GetCanonicalFormatEtc(
-        &self,
-        pformatectin: *const FORMATETC,
-        pformatectout: *mut FORMATETC,
-    ) -> HRESULT {
-        if pformatectin.is_null() || pformatectout.is_null() {
-            return E_POINTER;
+        if pidl.is_null() {
+            return Err(format!("无法解析文件路径：{}", path.display()));
         }
-        let mut canonical = unsafe { *pformatectin };
-        canonical.ptd = std::ptr::null_mut();
-        unsafe { pformatectout.write(canonical) };
-        DATA_S_SAMEFORMATETC
+        Ok(Self(pidl))
     }
 
-    fn SetData(
-        &self,
-        _pformatetc: *const FORMATETC,
-        _pmedium: *const STGMEDIUM,
-        _frelease: BOOL,
-    ) -> windows::core::Result<()> {
-        Err(E_NOTIMPL.into())
-    }
-
-    fn EnumFormatEtc(&self, dwdirection: u32) -> windows::core::Result<IEnumFORMATETC> {
-        trace_drag(&format!("EnumFormatEtc direction={dwdirection}"));
-        if dwdirection != DATADIR_GET.0 as u32 {
-            return Err(E_NOTIMPL.into());
-        }
-        unsafe { SHCreateStdEnumFmtEtc(&self.this.formats()) }
-    }
-
-    fn DAdvise(
-        &self,
-        _pformatetc: *const FORMATETC,
-        _advf: u32,
-        _padvsink: windows::core::Ref<IAdviseSink>,
-    ) -> windows::core::Result<u32> {
-        Err(OLE_E_ADVISENOTSUPPORTED.into())
-    }
-
-    fn DUnadvise(&self, _dwconnection: u32) -> windows::core::Result<()> {
-        Err(OLE_E_ADVISENOTSUPPORTED.into())
-    }
-
-    fn EnumDAdvise(&self) -> windows::core::Result<IEnumSTATDATA> {
-        Err(OLE_E_ADVISENOTSUPPORTED.into())
+    fn as_ptr(&self) -> *const ITEMIDLIST {
+        self.0
     }
 }
 
-fn format_id(format: *const FORMATETC) -> u16 {
-    if format.is_null() {
-        0
-    } else {
-        unsafe { (*format).cfFormat }
+impl Drop for ShellPidl {
+    fn drop(&mut self) {
+        unsafe { ILFree(Some(self.0)) };
     }
 }
 
