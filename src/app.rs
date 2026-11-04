@@ -5908,11 +5908,19 @@ impl KiteApp {
                         return;
                     }
                     let paths = native_drag_paths.clone();
+                    file_clipboard::trace_drag(&format!(
+                        "GPUI drag left window at ({:.1},{:.1}) with {} path(s)",
+                        position.x.as_f32(),
+                        position.y.as_f32(),
+                        paths.len()
+                    ));
                     cx.stop_active_drag(window);
                     // DoDragDrop enters a nested Windows message loop. Start it after
                     // this GPUI event returns so the framework is not re-entered.
                     window.defer(cx, move |_, _| {
+                        file_clipboard::trace_drag("deferred OLE drag started");
                         if let Err(error) = file_clipboard::drag_file_paths(&paths) {
+                            file_clipboard::trace_drag(&format!("native drag failed: {error}"));
                             eprintln!("failed to start native file drag: {error}");
                         }
                     });

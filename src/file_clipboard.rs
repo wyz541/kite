@@ -1,4 +1,6 @@
 use std::ffi::c_void;
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -24,6 +26,15 @@ use windows::Win32::UI::Shell::{
 use windows::core::{BOOL, HRESULT, Owned, PCWSTR, implement, w};
 
 const DRAGDROP_GET_FILES_COUNT: u32 = 0xFFFF_FFFF;
+
+pub(crate) fn trace_drag(message: &str) {
+    let Some(path) = std::env::var_os("KITE_DRAG_TRACE") else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{message}");
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClipboardMode {
@@ -70,18 +81,25 @@ pub(crate) fn write_file_clipboard(paths: &[PathBuf], mode: ClipboardMode) -> Re
 }
 
 pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
+    trace_drag(&format!("creating data object for {} path(s)", paths.len()));
     let (_pidls, data_object) = shell_drag_data_object(paths)?;
     unsafe {
         let drop_source: IDropSource = KiteDropSource.into();
         let mut effect = DROPEFFECT_COPY;
-        DoDragDrop(
+        trace_drag("calling DoDragDrop");
+        let result = DoDragDrop(
             &data_object,
             &drop_source,
             DROPEFFECT_COPY,
             &mut effect as *mut DROPEFFECT,
-        )
-        .ok()
-        .map_err(|error| format!("文件拖放失败：{error}"))
+        );
+        trace_drag(&format!(
+            "DoDragDrop returned hresult={:#010x} effect={}",
+            result.0, effect.0
+        ));
+        result
+            .ok()
+            .map_err(|error| format!("文件拖放失败：{error}"))
     }
 }
 
