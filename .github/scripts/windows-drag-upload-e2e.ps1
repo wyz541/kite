@@ -78,6 +78,15 @@ function Stop-TrackedProcesses {
     }
 }
 
+function Stop-BrowserProcess {
+    param([System.Diagnostics.Process]$Process)
+    if ($null -eq $Process) {
+        return
+    }
+    & taskkill.exe /PID $Process.Id /T /F *> $null
+    Start-Sleep -Milliseconds 750
+}
+
 function Wait-Until {
     param(
         [scriptblock]$Condition,
@@ -330,43 +339,48 @@ function Test-BrowserUpload {
         [int]$BrowserY,
         [int]$BrowserWidth,
         [int]$BrowserHeight,
-        [string]$ProfileRoot
-    )
+    [string]$ProfileRoot
+)
     $profile = Join-Path $ProfileRoot "$Name-profile"
     $url = "http://127.0.0.1:$Port/?browser=$Name"
+    $browser = $null
     $browser = Start-Browser -Name $Name -Executable $Executable -Url $url `
         -X $BrowserX -Y $BrowserY -Width $BrowserWidth -Height $BrowserHeight -Profile $profile
-    [KiteDragNative]::ShowWindow($KiteHandle, 9) | Out-Null
-    [KiteDragNative]::SetForegroundWindow($KiteHandle) | Out-Null
-    Start-Sleep -Milliseconds 500
-    $row = $null
     try {
-        $row = Find-FileRow -ProcessId $KiteProcess.Id -FileName $FileName -TimeoutSeconds 8
-    } catch {
-        Write-Warning "UIA file row unavailable; using controlled Kite column coordinates"
+        [KiteDragNative]::ShowWindow($KiteHandle, 9) | Out-Null
+        [KiteDragNative]::SetForegroundWindow($KiteHandle) | Out-Null
+        Start-Sleep -Milliseconds 500
+        $row = $null
+        try {
+            $row = Find-FileRow -ProcessId $KiteProcess.Id -FileName $FileName -TimeoutSeconds 8
+        } catch {
+            Write-Warning "UIA file row unavailable; using controlled Kite column coordinates"
+        }
+        if ($null -ne $row) {
+            $rect = $row.Current.BoundingRectangle
+            $fromX = [int]($rect.Left + ($rect.Width / 2))
+            $fromY = [int]($rect.Top + ($rect.Height / 2))
+        } else {
+            $kiteWindow = [System.Windows.Automation.AutomationElement]::FromHandle($KiteHandle)
+            $rect = $kiteWindow.Current.BoundingRectangle
+            # The E2E directory contains one file in the rightmost active column.
+            $fromX = [int]($script:ScreenWidth - 220)
+            $fromY = [int]($rect.Top + 211)
+        }
+        $toX = [int]($BrowserX + ($BrowserWidth / 2))
+        $toY = [int]($BrowserY + ($BrowserHeight / 2))
+        Write-Host "Dragging $FileName from ($fromX,$fromY) to $Name ($toX,$toY)"
+        Save-E2EDiagnostics -ProcessId $KiteProcess.Id -ScreenshotPath (Join-Path $output "before-$Name.png")
+        Invoke-NativeDrag -FromX $fromX -FromY $fromY -ToX $toX -ToY $toY
+        $record = Wait-ForUpload -Browser $Name -FileName $FileName -ExpectedHash $ExpectedHash -KiteProcess $KiteProcess
+        if ($record.PSObject.Properties.Name -contains "upload_error") {
+            throw "$Name reported upload error: $($record.upload_error)"
+        }
+        Write-Host "$Name upload verified: $($record.files[0].name) ($($record.files[0].size) bytes)"
+        return $record
+    } finally {
+        Stop-BrowserProcess -Process $browser.Process
     }
-    if ($null -ne $row) {
-        $rect = $row.Current.BoundingRectangle
-        $fromX = [int]($rect.Left + ($rect.Width / 2))
-        $fromY = [int]($rect.Top + ($rect.Height / 2))
-    } else {
-        $kiteWindow = [System.Windows.Automation.AutomationElement]::FromHandle($KiteHandle)
-        $rect = $kiteWindow.Current.BoundingRectangle
-        # The E2E directory contains one file in the rightmost active column.
-        $fromX = [int]($script:ScreenWidth - 220)
-        $fromY = [int]($rect.Top + 211)
-    }
-    $toX = [int]($BrowserX + ($BrowserWidth / 2))
-    $toY = [int]($BrowserY + ($BrowserHeight / 2))
-    Write-Host "Dragging $FileName from ($fromX,$fromY) to $Name ($toX,$toY)"
-    Save-E2EDiagnostics -ProcessId $KiteProcess.Id -ScreenshotPath (Join-Path $output "before-$Name.png")
-    Invoke-NativeDrag -FromX $fromX -FromY $fromY -ToX $toX -ToY $toY
-    $record = Wait-ForUpload -Browser $Name -FileName $FileName -ExpectedHash $ExpectedHash -KiteProcess $KiteProcess
-    if ($record.PSObject.Properties.Name -contains "upload_error") {
-        throw "$Name reported upload error: $($record.upload_error)"
-    }
-    Write-Host "$Name upload verified: $($record.files[0].name) ($($record.files[0].size) bytes)"
-    return $record
 }
 
 try {
