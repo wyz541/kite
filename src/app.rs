@@ -5907,10 +5907,15 @@ impl KiteApp {
                     if !outside || native_drag_started.swap(true, Ordering::Relaxed) {
                         return;
                     }
-                    if let Err(error) = file_clipboard::drag_file_paths(&native_drag_paths) {
-                        eprintln!("failed to start native file drag: {error}");
-                    }
+                    let paths = native_drag_paths.clone();
                     cx.stop_active_drag(window);
+                    // DoDragDrop enters a nested Windows message loop. Start it after
+                    // this GPUI event returns so the framework is not re-entered.
+                    window.defer(cx, move |_, _| {
+                        if let Err(error) = file_clipboard::drag_file_paths(&paths) {
+                            eprintln!("failed to start native file drag: {error}");
+                        }
+                    });
                 });
             if entry.is_dir() {
                 let internal_destination = entry.path.clone();
