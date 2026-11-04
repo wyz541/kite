@@ -22,6 +22,9 @@ $eventsLog = Join-Path $output "windows-application-errors.log"
 $uiaLog = Join-Path $output "uia-tree.json"
 $screenshotPath = Join-Path $output "screen.png"
 $kiteTraceLog = Join-Path $output "kite-drag-trace.log"
+$kiteStateDir = Join-Path $output "kite-state"
+$sessionPath = Join-Path $kiteStateDir "session.json"
+$uiPreferencesPath = Join-Path $kiteStateDir "ui.json"
 
 if (-not (Test-Path -LiteralPath $KiteExe)) {
     $candidate = Join-Path $root $KiteExe
@@ -202,24 +205,34 @@ function Find-FileRow {
             [System.Windows.Automation.TreeScope]::Descendants,
             $processCondition
         )
-        $matches = @()
+        $namedMatches = @()
+        $fallbackRows = @()
         foreach ($element in $elements) {
             try {
                 $rect = $element.Current.BoundingRectangle
-                if ($element.Current.Name -like "*$FileName*" -and
+                $name_matches = $element.Current.Name -like "*$FileName*"
+                $is_list_row = $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::DataItem
+                if (($name_matches -or $is_list_row) -and
                     $rect.Width -gt 60 -and
                     $rect.Height -ge 12 -and
                     $rect.Height -le 80 -and
                     -not $element.Current.IsOffscreen) {
-                    $matches += $element
+                    if ($name_matches) {
+                        $namedMatches += $element
+                    } elseif ($is_list_row) {
+                        $fallbackRows += $element
+                    }
                 }
             } catch {
             }
         }
-        if ($matches.Count -eq 0) {
-            return $null
+        if ($namedMatches.Count -gt 0) {
+            return $namedMatches | Sort-Object { $_.Current.BoundingRectangle.Width * $_.Current.BoundingRectangle.Height } -Descending | Select-Object -First 1
         }
-        return $matches | Sort-Object { $_.Current.BoundingRectangle.Width * $_.Current.BoundingRectangle.Height } -Descending | Select-Object -First 1
+        if ($fallbackRows.Count -gt 0) {
+            return $fallbackRows | Sort-Object @{ Expression = { $_.Current.BoundingRectangle.X }; Descending = $true }, @{ Expression = { $_.Current.BoundingRectangle.Y }; Descending = $false } | Select-Object -First 1
+        }
+        return $null
     }
 }
 
@@ -365,7 +378,7 @@ function Test-BrowserUpload {
             $kiteWindow = [System.Windows.Automation.AutomationElement]::FromHandle($KiteHandle)
             $rect = $kiteWindow.Current.BoundingRectangle
             # The E2E directory contains one file in the rightmost active column.
-            $fromX = [int]($script:ScreenWidth - 220)
+            $fromX = [int]($rect.Left + ($rect.Width * 0.75))
             $fromY = [int]($rect.Top + 211)
         }
         $toX = [int]($BrowserX + ($BrowserWidth / 2))
@@ -385,13 +398,29 @@ function Test-BrowserUpload {
 }
 
 try {
-    $testDir = Join-Path $env:RUNNER_TEMP "kite-drag-e2e-$([Guid]::NewGuid().ToString('N'))"
+    $testRoot = [System.IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+    $testDir = Join-Path $testRoot "kite-drag-e2e-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $testDir | Out-Null
     $fileName = "drag-test.txt"
     $filePath = Join-Path $testDir $fileName
     $content = "Kite Chrome and Edge drag upload test`r`n"
     [System.IO.File]::WriteAllText($filePath, $content, [System.Text.UTF8Encoding]::new($false))
     $expectedHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    New-Item -ItemType Directory -Force -Path $kiteStateDir | Out-Null
+    $session = @{
+        schema_version = 1
+        active_tab = 0
+        tabs = @(
+            @{
+                current_directory = $testDir
+                view_mode = "columns"
+                show_path_bar = $true
+            }
+        )
+    } | ConvertTo-Json -Depth 5
+    [System.IO.File]::WriteAllText($sessionPath, $session, [System.Text.UTF8Encoding]::new($false))
+    $env:KITE_SESSION_PATH = $sessionPath
+    $env:KITE_UI_PREFERENCES_PATH = $uiPreferencesPath
 
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
@@ -412,7 +441,7 @@ try {
     } | Out-Null
 
     $env:KITE_DRAG_TRACE = $kiteTraceLog
-    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    $kite = Start-Process -FilePath $KiteExe -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -458,7 +487,7 @@ try {
 
     Stop-TrackedProcess -Process $kite
     $env:KITE_DRAG_TRACE = $kiteTraceLog
-    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    $kite = Start-Process -FilePath $KiteExe -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
