@@ -43,6 +43,7 @@ ureq = { version = "2.12", default-features = false, features = ["tls"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 futures-channel = "0.3"
 gpui-kit = { version = "0.8.0", optional = true, features = ["syntect"] }
+notify = { version = "8.2.0", default-features = false }
 raw-window-handle = { version = "0.6.2", optional = true }
 winreg = "0.56"
 windows = { version = "0.62.2", features = [
