@@ -61,6 +61,7 @@ public static class KiteDragNative {
 $trackedProcesses = [System.Collections.Generic.List[int]]::new()
 $summary = [ordered]@{
     kite = $KiteExe
+    auto_refresh = $false
     chrome = $false
     edge = $false
     uploads = @()
@@ -234,6 +235,34 @@ function Find-FileRow {
         }
         return $null
     }
+}
+
+function Get-VisibleDataItemCount {
+    param([int]$ProcessId)
+    $rootElement = [System.Windows.Automation.AutomationElement]::RootElement
+    $processCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+        $ProcessId
+    )
+    $elements = $rootElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $processCondition
+    )
+    $count = 0
+    foreach ($element in $elements) {
+        try {
+            $rect = $element.Current.BoundingRectangle
+            if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::DataItem -and
+                -not $element.Current.IsOffscreen -and
+                $rect.Width -gt 60 -and
+                $rect.Height -ge 12 -and
+                $rect.Height -le 80) {
+                $count += 1
+            }
+        } catch {
+        }
+    }
+    return $count
 }
 
 function Move-Window {
@@ -456,6 +485,30 @@ try {
     $profileRoot = Join-Path $env:RUNNER_TEMP "kite-drag-browser-profiles-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
     Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
+
+    $initialRowCount = Wait-Until -TimeoutSeconds 10 -FailureMessage "active column rows did not load" -Condition {
+        $count = Get-VisibleDataItemCount -ProcessId $kite.Id
+        if ($count -gt 0) { return $count }
+        return $null
+    }
+    $autoRefreshFile = Join-Path $testDir "auto-refresh.txt"
+    [System.IO.File]::WriteAllText(
+        $autoRefreshFile,
+        "auto refresh",
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    Wait-Until -TimeoutSeconds 10 -FailureMessage "created file did not appear automatically" -Condition {
+        $count = Get-VisibleDataItemCount -ProcessId $kite.Id
+        if ($count -gt $initialRowCount) { return $count }
+        return $null
+    } | Out-Null
+    Remove-Item -LiteralPath $autoRefreshFile -Force
+    Wait-Until -TimeoutSeconds 10 -FailureMessage "deleted file did not disappear automatically" -Condition {
+        $count = Get-VisibleDataItemCount -ProcessId $kite.Id
+        if ($count -eq $initialRowCount) { return $count }
+        return $null
+    } | Out-Null
+    $summary.auto_refresh = $true
 
     $chromeCandidates = @(
         @(
