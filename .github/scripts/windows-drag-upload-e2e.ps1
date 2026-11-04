@@ -294,13 +294,19 @@ function Wait-ForUpload {
             } catch {
                 continue
             }
+            if ($record.kind -eq "drag-event") {
+                if ($record.type -eq "upload-error") {
+                    return [pscustomobject]@{ upload_error = $record.message }
+                }
+                continue
+            }
+            if ($record.kind -ne "upload") {
+                continue
+            }
             if ($record.browser -ne $Browser) {
                 continue
             }
-            if ($record.kind -eq "drag-event" -and $record.type -eq "upload-error") {
-                throw "$Browser reported upload error: $($record.message)"
-            }
-            foreach ($file in $record.files) {
+            foreach ($file in @($record.files)) {
                 if ($file.name -eq $FileName -and $file.sha256 -eq $ExpectedHash) {
                     return $record
                 }
@@ -356,6 +362,9 @@ function Test-BrowserUpload {
     Save-E2EDiagnostics -ProcessId $KiteProcess.Id -ScreenshotPath (Join-Path $output "before-$Name.png")
     Invoke-NativeDrag -FromX $fromX -FromY $fromY -ToX $toX -ToY $toY
     $record = Wait-ForUpload -Browser $Name -FileName $FileName -ExpectedHash $ExpectedHash -KiteProcess $KiteProcess
+    if ($record.PSObject.Properties.Name -contains "upload_error") {
+        throw "$Name reported upload error: $($record.upload_error)"
+    }
     Write-Host "$Name upload verified: $($record.files[0].name) ($($record.files[0].size) bytes)"
     return $record
 }
