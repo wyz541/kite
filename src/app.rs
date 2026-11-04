@@ -5886,6 +5886,11 @@ impl KiteApp {
                     this.activate_column_entry(column, row_ix, event, window, cx)
                 }))
                 .on_drag(drag_payload, |drag: &KiteFileDrag, position, _, cx| {
+                    file_clipboard::trace_drag(&format!(
+                        "GPUI drag preview created at ({:.1},{:.1})",
+                        position.x.as_f32(),
+                        position.y.as_f32()
+                    ));
                     cx.new(|_| KiteFileDragPreview {
                         label: drag.label.clone(),
                         count: drag.paths.len(),

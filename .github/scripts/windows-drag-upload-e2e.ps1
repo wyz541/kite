@@ -242,9 +242,19 @@ function Start-Browser {
     return [pscustomobject]@{ Process = $process; Window = $window; Handle = $handle }
 }
 
+function Move-NativeCursor {
+    param([int]$X, [int]$Y)
+    $width = [Math]::Max(2, $script:ScreenWidth)
+    $height = [Math]::Max(2, $script:ScreenHeight)
+    $absoluteX = [uint32][Math]::Round(($X * 65535.0) / ($width - 1))
+    $absoluteY = [uint32][Math]::Round(($Y * 65535.0) / ($height - 1))
+    [KiteDragNative]::mouse_event(0x8001, $absoluteX, $absoluteY, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 12
+}
+
 function Invoke-NativeDrag {
     param([int]$FromX, [int]$FromY, [int]$ToX, [int]$ToY)
-    [KiteDragNative]::SetCursorPos($FromX, $FromY) | Out-Null
+    Move-NativeCursor -X $FromX -Y $FromY
     Start-Sleep -Milliseconds 200
     # Prime activation and selection. The browser may still own foreground focus.
     [KiteDragNative]::mouse_event([KiteDragNative]::LeftDown, 0, 0, 0, [UIntPtr]::Zero)
@@ -255,8 +265,8 @@ function Invoke-NativeDrag {
     for ($step = 1; $step -le 30; $step++) {
         $x = [int]($FromX + (($ToX - $FromX) * $step / 30.0))
         $y = [int]($FromY + (($ToY - $FromY) * $step / 30.0))
-        [KiteDragNative]::SetCursorPos($x, $y) | Out-Null
-        Start-Sleep -Milliseconds 25
+        Move-NativeCursor -X $x -Y $y
+        Start-Sleep -Milliseconds 13
     }
     Start-Sleep -Milliseconds 300
     $point = [KiteDragNative+POINT]::new()
@@ -388,6 +398,8 @@ try {
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $script:ScreenWidth = $screen.Width
+    $script:ScreenHeight = $screen.Height
     $windowHeight = [Math]::Max(600, $screen.Height - 80)
     $browserWidth = [Math]::Min(420, $screen.Width)
     $browserHeight = [Math]::Min(360, $windowHeight)
