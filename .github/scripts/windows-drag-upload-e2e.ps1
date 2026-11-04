@@ -299,9 +299,9 @@ function Test-BrowserUpload {
         [int]$BrowserY,
         [int]$BrowserWidth,
         [int]$BrowserHeight,
-        [string]$TempDir
+        [string]$ProfileRoot
     )
-    $profile = Join-Path $TempDir "$Name-profile"
+    $profile = Join-Path $ProfileRoot "$Name-profile"
     $url = "http://127.0.0.1:$Port/?browser=$Name"
     $browser = Start-Browser -Name $Name -Executable $Executable -Url $url `
         -X $BrowserX -Y $BrowserY -Width $BrowserWidth -Height $BrowserHeight -Profile $profile
@@ -366,11 +366,14 @@ try {
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $windowHeight = [Math]::Max(600, $screen.Height - 80)
-    $browserWidth = [Math]::Min(420, [int]($screen.Width / 2))
-    $browserHeight = [Math]::Min(360, $windowHeight)
-    $browserX = $screen.Width - $browserWidth - 20
-    $browserY = $screen.Height - $browserHeight - 80
-    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $screen.Width -Height $windowHeight
+    $browserWidth = [Math]::Max(320, [Math]::Min(420, [int]($screen.Width / 3)))
+    $browserHeight = $windowHeight
+    $browserX = $screen.Width - $browserWidth
+    $browserY = 0
+    $kiteWidth = $screen.Width - $browserWidth
+    $profileRoot = Join-Path $env:RUNNER_TEMP "kite-drag-browser-profiles-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
+    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
 
     $chromeCandidates = @(
         @(
@@ -396,13 +399,13 @@ try {
 
     $chromeRecord = Test-BrowserUpload -Name "chrome" -Executable $chromeCandidates[0] -Port $port `
         -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
-        -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -TempDir $testDir
+        -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -ProfileRoot $profileRoot
     $summary.chrome = $true
     $summary.uploads += $chromeRecord
 
     $edgeRecord = Test-BrowserUpload -Name "edge" -Executable $edgeCandidates[0] -Port $port `
         -FileName $fileName -ExpectedHash $expectedHash -KiteProcess $kite -KiteHandle $kiteHandle `
-        -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -TempDir $testDir
+        -BrowserX $browserX -BrowserY $browserY -BrowserWidth $browserWidth -BrowserHeight $browserHeight -ProfileRoot $profileRoot
     $summary.edge = $true
     $summary.uploads += $edgeRecord
 
