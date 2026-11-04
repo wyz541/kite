@@ -213,10 +213,6 @@ fn drag_file_paths(hwnd: HWND, paths: &[PathBuf]) -> Result<(), String> {
             tymed: TYMED_HGLOBAL.0 as u32,
         };
         let format_status = data_object.QueryGetData(&format);
-        trace_drag(&format!(
-            "shell data object CF_HDROP status={:#010x}",
-            format_status.0
-        ));
         if format_status.is_err() {
             return Err("系统拖放数据不支持 CF_HDROP".to_string());
         }
