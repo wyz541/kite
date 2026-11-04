@@ -5875,21 +5875,17 @@ impl KiteApp {
                 }
             }
             let drag_payload = self.drag_payload_for_entry(column, &entry);
-            let native_drag_paths = drag_payload
-                .paths
-                .iter()
-                .map(|(path, _)| path.clone())
-                .collect::<Vec<_>>();
-            let native_drag_started = Arc::new(AtomicBool::new(false));
             let mut row = row
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     this.activate_column_entry(column, row_ix, event, window, cx)
                 }))
                 .on_drag(drag_payload, |drag: &KiteFileDrag, position, _, cx| {
                     file_clipboard::trace_drag(&format!(
-                        "GPUI drag preview created at ({:.1},{:.1})",
+                        "GPUI drag preview created at ({:.1},{:.1}) label={} paths={:?}",
                         position.x.as_f32(),
-                        position.y.as_f32()
+                        position.y.as_f32(),
+                        drag.label,
+                        drag.paths
                     ));
                     cx.new(|_| KiteFileDragPreview {
                         label: drag.label.clone(),
@@ -5901,39 +5897,6 @@ impl KiteApp {
                     Some(ExternalDragPayload::Files(FileDragPaths::new(
                         drag.paths.clone(),
                     )))
-                })
-                .on_drag_move::<KiteFileDrag>(move |event, window, cx| {
-                    let position = event.event.position;
-                    file_clipboard::trace_drag(&format!(
-                        "GPUI drag move at ({:.1},{:.1})",
-                        position.x.as_f32(),
-                        position.y.as_f32()
-                    ));
-                    let viewport = window.viewport_size();
-                    let outside = position.x < px(0.)
-                        || position.y < px(0.)
-                        || position.x > viewport.width
-                        || position.y > viewport.height;
-                    if !outside || native_drag_started.swap(true, Ordering::Relaxed) {
-                        return;
-                    }
-                    let paths = native_drag_paths.clone();
-                    file_clipboard::trace_drag(&format!(
-                        "GPUI drag left window at ({:.1},{:.1}) with {} path(s)",
-                        position.x.as_f32(),
-                        position.y.as_f32(),
-                        paths.len()
-                    ));
-                    cx.stop_active_drag(window);
-                    // DoDragDrop enters a nested Windows message loop. Start it after
-                    // this GPUI event returns so the framework is not re-entered.
-                    window.defer(cx, move |_, _| {
-                        file_clipboard::trace_drag("deferred OLE drag started");
-                        if let Err(error) = file_clipboard::drag_file_paths(&paths) {
-                            file_clipboard::trace_drag(&format!("native drag failed: {error}"));
-                            eprintln!("failed to start native file drag: {error}");
-                        }
-                    });
                 });
             if entry.is_dir() {
                 let internal_destination = entry.path.clone();
@@ -7259,6 +7222,44 @@ impl Render for KiteApp {
             .on_action(cx.listener(Self::set_default_explorer))
             .on_action(cx.listener(Self::restore_default_explorer))
             .on_action(cx.listener(Self::create_start_menu_shortcut))
+            .on_drag_move::<KiteFileDrag>(|event, window, cx| {
+                let position = event.event.position;
+                file_clipboard::trace_drag(&format!(
+                    "GPUI drag move at ({:.1},{:.1})",
+                    position.x.as_f32(),
+                    position.y.as_f32()
+                ));
+                let viewport = window.viewport_size();
+                let outside = position.x < px(0.)
+                    || position.y < px(0.)
+                    || position.x > viewport.width
+                    || position.y > viewport.height;
+                if !outside {
+                    return;
+                }
+                let paths = event
+                    .drag(cx)
+                    .paths
+                    .iter()
+                    .map(|(path, _)| path.clone())
+                    .collect::<Vec<_>>();
+                file_clipboard::trace_drag(&format!(
+                    "GPUI drag left window at ({:.1},{:.1}) paths={:?}",
+                    position.x.as_f32(),
+                    position.y.as_f32(),
+                    paths
+                ));
+                cx.stop_active_drag(window);
+                // DoDragDrop enters a nested Windows message loop. Start it after
+                // this GPUI event returns so the framework is not re-entered.
+                window.defer(cx, move |_, _| {
+                    file_clipboard::trace_drag("deferred OLE drag started");
+                    if let Err(error) = file_clipboard::drag_file_paths(&paths) {
+                        file_clipboard::trace_drag(&format!("native drag failed: {error}"));
+                        eprintln!("failed to start native file drag: {error}");
+                    }
+                });
+            })
             .child(self.render_toolbar(cx))
             .child(
                 h_flex()
