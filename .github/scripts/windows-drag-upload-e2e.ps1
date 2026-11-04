@@ -22,6 +22,9 @@ $eventsLog = Join-Path $output "windows-application-errors.log"
 $uiaLog = Join-Path $output "uia-tree.json"
 $screenshotPath = Join-Path $output "screen.png"
 $kiteTraceLog = Join-Path $output "kite-drag-trace.log"
+$kiteStateDir = Join-Path $output "kite-state"
+$sessionPath = Join-Path $kiteStateDir "session.json"
+$uiPreferencesPath = Join-Path $kiteStateDir "ui.json"
 
 if (-not (Test-Path -LiteralPath $KiteExe)) {
     $candidate = Join-Path $root $KiteExe
@@ -350,11 +353,7 @@ function Test-BrowserUpload {
     try {
         [KiteDragNative]::ShowWindow($KiteHandle, 9) | Out-Null
         [KiteDragNative]::SetForegroundWindow($KiteHandle) | Out-Null
-        Start-Sleep -Milliseconds 750
-        # Use one deterministic list pane so the file row cannot be clipped by
-        # a restored multi-column path chain.
-        [System.Windows.Forms.SendKeys]::SendWait("^1")
-        Start-Sleep -Milliseconds 1000
+        Start-Sleep -Milliseconds 500
         $row = $null
         try {
             $row = Find-FileRow -ProcessId $KiteProcess.Id -FileName $FileName -TimeoutSeconds 8
@@ -396,6 +395,21 @@ try {
     $content = "Kite Chrome and Edge drag upload test`r`n"
     [System.IO.File]::WriteAllText($filePath, $content, [System.Text.UTF8Encoding]::new($false))
     $expectedHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    New-Item -ItemType Directory -Force -Path $kiteStateDir | Out-Null
+    $session = @{
+        schema_version = 1
+        active_tab = 0
+        tabs = @(
+            @{
+                current_directory = $testDir
+                view_mode = "list"
+                show_path_bar = $true
+            }
+        )
+    } | ConvertTo-Json -Depth 5
+    [System.IO.File]::WriteAllText($sessionPath, $session, [System.Text.UTF8Encoding]::new($false))
+    $env:KITE_SESSION_PATH = $sessionPath
+    $env:KITE_UI_PREFERENCES_PATH = $uiPreferencesPath
 
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
@@ -416,7 +430,7 @@ try {
     } | Out-Null
 
     $env:KITE_DRAG_TRACE = $kiteTraceLog
-    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    $kite = Start-Process -FilePath $KiteExe -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -462,7 +476,7 @@ try {
 
     Stop-TrackedProcess -Process $kite
     $env:KITE_DRAG_TRACE = $kiteTraceLog
-    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    $kite = Start-Process -FilePath $KiteExe -PassThru
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
