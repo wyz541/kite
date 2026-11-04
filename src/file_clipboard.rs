@@ -21,7 +21,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::System::Ole::{
     CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, DoDragDrop, IDropSource,
-    IDropSource_Impl,
+    IDropSource_Impl, OleGetClipboard, OleSetClipboard,
 };
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
 use windows::Win32::UI::Shell::{DROPFILES, DragQueryFileW, HDROP, SHCreateStdEnumFmtEtc};
@@ -84,36 +84,53 @@ pub(crate) fn write_file_clipboard(paths: &[PathBuf], mode: ClipboardMode) -> Re
 
 pub(crate) fn drag_file_paths(paths: &[PathBuf]) -> Result<(), String> {
     trace_drag(&format!(
-        "creating CF_HDROP data object for {} path(s)",
-        paths.len()
+        "creating system CF_HDROP data object for {} path(s): {:?}",
+        paths.len(),
+        paths
     ));
-    let data_object: IDataObject = KiteFileDataObject::new(paths)?.into();
-    unsafe {
-        let drop_source: IDropSource = KiteDropSource.into();
-        let mut effect = DROPEFFECT_COPY;
-        trace_drag("calling DoDragDrop");
-        let result = DoDragDrop(
-            &data_object,
-            &drop_source,
-            DROPEFFECT_COPY,
-            &mut effect as *mut DROPEFFECT,
-        );
-        trace_drag(&format!(
-            "DoDragDrop returned hresult={:#010x} effect={}",
-            result.0, effect.0
-        ));
-        result
-            .ok()
-            .map_err(|error| format!("文件拖放失败：{error}"))
+    let previous_clipboard = unsafe { OleGetClipboard().ok() };
+    let result = (|| -> Result<(), String> {
+        write_file_clipboard(paths, ClipboardMode::Copy)?;
+        let data_object = unsafe { OleGetClipboard() }
+            .map_err(|error| format!("无法读取系统拖放数据：{error}"))?;
+        unsafe {
+            let drop_source: IDropSource = KiteDropSource.into();
+            let mut effect = DROPEFFECT_COPY;
+            trace_drag("calling DoDragDrop");
+            let result = DoDragDrop(
+                &data_object,
+                &drop_source,
+                DROPEFFECT_COPY,
+                &mut effect as *mut DROPEFFECT,
+            );
+            trace_drag(&format!(
+                "DoDragDrop returned hresult={:#010x} effect={}",
+                result.0, effect.0
+            ));
+            result
+                .ok()
+                .map_err(|error| format!("文件拖放失败：{error}"))
+        }
+    })();
+    let restore_result = if let Some(previous_clipboard) = previous_clipboard {
+        unsafe { OleSetClipboard(&previous_clipboard) }
+    } else {
+        unsafe { OleSetClipboard(None::<&IDataObject>) }
+    };
+    if let Err(error) = restore_result {
+        trace_drag(&format!("clipboard restore failed: {error}"));
     }
+    result
 }
 
 #[implement(IDataObject)]
+#[allow(dead_code)]
 struct KiteFileDataObject {
     paths: Vec<PathBuf>,
     preferred_drop_effect_format: u16,
 }
 
+#[allow(dead_code)]
 impl KiteFileDataObject {
     fn new(paths: &[PathBuf]) -> Result<Self, String> {
         if paths.is_empty() {
@@ -178,6 +195,7 @@ impl KiteFileDataObject {
 }
 
 #[allow(non_snake_case)]
+#[allow(dead_code)]
 impl IDataObject_Impl for KiteFileDataObject_Impl {
     fn GetData(&self, pformatetc: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
         let status = self.this.validate_format(pformatetc);
