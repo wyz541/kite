@@ -68,12 +68,12 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 
-      - name: Build debug binary
-        run: cargo build --locked --features windows-ui
+      - name: Build release binary
+        run: cargo build --locked --release --features windows-ui
 
       - name: Run Chrome and Edge drag upload E2E
         shell: pwsh
-        run: ./.github/scripts/windows-drag-upload-e2e.ps1 -KiteExe target/debug/kite-explorer.exe -OutputDir "$env:RUNNER_TEMP\windows-drag-e2e"
+        run: ./.github/scripts/windows-drag-upload-e2e.ps1 -KiteExe target/release/kite-explorer.exe -OutputDir "$env:RUNNER_TEMP\windows-drag-e2e"
 
       - name: Upload Windows drag E2E logs
         if: failure()

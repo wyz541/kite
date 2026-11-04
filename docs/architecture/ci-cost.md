@@ -27,7 +27,7 @@ Create the `ci:full` repository label before you use this control.
 ## Cost controls
 
 - Pull requests normally use one Ubuntu runner.
-- Windows and macOS CI use debug builds. They do not build release binaries.
+- macOS CI uses a debug build. Windows CI keeps the cached release build.
 - Routine CI does not upload Windows or macOS artifacts.
 - Failed Windows E2E logs stay for one day.
 - Concurrent runs for the same pull request or branch are cancelled.
