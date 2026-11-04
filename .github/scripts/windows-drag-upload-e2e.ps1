@@ -344,7 +344,7 @@ function Test-BrowserUpload {
         $kiteWindow = [System.Windows.Automation.AutomationElement]::FromHandle($KiteHandle)
         $rect = $kiteWindow.Current.BoundingRectangle
         # The E2E directory contains one file in the rightmost active column.
-        $fromX = [int]($rect.Left + $rect.Width - 135)
+        $fromX = [int]($script:ScreenWidth - 220)
         $fromY = [int]($rect.Top + 211)
     }
     $toX = [int]($BrowserX + ($BrowserWidth / 2))
@@ -401,13 +401,14 @@ try {
     $script:ScreenWidth = $screen.Width
     $script:ScreenHeight = $screen.Height
     $windowHeight = [Math]::Max(600, $screen.Height - 80)
-    $browserWidth = [Math]::Min(420, $screen.Width)
-    $browserHeight = [Math]::Min(360, $windowHeight)
-    $browserX = $screen.Width - $browserWidth - 10
-    $browserY = $windowHeight - $browserHeight - 10
+    $browserWidth = 200
+    $browserHeight = $windowHeight
+    $browserX = $screen.Width - $browserWidth
+    $browserY = 0
+    $kiteWidth = $screen.Width - $browserWidth
     $profileRoot = Join-Path $env:RUNNER_TEMP "kite-drag-browser-profiles-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
-    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $screen.Width -Height $windowHeight
+    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
 
     $chromeCandidates = @(
         @(
