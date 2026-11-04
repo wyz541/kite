@@ -2,8 +2,17 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+enum KiteInternalDragOperation: Equatable {
+    case cut
+    case copy
+}
+
 enum KiteFileDragProvider {
     static let contentType = UTType(exportedAs: "com.wyz541.kite.file-items")
+
+    static func internalDragOperation(copyRequested: Bool) -> KiteInternalDragOperation {
+        copyRequested ? .copy : .cut
+    }
 
     private struct FileDragPayload: Codable {
         let paths: [String]
