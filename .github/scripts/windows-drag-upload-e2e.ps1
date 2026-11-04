@@ -297,6 +297,9 @@ function Wait-ForUpload {
             if ($record.browser -ne $Browser) {
                 continue
             }
+            if ($record.kind -eq "drag-event" -and $record.type -eq "upload-error") {
+                throw "$Browser reported upload error: $($record.message)"
+            }
             foreach ($file in $record.files) {
                 if ($file.name -eq $FileName -and $file.sha256 -eq $ExpectedHash) {
                     return $record

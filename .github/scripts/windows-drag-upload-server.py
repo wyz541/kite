@@ -32,15 +32,22 @@ HTML = r'''<!doctype html>
     const browser = new URLSearchParams(location.search).get('browser') || 'unknown';
     let uploading = false;
 
-    async function uploadFiles(eventName) {
-      if (uploading || input.files.length === 0) return;
+    async function uploadFiles(eventName, files) {
+      if (uploading) return;
+      if (files.length === 0) {
+        status.textContent = 'Drop contained no files';
+        await logDragEvent('upload-error', null, {
+          message: 'Drop contained no files',
+        });
+        return;
+      }
       uploading = true;
       status.textContent = 'Uploading...';
       try {
         const body = new FormData();
         body.append('browser', browser);
         body.append('event', eventName);
-        for (const file of input.files) body.append('files', file, file.name);
+        for (const file of files) body.append('files', file, file.name);
         const response = await fetch('/upload', { method: 'POST', body });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const result = await response.json();
@@ -48,10 +55,14 @@ HTML = r'''<!doctype html>
       } catch (error) {
         status.textContent = `Upload failed: ${error}`;
         document.title = 'Kite Drag Upload Test - FAILED';
+        await logDragEvent('upload-error', null, {
+          message: String(error),
+          fileNames: files.map(file => file.name),
+        });
       }
     }
 
-    async function logDragEvent(type, event) {
+    async function logDragEvent(type, event, extra = {}) {
       try {
         await fetch('/drag-event', {
           method: 'POST',
@@ -61,6 +72,7 @@ HTML = r'''<!doctype html>
             type,
             types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
             files: event.dataTransfer ? event.dataTransfer.files.length : 0,
+            ...extra,
           }),
         });
       } catch (_) {}
@@ -74,10 +86,12 @@ HTML = r'''<!doctype html>
       logDragEvent('dragover', event);
     });
     input.addEventListener('drop', event => {
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer.files);
       logDragEvent('drop', event);
-      setTimeout(() => uploadFiles('drop'), 250);
+      uploadFiles('drop', files);
     });
-    input.addEventListener('change', () => uploadFiles('change'));
+    input.addEventListener('change', () => uploadFiles('change', Array.from(input.files)));
   </script>
 </body>
 </html>'''
@@ -118,6 +132,8 @@ class UploadHandler(BaseHTTPRequestHandler):
                     "type": value.get("type", "unknown"),
                     "types": value.get("types", []),
                     "file_count": value.get("files", 0),
+                    "message": value.get("message"),
+                    "file_names": value.get("fileNames", []),
                 }
                 with self.server.log_path.open("a", encoding="utf-8") as log:
                     log.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
