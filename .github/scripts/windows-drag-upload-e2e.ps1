@@ -44,6 +44,7 @@ public static class KiteDragNative {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
@@ -237,6 +238,7 @@ function Start-Browser {
     $window = Find-AutomationWindow -Title "Kite Drag Upload Test" -TimeoutSeconds 30
     $handle = [IntPtr]$window.Current.NativeWindowHandle
     Move-Window -Handle $handle -X $X -Y $Y -Width $Width -Height $Height
+    [KiteDragNative]::SetWindowPos($handle, [IntPtr](-1), $X, $Y, $Width, $Height, 0x0040) | Out-Null
     return [pscustomobject]@{ Process = $process; Window = $window; Handle = $handle }
 }
 
@@ -387,14 +389,13 @@ try {
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $windowHeight = [Math]::Max(600, $screen.Height - 80)
-    $browserWidth = [Math]::Max(320, [Math]::Min(420, [int]($screen.Width / 3)))
-    $browserHeight = $windowHeight
-    $browserX = $screen.Width - $browserWidth
-    $browserY = 0
-    $kiteWidth = $screen.Width - $browserWidth
+    $browserWidth = [Math]::Min(420, $screen.Width)
+    $browserHeight = [Math]::Min(360, $windowHeight)
+    $browserX = $screen.Width - $browserWidth - 10
+    $browserY = $windowHeight - $browserHeight - 10
     $profileRoot = Join-Path $env:RUNNER_TEMP "kite-drag-browser-profiles-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
-    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $kiteWidth -Height $windowHeight
+    Move-Window -Handle $kiteHandle -X 0 -Y 0 -Width $screen.Width -Height $windowHeight
 
     $chromeCandidates = @(
         @(
