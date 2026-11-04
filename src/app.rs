@@ -7249,16 +7249,14 @@ impl Render for KiteApp {
                     position.y.as_f32(),
                     paths
                 ));
+                // SHDoDragDrop enters a nested Windows message loop. Post a native
+                // window message so OLE starts after this GPUI input event returns.
+                if let Err(error) = file_clipboard::request_file_drag(window, &paths) {
+                    file_clipboard::trace_drag(&format!("failed to queue native drag: {error}"));
+                    eprintln!("failed to queue native file drag: {error}");
+                    return;
+                }
                 cx.stop_active_drag(window);
-                // DoDragDrop enters a nested Windows message loop. Start it after
-                // this GPUI event returns so the framework is not re-entered.
-                window.defer(cx, move |_, _| {
-                    file_clipboard::trace_drag("deferred OLE drag started");
-                    if let Err(error) = file_clipboard::drag_file_paths(&paths) {
-                        file_clipboard::trace_drag(&format!("native drag failed: {error}"));
-                        eprintln!("failed to start native file drag: {error}");
-                    }
-                });
             })
             .child(self.render_toolbar(cx))
             .child(
