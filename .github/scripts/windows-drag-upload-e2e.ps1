@@ -21,6 +21,7 @@ $summaryPath = Join-Path $output "summary.json"
 $eventsLog = Join-Path $output "windows-application-errors.log"
 $uiaLog = Join-Path $output "uia-tree.json"
 $screenshotPath = Join-Path $output "screen.png"
+$kiteTraceLog = Join-Path $output "kite-drag-trace.log"
 
 if (-not (Test-Path -LiteralPath $KiteExe)) {
     $candidate = Join-Path $root $KiteExe
@@ -112,7 +113,7 @@ function Wait-ProcessWindow {
 }
 
 function Save-E2EDiagnostics {
-    param([int]$ProcessId)
+    param([int]$ProcessId, [string]$ScreenshotPath = $screenshotPath)
     try {
         Add-Type -AssemblyName System.Drawing
         $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -120,7 +121,7 @@ function Save-E2EDiagnostics {
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
         try {
             $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-            $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Save($ScreenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
         } finally {
             $graphics.Dispose()
             $bitmap.Dispose()
@@ -337,6 +338,7 @@ function Test-BrowserUpload {
     $toX = [int]($BrowserX + ($BrowserWidth / 2))
     $toY = [int]($BrowserY + ($BrowserHeight / 2))
     Write-Host "Dragging $FileName from ($fromX,$fromY) to $Name ($toX,$toY)"
+    Save-E2EDiagnostics -ProcessId $KiteProcess.Id -ScreenshotPath (Join-Path $output "before-$Name.png")
     Invoke-NativeDrag -FromX $fromX -FromY $fromY -ToX $toX -ToY $toY
     $record = Wait-ForUpload -Browser $Name -FileName $FileName -ExpectedHash $ExpectedHash -KiteProcess $KiteProcess
     Write-Host "$Name upload verified: $($record.files[0].name) ($($record.files[0].size) bytes)"
@@ -370,7 +372,17 @@ try {
         }
     } | Out-Null
 
-    $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    $previousTrace = $env:KITE_DRAG_TRACE
+    $env:KITE_DRAG_TRACE = $kiteTraceLog
+    try {
+        $kite = Start-Process -FilePath $KiteExe -ArgumentList @($testDir) -PassThru
+    } finally {
+        if ($null -eq $previousTrace) {
+            Remove-Item Env:KITE_DRAG_TRACE -ErrorAction SilentlyContinue
+        } else {
+            $env:KITE_DRAG_TRACE = $previousTrace
+        }
+    }
     Track-Process $kite | Out-Null
     $kiteHandle = Wait-ProcessWindow -Process $kite -Name "Kite"
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -441,6 +453,11 @@ try {
     }
     if ($null -ne $failure) {
         $summary["failure"] = $failure.Exception.Message
+        try {
+            $summary["file_exists_after"] = Test-Path -LiteralPath $filePath
+            $summary["test_directory_items"] = @(Get-ChildItem -LiteralPath $testDir -Force | Select-Object -ExpandProperty Name)
+        } catch {
+        }
     }
     $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding utf8
     Stop-TrackedProcesses
