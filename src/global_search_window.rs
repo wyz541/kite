@@ -403,6 +403,9 @@ impl GlobalSearchWindow {
             )
             .child({
                 let selected_scope = self.scope;
+                let has_favorites = !self.favorite_roots.is_empty();
+                let has_local_roots = !self.local_roots.is_empty();
+                let has_network_roots = !self.network_roots.is_empty();
                 Button::new("global-search-scope")
                     .ghost()
                     .compact()
@@ -418,16 +421,19 @@ impl GlobalSearchWindow {
                         .item(
                             PopupMenuItem::new("收藏文件夹")
                                 .checked(selected_scope == GlobalSearchScope::Favorites)
+                                .disabled(!has_favorites)
                                 .action(Box::new(SetGlobalSearchScopeFavorites)),
                         )
                         .item(
                             PopupMenuItem::new("本地磁盘")
                                 .checked(selected_scope == GlobalSearchScope::LocalDisks)
+                                .disabled(!has_local_roots)
                                 .action(Box::new(SetGlobalSearchScopeLocalDisks)),
                         )
                         .item(
                             PopupMenuItem::new("网络卷")
                                 .checked(selected_scope == GlobalSearchScope::NetworkVolumes)
+                                .disabled(!has_network_roots)
                                 .action(Box::new(SetGlobalSearchScopeNetworkVolumes)),
                         )
                     })
