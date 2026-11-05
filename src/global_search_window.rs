@@ -1,12 +1,13 @@
-use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::content_search::{
     self, CONTENT_SEARCH_MAX_FILES, ContentFileMatch, ContentSearchSnapshot,
 };
-use crate::fs::{FileEntry, SortSpec, format_size, search_directory, sort_entries};
+use crate::fs::{FileEntry, format_size, search_global_names};
 use crate::table::icon_for;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -35,8 +36,8 @@ impl GlobalSearchScope {
     fn label(self) -> &'static str {
         match self {
             Self::CurrentFolder => "当前文件夹",
-            Self::Favorites => "收藏范围",
-            Self::LocalDisks => "本地磁盘",
+            Self::Favorites => "收藏文件夹",
+            Self::LocalDisks => "所有磁盘",
         }
     }
 
@@ -51,8 +52,14 @@ impl GlobalSearchScope {
 
 struct GlobalNameResults {
     query: String,
-    entries: Vec<FileEntry>,
+    groups: Vec<GlobalNameGroup>,
+    total_entries: usize,
     truncated: bool,
+}
+
+struct GlobalNameGroup {
+    key: String,
+    entries: Vec<FileEntry>,
 }
 
 pub(crate) struct GlobalSearchWindow {
@@ -68,7 +75,9 @@ pub(crate) struct GlobalSearchWindow {
     error: Option<SharedString>,
     generation: u64,
     search_cancel: Option<Arc<AtomicBool>>,
+    expanded_groups: HashSet<String>,
     _search_task: Task<()>,
+    _live_search_task: Task<()>,
     _subscription: Subscription,
 }
 
@@ -93,7 +102,7 @@ impl GlobalSearchWindow {
             |this: &mut Self, _, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { .. } => {
                     let query = this.query_input.read(cx).value().to_string();
-                    this.start_search(query, window, cx);
+                    this.start_immediate_search(query, window, cx);
                 }
                 InputEvent::Change => {
                     if this.mode == GlobalSearchMode::Content
@@ -101,6 +110,7 @@ impl GlobalSearchWindow {
                     {
                         service.note_interaction();
                     }
+                    this.schedule_live_search(window, cx);
                 }
                 _ => {}
             },
@@ -119,7 +129,9 @@ impl GlobalSearchWindow {
             error: None,
             generation: 0,
             search_cancel: None,
+            expanded_groups: HashSet::new(),
             _search_task: Task::ready(()),
+            _live_search_task: Task::ready(()),
             _subscription: subscription,
         }
     }
@@ -137,9 +149,11 @@ impl GlobalSearchWindow {
             return;
         }
         self.cancel_search();
+        self.cancel_live_search();
         self.mode = mode;
         self.name_results = None;
         self.content_results = None;
+        self.expanded_groups.clear();
         self.loading = false;
         self.error = None;
         if mode == GlobalSearchMode::Content {
@@ -148,14 +162,17 @@ impl GlobalSearchWindow {
         self.query_input.update(cx, |input, cx| {
             input.focus(window, cx);
         });
+        self.schedule_live_search(window, cx);
         cx.notify();
     }
 
     fn cycle_scope(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.scope = self.scope.next();
         self.cancel_search();
+        self.cancel_live_search();
         self.name_results = None;
         self.content_results = None;
+        self.expanded_groups.clear();
         self.error = None;
         if self.mode == GlobalSearchMode::Content {
             self.prepare_content_index();
@@ -163,6 +180,7 @@ impl GlobalSearchWindow {
         self.query_input.update(cx, |input, cx| {
             input.focus(window, cx);
         });
+        self.schedule_live_search(window, cx);
         cx.notify();
     }
 
@@ -180,6 +198,39 @@ impl GlobalSearchWindow {
         if let Ok(service) = content_search::shared_service() {
             service.cancel_search();
         }
+    }
+
+    fn cancel_live_search(&mut self) {
+        self._live_search_task = Task::ready(());
+    }
+
+    fn start_immediate_search(
+        &mut self,
+        query: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_live_search();
+        self.start_search(query, window, cx);
+    }
+
+    fn schedule_live_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.query_input.read(cx).value().trim().to_string();
+        if query.chars().count() < 2 {
+            self.cancel_live_search();
+            return;
+        }
+        self._live_search_task = cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(280))
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                let current = this.query_input.read(cx).value().trim().to_string();
+                if current == query {
+                    this.start_search(query, window, cx);
+                }
+            });
+        });
     }
 
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -204,6 +255,7 @@ impl GlobalSearchWindow {
         self.search_cancel = Some(Arc::clone(&cancel));
         self.name_results = None;
         self.content_results = None;
+        self.expanded_groups.clear();
         self.loading = true;
         self.error = None;
         if let Ok(service) = content_search::shared_service() {
@@ -320,18 +372,18 @@ impl GlobalSearchWindow {
                         .cleanable(true),
                 ),
             )
-            .when(self.mode == GlobalSearchMode::Content, |this| {
-                this.child(
-                    Button::new("global-search-scope")
-                        .ghost()
-                        .compact()
-                        .label(self.scope.label())
-                        .tooltip("切换搜索范围")
-                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+            .child(
+                Button::new("global-search-scope")
+                    .ghost()
+                    .compact()
+                    .label(format!("范围 · {}", self.scope.label()))
+                    .tooltip(format!("当前搜索范围：{}。点击切换", self.scope.label()))
+                    .on_click(
+                        cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.cycle_scope(window, cx)
-                        })),
-                )
-            })
+                        }),
+                    ),
+            )
             .child(
                 Button::new("global-search-submit")
                     .primary()
@@ -339,7 +391,7 @@ impl GlobalSearchWindow {
                     .label("搜索")
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         let query = this.query_input.read(cx).value().to_string();
-                        this.start_search(query, window, cx);
+                        this.start_immediate_search(query, window, cx);
                     })),
             )
             .into_any_element()
@@ -350,58 +402,133 @@ impl GlobalSearchWindow {
         results: &GlobalNameResults,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut list = v_flex().w_full().gap_1();
-        for entry in &results.entries {
-            let path = entry.path.clone();
-            let icon = icon_for(entry);
-            let detail = if entry.is_dir() {
-                entry.path.display().to_string()
-            } else {
-                format!("{} · {}", entry.type_label(), entry.size_label())
-            };
-            list = list.child(
-                h_flex()
-                    .id(SharedString::from(format!(
-                        "global-name-{}",
-                        entry.path.display()
+        let mut list = v_flex().w_full().gap_2();
+        for group in &results.groups {
+            let expanded = self.expanded_groups.contains(&group.key);
+            let visible_count = if expanded { group.entries.len() } else { 1 };
+            let mut rows = v_flex().w_full().gap_1();
+            for entry in group.entries.iter().take(visible_count) {
+                let path = entry.path.clone();
+                let location = entry
+                    .path
+                    .parent()
+                    .map(|parent| parent.display().to_string())
+                    .unwrap_or_else(|| entry.path.display().to_string());
+                let icon = icon_for(entry);
+                let metadata = format!(
+                    "{} · {} · {}",
+                    entry.type_label(),
+                    if entry.is_dir() {
+                        "文件夹".to_string()
+                    } else {
+                        entry.size_label()
+                    },
+                    entry.modified_label(),
+                );
+                rows = rows.child(
+                    h_flex()
+                        .id(SharedString::from(format!(
+                            "global-name-{}",
+                            entry.path.display()
+                        )))
+                        .w_full()
+                        .items_center()
+                        .gap_3()
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .bg(cx.theme().background.opacity(0.62))
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                            if event.click_count() == 2 {
+                                this.open_path(path.clone(), window, cx);
+                            }
+                        }))
+                        .child(
+                            Icon::new(icon)
+                                .size_4()
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_0p5()
+                                .child(
+                                    h_flex()
+                                        .min_w_0()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .text_sm()
+                                                .font_semibold()
+                                                .truncate()
+                                                .child(entry.name.clone()),
+                                        )
+                                        .when(group.entries.len() > 1, |this| {
+                                            this.child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .rounded_full()
+                                                    .bg(cx.theme().primary.opacity(0.12))
+                                                    .px(px(6.))
+                                                    .py_0p5()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().primary)
+                                                    .child(format!(
+                                                        "{} 个位置",
+                                                        group.entries.len()
+                                                    )),
+                                            )
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().foreground.opacity(0.72))
+                                        .truncate()
+                                        .child(location),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .truncate()
+                                        .child(metadata),
+                                ),
+                        ),
+                );
+            }
+            if group.entries.len() > 1 {
+                let key = group.key.clone();
+                let label = if expanded {
+                    "收起其他位置".to_string()
+                } else {
+                    format!("展开另外 {} 个位置", group.entries.len() - 1)
+                };
+                rows = rows.child(
+                    Button::new(SharedString::from(format!(
+                        "global-name-group-toggle-{}",
+                        group.key
                     )))
-                    .w_full()
-                    .items_center()
-                    .gap_3()
-                    .px_3()
-                    .py_2()
-                    .rounded_md()
-                    .bg(cx.theme().background.opacity(0.55))
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                        if event.click_count() == 2 {
-                            this.open_path(path.clone(), window, cx);
-                        }
-                    }))
-                    .child(Icon::new(icon).size_5().text_color(cx.theme().primary))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_medium()
-                                    .truncate()
-                                    .child(entry.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .truncate()
-                                    .child(detail),
-                            ),
-                    ),
-            );
+                    .ghost()
+                    .compact()
+                    .label(label)
+                    .on_click(cx.listener(
+                        move |this, _: &ClickEvent, _, cx| {
+                            if !this.expanded_groups.remove(&key) {
+                                this.expanded_groups.insert(key.clone());
+                            }
+                            cx.notify();
+                        },
+                    )),
+                );
+            }
+            list = list.child(rows);
         }
 
         v_flex()
@@ -413,10 +540,27 @@ impl GlobalSearchWindow {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("“{}”的名称结果", results.query))
-                    .child(format!("{} 项", results.entries.len()))
+                    .child(format!("{} 项", results.total_entries))
                     .when(results.truncated, |this| this.child("结果已截断")),
             )
-            .child(div().flex_1().min_h_0().overflow_y_scrollbar().child(list))
+            .child(if results.groups.is_empty() {
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("没有找到匹配的文件名")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(list)
+                    .into_any_element()
+            })
             .into_any_element()
     }
 
@@ -444,7 +588,24 @@ impl GlobalSearchWindow {
                     .when(results.partial, |this| this.child("索引更新中"))
                     .when(results.truncated, |this| this.child("结果已截断")),
             )
-            .child(div().flex_1().min_h_0().overflow_y_scrollbar().child(list))
+            .child(if results.files.is_empty() {
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("没有找到匹配的文件内容")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(list)
+                    .into_any_element()
+            })
             .into_any_element()
     }
 
@@ -452,6 +613,20 @@ impl GlobalSearchWindow {
         let path = file.path.clone();
         let mut snippets = v_flex().w_full().gap_1();
         for line in &file.matches {
+            let mut styled = StyledText::new(line.text.clone());
+            if let Some(range) =
+                content_highlight_range(&line.text, line.column_start, line.column_end)
+            {
+                styled = styled.with_highlights([(
+                    range,
+                    HighlightStyle {
+                        color: Some(cx.theme().primary),
+                        font_weight: Some(FontWeight::SEMIBOLD),
+                        background_color: Some(cx.theme().primary.opacity(0.16)),
+                        ..Default::default()
+                    },
+                )]);
+            }
             snippets = snippets.child(
                 h_flex()
                     .w_full()
@@ -466,7 +641,7 @@ impl GlobalSearchWindow {
                             .text_color(cx.theme().muted_foreground)
                             .child(line.line_number.to_string()),
                     )
-                    .child(div().flex_1().min_w_0().text_xs().child(line.text.clone())),
+                    .child(div().flex_1().min_w_0().text_xs().child(styled)),
             );
         }
 
@@ -491,8 +666,8 @@ impl GlobalSearchWindow {
             }))
             .child(
                 Icon::new(content_file_icon(&file.path))
-                    .size_5()
-                    .text_color(cx.theme().primary),
+                    .size_4()
+                    .text_color(cx.theme().muted_foreground),
             )
             .child(
                 v_flex()
@@ -525,7 +700,7 @@ impl GlobalSearchWindow {
                                     .flex_1()
                                     .truncate()
                                     .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(cx.theme().foreground.opacity(0.72))
                                     .child(file.relative_path.clone()),
                             ),
                     )
@@ -644,31 +819,60 @@ fn search_name_roots(
     query: &str,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameResults>, String> {
-    let mut entries = Vec::new();
-    let mut truncated = false;
-    for root in roots {
-        if cancel.load(Ordering::Relaxed) {
-            return Ok(None);
-        }
-        let Some(snapshot) = search_directory(root, query, SortSpec::default(), cancel)? else {
-            continue;
-        };
-        truncated |= snapshot.truncated;
-        entries.extend(snapshot.entries);
-        if entries.len() >= 1000 {
-            entries.truncate(1000);
-            truncated = true;
-            break;
+    let Some(snapshot) = search_global_names(roots, query, cancel)? else {
+        return Ok(None);
+    };
+    let total_entries = snapshot.entries.len();
+    Ok(Some(GlobalNameResults {
+        query: snapshot.query,
+        groups: group_name_entries(&snapshot.entries),
+        total_entries,
+        truncated: snapshot.truncated,
+    }))
+}
+
+fn group_name_entries(entries: &[FileEntry]) -> Vec<GlobalNameGroup> {
+    let mut groups = Vec::<GlobalNameGroup>::new();
+    let mut indexes = HashMap::<String, usize>::new();
+    for entry in entries {
+        let key = format!(
+            "{}:{}",
+            if entry.is_dir() { "dir" } else { "file" },
+            entry.name.to_lowercase()
+        );
+        if let Some(index) = indexes.get(&key) {
+            groups[*index].entries.push(entry.clone());
+        } else {
+            indexes.insert(key.clone(), groups.len());
+            groups.push(GlobalNameGroup {
+                key,
+                entries: vec![entry.clone()],
+            });
         }
     }
-    sort_entries(&mut entries, SortSpec::default());
-    let mut seen = BTreeSet::new();
-    entries.retain(|entry| seen.insert(entry.path.clone()));
-    Ok(Some(GlobalNameResults {
-        query: query.to_string(),
-        entries,
-        truncated,
-    }))
+    groups
+}
+
+fn content_highlight_range(
+    text: &str,
+    column_start: Option<u64>,
+    column_end: Option<u64>,
+) -> Option<std::ops::Range<usize>> {
+    let start_char = usize::try_from(column_start?.checked_sub(1)?).ok()?;
+    let end_char = usize::try_from(column_end?.checked_sub(1)?).ok()?;
+    if start_char >= end_char {
+        return None;
+    }
+    let start = text
+        .char_indices()
+        .nth(start_char)
+        .map(|(index, _)| index)?;
+    let end = text
+        .char_indices()
+        .nth(end_char)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    Some(start..end)
 }
 
 fn content_file_icon(path: &Path) -> IconName {

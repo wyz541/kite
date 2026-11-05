@@ -24,7 +24,7 @@ use tantivy::tokenizer::{SimpleTokenizer, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 use thread_priority::{ThreadBuilderExt, ThreadPriority};
 
-use crate::fs::{EntryKind, type_label};
+use crate::fs::{EntryKind, search_path_quality_rank, type_label};
 
 pub const CONTENT_SEARCH_MAX_FILES: usize = 50;
 pub const CONTENT_SEARCH_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
@@ -1387,6 +1387,9 @@ fn compare_content_files(left: &ContentFileMatch, right: &ContentFileMatch) -> s
     right
         .match_count
         .cmp(&left.match_count)
+        .then_with(|| {
+            search_path_quality_rank(&right.path).cmp(&search_path_quality_rank(&left.path))
+        })
         .then_with(|| right.modified_unix_ms.cmp(&left.modified_unix_ms))
         .then_with(|| left.relative_path.cmp(&right.relative_path))
 }

@@ -35,8 +35,11 @@ The build script creates `apps/macos/build/Kite.app`.
 - SwiftUI column browser.
 - Column multi-selection with range and toggle selection.
 - Independent global search window for file names or indexed file content.
+- Current-folder, favorite-folder, and all-volume scopes in both search modes.
+- Ranked name results with collapsible duplicate locations.
+- Content results with line context and highlighted matches.
 - `Command+Shift+F` opens the global search window.
-- Content search scopes: current folder, favorites, and local disks.
+- Search scopes: current folder, favorites, and all mounted volumes.
 - Configurable detail columns and persisted column-width presets.
 - SwiftUI tab rail with new, close, and switch commands.
 - Tab and directory restoration on app relaunch.

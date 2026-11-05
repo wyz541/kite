@@ -553,10 +553,46 @@ struct BrowserTab: Identifiable {
 }
 
 struct BrowserGlobalSearchState {
-    let rootPath: String
+    let roots: [String]
     let query: String
     let entries: [BrowserEntry]
+    let groups: [BrowserGlobalSearchGroup]
     let truncated: Bool
+
+    init(dto: GlobalSearchResultDto) {
+        roots = dto.roots
+        query = dto.query
+        entries = dto.entries.map(BrowserEntry.init(dto:))
+        groups = Self.group(entries)
+        truncated = dto.truncated
+    }
+
+    private static func group(_ entries: [BrowserEntry]) -> [BrowserGlobalSearchGroup] {
+        var groups: [BrowserGlobalSearchGroup] = []
+        var indexes: [String: Int] = [:]
+        for entry in entries {
+            let key = "\(entry.isDirectory ? "dir" : "file"):\(entry.name.lowercased())"
+            if let index = indexes[key] {
+                groups[index].entries.append(entry)
+            } else {
+                indexes[key] = groups.count
+                groups.append(BrowserGlobalSearchGroup(
+                    key: key,
+                    name: entry.name,
+                    entries: [entry]
+                ))
+            }
+        }
+        return groups
+    }
+}
+
+struct BrowserGlobalSearchGroup: Identifiable {
+    let key: String
+    let name: String
+    var entries: [BrowserEntry]
+
+    var id: String { key }
 }
 
 enum GlobalSearchMode: String, CaseIterable, Identifiable {
@@ -573,7 +609,7 @@ enum GlobalSearchMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum ContentSearchScope: String, CaseIterable, Identifiable {
+enum GlobalSearchScope: String, CaseIterable, Identifiable {
     case currentFolder
     case favorites
     case localDisks
@@ -583,8 +619,8 @@ enum ContentSearchScope: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .currentFolder: return "当前文件夹"
-        case .favorites: return "收藏范围"
-        case .localDisks: return "本地磁盘"
+        case .favorites: return "收藏文件夹"
+        case .localDisks: return "所有磁盘"
         }
     }
 }
@@ -691,6 +727,7 @@ final class KiteModel: ObservableObject {
     private var columnSearchGeneration: UInt64 = 0
     private var globalSearchGeneration: UInt64 = 0
     private var contentSearchGeneration: UInt64 = 0
+    private var globalSearchDebounceTask: Task<Void, Never>?
     private var columnSearchDebounceTask: Task<Void, Never>?
     private var columnAutoRefreshGeneration: UInt64 = 0
     private var columnAutoRefreshTask: Task<Void, Never>?
@@ -714,7 +751,7 @@ final class KiteModel: ObservableObject {
     @Published private(set) var columnSearchLoading = false
     @Published var globalSearchText = ""
     @Published var globalSearchMode: GlobalSearchMode = .name
-    @Published var contentSearchScope: ContentSearchScope = .currentFolder
+    @Published var globalSearchScope: GlobalSearchScope = .currentFolder
     @Published private(set) var globalSearch: BrowserGlobalSearchState?
     @Published private(set) var globalSearchLoading = false
     @Published private(set) var contentSearch: BrowserContentSearchState?
@@ -740,6 +777,7 @@ final class KiteModel: ObservableObject {
 
     deinit {
         contentSearchPowerPolicyTask?.cancel()
+        globalSearchDebounceTask?.cancel()
     }
 
     var activeTab: BrowserTab? {
@@ -1049,10 +1087,11 @@ final class KiteModel: ObservableObject {
     }
 
     var currentSearchScopeTitle: String {
-        contentSearchScope.title
+        globalSearchScope.title
     }
 
     func submitGlobalSearch() {
+        cancelGlobalSearchDebounce()
         switch globalSearchMode {
         case .name:
             submitNameGlobalSearch()
@@ -1070,7 +1109,11 @@ final class KiteModel: ObservableObject {
 
         globalSearchGeneration &+= 1
         let generation = globalSearchGeneration
-        let rootPath = currentPath
+        let roots = searchRoots()
+        guard !roots.isEmpty else {
+            errorMessage = "当前搜索范围没有可搜索的文件夹"
+            return
+        }
         core.cancelDirectorySearch()
         core.cancelContentSearch()
         globalSearchLoading = true
@@ -1083,18 +1126,13 @@ final class KiteModel: ObservableObject {
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) {
-                    try core.searchDirectory(path: rootPath, query: query)
+                    try core.searchDirectories(paths: roots, query: query)
                 }.value
 
                 guard generation == self.globalSearchGeneration else { return }
                 self.globalSearchLoading = false
                 guard let result else { return }
-                self.globalSearch = BrowserGlobalSearchState(
-                    rootPath: result.path,
-                    query: result.query,
-                    entries: result.entries.map(BrowserEntry.init(dto:)),
-                    truncated: result.truncated
-                )
+                self.globalSearch = BrowserGlobalSearchState(dto: result)
                 self.errorMessage = nil
             } catch {
                 guard generation == self.globalSearchGeneration else { return }
@@ -1110,7 +1148,7 @@ final class KiteModel: ObservableObject {
             clearGlobalSearch()
             return
         }
-        let roots = contentSearchRoots()
+        let roots = searchRoots()
         guard !roots.isEmpty else {
             errorMessage = "当前搜索范围没有可搜索的文件夹"
             return
@@ -1156,6 +1194,7 @@ final class KiteModel: ObservableObject {
     }
 
     func globalSearchModeDidChange() {
+        cancelGlobalSearchDebounce()
         globalSearchGeneration &+= 1
         contentSearchGeneration &+= 1
         core.cancelDirectorySearch()
@@ -1168,16 +1207,31 @@ final class KiteModel: ObservableObject {
         if globalSearchMode == .content {
             prepareContentIndex()
         }
+        scheduleGlobalSearch()
     }
 
-    func contentSearchScopeDidChange() {
+    func globalSearchScopeDidChange() {
+        cancelGlobalSearchDebounce()
+        globalSearchGeneration &+= 1
         contentSearchGeneration &+= 1
+        core.cancelDirectorySearch()
         core.cancelContentSearch()
+        globalSearchLoading = false
         contentSearchLoading = false
+        globalSearch = nil
         contentSearch = nil
+        errorMessage = nil
         if globalSearchMode == .content {
             prepareContentIndex()
         }
+        scheduleGlobalSearch()
+    }
+
+    func globalSearchTextDidChange() {
+        if globalSearchMode == .content {
+            noteContentSearchInteraction()
+        }
+        scheduleGlobalSearch()
     }
 
     func noteContentSearchInteraction() {
@@ -1186,7 +1240,7 @@ final class KiteModel: ObservableObject {
 
     private func prepareContentIndex() {
         updateContentSearchPowerPolicy()
-        let roots = contentSearchRoots()
+        let roots = searchRoots()
         guard !roots.isEmpty else { return }
         let core = self.core
         Task.detached(priority: .utility) {
@@ -1194,17 +1248,35 @@ final class KiteModel: ObservableObject {
         }
     }
 
-    private func contentSearchRoots() -> [String] {
-        switch contentSearchScope {
+    private func searchRoots() -> [String] {
+        switch globalSearchScope {
         case .currentFolder:
             return [currentPath]
         case .favorites:
             return favorites.filter(\.isDirectory).map(\.path)
         case .localDisks:
             return volumes
-                .filter { ["fixed", "usb", "removable"].contains($0.kind) }
+                .filter { ["fixed", "usb", "removable", "network"].contains($0.kind) }
                 .map(\.path)
         }
+    }
+
+    private func scheduleGlobalSearch() {
+        cancelGlobalSearchDebounce()
+        let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 2 else { return }
+        globalSearchDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            guard !Task.isCancelled, let self else { return }
+            let current = self.globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard current == query else { return }
+            self.submitGlobalSearch()
+        }
+    }
+
+    private func cancelGlobalSearchDebounce() {
+        globalSearchDebounceTask?.cancel()
+        globalSearchDebounceTask = nil
     }
 
     private func updateContentSearchPowerPolicy() {
@@ -1217,6 +1289,7 @@ final class KiteModel: ObservableObject {
     }
 
     func clearGlobalSearch() {
+        cancelGlobalSearchDebounce()
         globalSearchGeneration &+= 1
         contentSearchGeneration &+= 1
         core.cancelDirectorySearch()

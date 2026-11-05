@@ -82,8 +82,8 @@ private struct KiteGlobalSearchWindowView: View {
         .onChange(of: model.globalSearchMode) { _ in
             model.globalSearchModeDidChange()
         }
-        .onChange(of: model.contentSearchScope) { _ in
-            model.contentSearchScopeDidChange()
+        .onChange(of: model.globalSearchScope) { _ in
+            model.globalSearchScopeDidChange()
         }
         .onExitCommand {
             NSApp.keyWindow?.performClose(nil)
@@ -106,31 +106,29 @@ private struct KiteGlobalSearchWindowView: View {
             .controlSize(.small)
             .frame(width: 110)
 
-            if model.globalSearchMode == .content {
-                Menu {
-                    ForEach(ContentSearchScope.allCases) { scope in
-                        Button {
-                            model.contentSearchScope = scope
-                        } label: {
-                            if model.contentSearchScope == scope {
-                                Label(scope.title, systemImage: "checkmark")
-                            } else {
-                                Text(scope.title)
-                            }
+            Menu {
+                ForEach(GlobalSearchScope.allCases) { scope in
+                    Button {
+                        model.globalSearchScope = scope
+                    } label: {
+                        if model.globalSearchScope == scope {
+                            Label(scope.title, systemImage: "checkmark")
+                        } else {
+                            Text(scope.title)
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "scope")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text(model.currentSearchScopeTitle)
-                            .lineLimit(1)
-                    }
-                    .font(.system(size: 10.5, weight: .medium))
                 }
-                .menuStyle(.borderlessButton)
-                .frame(width: 112)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "scope")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(model.currentSearchScopeTitle)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 10.5, weight: .medium))
             }
+            .menuStyle(.borderlessButton)
+            .frame(width: 112)
 
             TextField(
                 model.globalSearchMode == .content ? "搜索文件内容" : "搜索文件名",
@@ -143,9 +141,7 @@ private struct KiteGlobalSearchWindowView: View {
                 model.submitGlobalSearch()
             }
             .onChange(of: model.globalSearchText) { _ in
-                if model.globalSearchMode == .content {
-                    model.noteContentSearchInteraction()
-                }
+                model.globalSearchTextDidChange()
             }
 
             if model.globalSearchLoading || model.contentSearchLoading {
