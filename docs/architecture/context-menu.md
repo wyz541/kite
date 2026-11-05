@@ -111,13 +111,15 @@ svn_available
 每个提供者只负责一个功能域。
 
 ```text
+RefreshMenuProvider
 CoreMenuProvider
+ArchiveMenuProvider
 VcsMenuProvider
 NativeShellMenuProvider
-RefreshMenuProvider
 ```
 
 当前顺序是固定顺序。
+“刷新”是右键菜单第一项。
 未来可改为按能力注册。
 新增功能只需添加提供者或模型节点。
 调用点不需要再复制菜单代码。
@@ -134,6 +136,22 @@ command: ContextMenuCommand
 
 动作分发集中在 `KiteApp::on_context_menu_action`。
 因此，列表视图、分栏视图和预览菜单使用同一套命令语义。
+
+### 压缩菜单
+
+`ArchiveMenuProvider` 增加两个一级菜单。
+
+- “压缩”二级菜单提供 ZIP 和 TAR.GZ。
+- “解压”二级菜单提供“解压到当前文件夹”和“解压到…”。
+
+`ArchiveMenuProvider` 只在本地文件目标启用压缩。
+`ArchiveMenuProvider` 只在 ZIP、TAR.GZ 和 TGZ 文件目标启用解压。
+共享核心位于 `src/archive.rs`。
+macOS 通过 UniFFI 调用共享核心。
+Windows 直接调用共享核心。
+压缩文件使用临时路径，完成后原子重命名。
+解压拒绝覆盖已有文件。
+解压拒绝不安全的归档路径和符号链接。
 
 ### 预览更多菜单
 
@@ -205,6 +223,8 @@ Kite 原生项适合高频操作。
 - 粘贴。
 - 新建文件夹。
 - 新建文件。
+- 压缩为 ZIP 或 TAR.GZ。
+- 解压到当前文件夹或指定文件夹。
 - 添加到收藏。
 - 重命名。
 - 移到回收站。

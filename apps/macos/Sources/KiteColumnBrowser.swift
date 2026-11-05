@@ -1374,6 +1374,14 @@ private struct KiteEntryMenu: View {
 
     var body: some View {
         Button {
+            model.refresh()
+        } label: {
+            Label("刷新", systemImage: "arrow.clockwise")
+        }
+
+        Divider()
+
+        Button {
             KitePlatform.open(entry.path)
         } label: {
             Label("打开", systemImage: "arrow.up.forward.app")
@@ -1432,6 +1440,45 @@ private struct KiteEntryMenu: View {
                 operationEntries.count > 1 ? "将所选项目拷贝到…" : "拷贝到…",
                 systemImage: "folder.badge.plus"
             )
+        }
+
+        Menu {
+            Button {
+                if let path = singleOperationPath {
+                    model.compress(path, format: "zip")
+                }
+            } label: {
+                Label("ZIP (.zip)", systemImage: "doc.zipper")
+            }
+
+            Button {
+                if let path = singleOperationPath {
+                    model.compress(path, format: "tar.gz")
+                }
+            } label: {
+                Label("TAR.GZ (.tar.gz)", systemImage: "archivebox")
+            }
+        } label: {
+            Label("压缩", systemImage: "archivebox")
+        }
+        .disabled(!canCompressSelection)
+
+        if let path = singleOperationPath, KitePlatform.archiveFormat(path) != nil {
+            Menu {
+                Button {
+                    model.extract(path, to: parentDirectory)
+                } label: {
+                    Label("解压到当前文件夹", systemImage: "arrow.down.doc")
+                }
+
+                Button {
+                    model.extractTo(path)
+                } label: {
+                    Label("解压到…", systemImage: "folder.badge.plus")
+                }
+            } label: {
+                Label("解压", systemImage: "doc.zipper")
+            }
         }
 
         Divider()
@@ -1512,6 +1559,14 @@ private struct KiteEntryMenu: View {
     private var operationPaths: [String] {
         operationEntries.map(\.path)
     }
+
+    private var singleOperationPath: String? {
+        operationEntries.count == 1 ? operationEntries[0].path : nil
+    }
+
+    private var canCompressSelection: Bool {
+        singleOperationPath.map(KitePlatform.canCompress) ?? false
+    }
 }
 
 private struct KiteDirectoryMenu: View {
@@ -1519,6 +1574,14 @@ private struct KiteDirectoryMenu: View {
     let column: BrowserColumn
 
     var body: some View {
+        Button {
+            model.refresh()
+        } label: {
+            Label("刷新", systemImage: "arrow.clockwise")
+        }
+
+        Divider()
+
         Button {
             KitePlatform.open(column.path)
         } label: {
@@ -1562,6 +1625,23 @@ private struct KiteDirectoryMenu: View {
         } label: {
             Label("拷贝到…", systemImage: "folder.badge.plus")
         }
+
+        Menu {
+            Button {
+                model.compress(column.path, format: "zip")
+            } label: {
+                Label("ZIP (.zip)", systemImage: "doc.zipper")
+            }
+
+            Button {
+                model.compress(column.path, format: "tar.gz")
+            } label: {
+                Label("TAR.GZ (.tar.gz)", systemImage: "archivebox")
+            }
+        } label: {
+            Label("压缩", systemImage: "archivebox")
+        }
+        .disabled(!KitePlatform.canCompress(column.path))
 
         Divider()
 
