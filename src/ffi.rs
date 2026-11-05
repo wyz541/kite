@@ -5,6 +5,7 @@ use std::sync::{
 };
 use std::time::UNIX_EPOCH;
 
+use crate::archive::{self, ArchiveFormat};
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
 use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory, transfer_entry};
@@ -297,6 +298,24 @@ impl KiteCore {
         )
         .map(|path| path.to_string_lossy().into_owned())
         .map_err(KiteError::operation)
+    }
+
+    pub fn compress_path(&self, path: String, format: String) -> Result<String, KiteError> {
+        let format = ArchiveFormat::parse(&format)
+            .ok_or_else(|| KiteError::operation("不支持的压缩格式。当前支持 ZIP 和 TAR.GZ。"))?;
+        archive::compress(&PathBuf::from(path), format)
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(KiteError::operation)
+    }
+
+    pub fn extract_archive(
+        &self,
+        path: String,
+        destination_directory: String,
+    ) -> Result<String, KiteError> {
+        archive::extract(&PathBuf::from(path), &PathBuf::from(destination_directory))
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(KiteError::operation)
     }
 
     pub fn save_text_document(

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::actions::*;
+use crate::archive::{self, ArchiveFormat};
 use crate::context_menu::{
     ContextMenuCapabilities, ContextMenuTarget, render_context_menu, request_system_menu,
     show_properties,
@@ -2589,6 +2590,16 @@ impl KiteApp {
             ContextMenuCommand::Recycle => {
                 self.confirm_recycle_path(action.target.clone(), window, cx)
             }
+            ContextMenuCommand::CompressZip => {
+                self.compress_path(action.target.clone(), ArchiveFormat::Zip, window, cx)
+            }
+            ContextMenuCommand::CompressTarGz => {
+                self.compress_path(action.target.clone(), ArchiveFormat::TarGz, window, cx)
+            }
+            ContextMenuCommand::ExtractHere => self.extract_here(action.target.clone(), window, cx),
+            ContextMenuCommand::ExtractTo => {
+                self.extract_to_directory(action.target.clone(), window, cx)
+            }
             ContextMenuCommand::ShowProperties => {
                 match show_properties(window, &action.target) {
                     Ok(()) => {
@@ -3566,6 +3577,149 @@ impl KiteApp {
                         .into(),
                     );
                     if same_path(&this.current_dir, &destination_dir) {
+                        this.refresh(window, cx);
+                    } else {
+                        cx.notify();
+                    }
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn compress_path(
+        &mut self,
+        source: PathBuf,
+        format: ArchiveFormat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let format_name = match format {
+            ArchiveFormat::Zip => "ZIP",
+            ArchiveFormat::TarGz => "TAR.GZ",
+        };
+        self.error = None;
+        self.notice = Some(format!("正在创建 {format_name} 文件…").into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { archive::compress(&source, format) })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(created) => {
+                    this.error = None;
+                    this.notice = Some(
+                        format!(
+                            "已创建 {}",
+                            created
+                                .file_name()
+                                .unwrap_or_else(|| created.as_os_str())
+                                .to_string_lossy()
+                        )
+                        .into(),
+                    );
+                    let parent = created.parent().map(Path::to_path_buf);
+                    if parent
+                        .as_ref()
+                        .is_some_and(|parent| same_path(&this.current_dir, parent))
+                    {
+                        this.refresh(window, cx);
+                    } else {
+                        cx.notify();
+                    }
+                }
+                Err(error) => {
+                    this.notice = None;
+                    this.error = Some(error.into());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn extract_here(&mut self, source: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        match archive::extraction_directory(&source) {
+            Ok(destination) => self.extract_archive_into(source, destination, window, cx),
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+                cx.notify();
+            }
+        }
+    }
+
+    fn extract_to_directory(
+        &mut self,
+        source: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("解压到这里".into()),
+        });
+        self.error = None;
+        self.notice = Some("请选择解压目标文件夹…".into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let selected = match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Ok(Ok(None)) => None,
+                Ok(Err(error)) => {
+                    let _ = this.update_in(cx, |this, _, cx| {
+                        this.notice = None;
+                        this.error = Some(format!("无法打开解压目标选择器：{error}").into());
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(_) => None,
+            };
+            let Some(destination) = selected else {
+                let _ = this.update_in(cx, |this, _, cx| {
+                    this.notice = None;
+                    cx.notify();
+                });
+                return;
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.extract_archive_into(source, destination, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn extract_archive_into(
+        &mut self,
+        source: PathBuf,
+        destination: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.error = None;
+        self.notice = Some("正在解压文件…".into());
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let extract_destination = destination.clone();
+            let result = cx
+                .background_spawn(async move { archive::extract(&source, &extract_destination) })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(extracted_to) => {
+                    this.error = None;
+                    this.notice = Some(format!("已解压到 {}", extracted_to.display()).into());
+                    if same_path(&this.current_dir, &destination) {
                         this.refresh(window, cx);
                     } else {
                         cx.notify();

@@ -47,6 +47,8 @@ The build script creates `apps/macos/build/Kite.app`.
 - macOS 13 through 15 material fallback.
 - AppKit workspace actions.
 - File-row and column-directory context menus.
+- Refresh-first file and directory context menus.
+- ZIP and TAR.GZ compression and extraction.
 - LaunchServices folder-opener selection.
 - Folder open requests from Finder or other apps.
 - Finder reveal requests for the current user file viewer.

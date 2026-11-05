@@ -1210,6 +1210,43 @@ final class KiteModel: ObservableObject {
         transferPaths(paths, to: destination, moveFiles: false)
     }
 
+    func compress(_ path: String, format: String) {
+        let core = self.core
+        Task {
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try core.compressPath(path: path, format: format)
+                }.value
+                errorMessage = nil
+                refreshVisibleColumns()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func extract(_ path: String, to directory: String) {
+        let core = self.core
+        Task {
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try core.extractArchive(path: path, destinationDirectory: directory)
+                }.value
+                errorMessage = nil
+                refreshVisibleColumns()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func extractTo(_ path: String) {
+        guard let destination = KitePlatform.chooseDirectory(prompt: "解压到这里") else {
+            return
+        }
+        extract(path, to: destination)
+    }
+
     func dragPaths(column index: Int, entry: BrowserEntry) -> [String] {
         guard columns.indices.contains(index) else { return [entry.path] }
         let column = columns[index]
