@@ -1,5 +1,6 @@
 uniffi::setup_scaffolding!();
 
+pub mod archive;
 pub mod devices;
 pub mod favorites;
 pub mod ffi;
