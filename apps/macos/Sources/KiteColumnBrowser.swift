@@ -1363,9 +1363,8 @@ struct KiteContentSearchResults: View {
                             .font(.system(size: 9.5, design: .monospaced))
                             .foregroundStyle(secondaryTextColor)
                             .frame(width: 42, alignment: .trailing)
-                        Text(line.text)
+                        contentLineText(line)
                             .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(primaryTextColor.opacity(0.82))
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .textSelection(.enabled)
@@ -1393,11 +1392,41 @@ struct KiteContentSearchResults: View {
         }
         .help("索引状态：\(search.indexState)")
     }
+
+    private func contentLineText(_ line: BrowserContentLineMatch) -> Text {
+        guard let start = line.columnStart,
+              let end = line.columnEnd,
+              start > 0,
+              end > start else {
+            return Text(line.text).foregroundColor(primaryTextColor.opacity(0.82))
+        }
+        let startOffset = Int(clamping: start - 1)
+        let endOffset = Int(clamping: end - 1)
+        guard let startIndex = line.text.index(
+            line.text.startIndex,
+            offsetBy: startOffset,
+            limitedBy: line.text.endIndex
+        ), let endIndex = line.text.index(
+            line.text.startIndex,
+            offsetBy: endOffset,
+            limitedBy: line.text.endIndex
+        ), startIndex < endIndex else {
+            return Text(line.text).foregroundColor(primaryTextColor.opacity(0.82))
+        }
+        return Text(String(line.text[..<startIndex]))
+            .foregroundColor(primaryTextColor.opacity(0.82))
+            + Text(String(line.text[startIndex..<endIndex]))
+                .bold()
+                .foregroundColor(Color.accentColor)
+            + Text(String(line.text[endIndex...]))
+                .foregroundColor(primaryTextColor.opacity(0.82))
+    }
 }
 
 struct KiteGlobalSearchResults: View {
     @ObservedObject var model: KiteModel
     @State private var selectedPath: String?
+    @State private var expandedGroups: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1429,7 +1458,7 @@ struct KiteGlobalSearchResults: View {
 
                 Spacer(minLength: 8)
 
-                Text(model.globalSearch?.rootPath ?? model.currentPath)
+                Text(model.currentSearchScopeTitle)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -1453,11 +1482,33 @@ struct KiteGlobalSearchResults: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let entries = model.globalSearch?.entries {
+            } else if model.globalSearch != nil {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(entries) { entry in
-                            searchRow(entry)
+                        ForEach(model.globalSearch?.groups ?? []) { group in
+                            let visible = expandedGroups.contains(group.key)
+                                ? group.entries
+                                : Array(group.entries.prefix(1))
+                            ForEach(visible) { entry in
+                                searchRow(entry, groupCount: group.entries.count)
+                            }
+                            if group.entries.count > 1 {
+                                Button {
+                                    if expandedGroups.contains(group.key) {
+                                        expandedGroups.remove(group.key)
+                                    } else {
+                                        expandedGroups.insert(group.key)
+                                    }
+                                } label: {
+                                    Text(expandedGroups.contains(group.key)
+                                        ? "收起其他位置"
+                                        : "展开另外 \(group.entries.count - 1) 个位置")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 39)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     .padding(.horizontal, 6)
@@ -1485,36 +1536,63 @@ struct KiteGlobalSearchResults: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: model.globalSearch?.query) { _ in
             selectedPath = nil
+            expandedGroups = []
         }
     }
 
-    private func searchRow(_ entry: BrowserEntry) -> some View {
+    private func searchRow(_ entry: BrowserEntry, groupCount: Int) -> some View {
         Button {
             selectedPath = entry.path
         } label: {
-            HStack(spacing: 9) {
-                KiteFileIcon(path: entry.path, isDirectory: entry.isDirectory, size: 20)
+            HStack(alignment: .center, spacing: 10) {
+                KiteFileIcon(path: entry.path, isDirectory: entry.isDirectory, size: 18)
+                    .opacity(0.58)
                     .frame(width: 22, height: 22)
 
-                Text(entry.name)
-                    .font(.system(
-                        size: 12.5,
-                        weight: selectedPath == entry.path ? .medium : .regular
-                    ))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(entry.name)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if groupCount > 1 {
+                            Text("\(groupCount) 个位置")
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        }
+                    }
 
-                Spacer(minLength: 8)
+                    Text(relativeLocation(for: entry))
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(Color.primary.opacity(0.68))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-                Text(relativeLocation(for: entry))
-                    .font(.system(size: 10, design: .monospaced))
+                    HStack(spacing: 7) {
+                        Text(entry.kindLabel)
+                        if !entry.isDirectory {
+                            Text(ByteCountFormatter.string(
+                                fromByteCount: Int64(clamping: entry.size),
+                                countStyle: .file
+                            ))
+                        }
+                        if let modified = entry.modifiedUnixMs {
+                            Text(Date(timeIntervalSince1970: TimeInterval(modified) / 1_000)
+                                .formatted(date: .numeric, time: .shortened))
+                        }
+                    }
+                    .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 320, alignment: .trailing)
+                }
+
+                Spacer(minLength: 4)
             }
             .padding(.horizontal, 8)
-            .frame(height: 32)
+            .padding(.vertical, 6)
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .background {
                 if selectedPath == entry.path {
@@ -1572,22 +1650,10 @@ struct KiteGlobalSearchResults: View {
     }
 
     private func relativeLocation(for entry: BrowserEntry) -> String {
-        let root = model.globalSearch?.rootPath ?? model.currentPath
-        let rootURL = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
-        let parentURL = URL(fileURLWithPath: entry.path)
+        URL(fileURLWithPath: entry.path)
             .deletingLastPathComponent()
             .standardizedFileURL
-        let parent = parentURL.path
-        let rootPath = rootURL.path
-        let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        guard parent == rootPath || parent.hasPrefix(rootPrefix) else {
-            return parent
-        }
-        let suffix = String(parent.dropFirst(rootPath.count))
-        if suffix.isEmpty {
-            return "."
-        }
-        return suffix.hasPrefix("/") ? "." + suffix : "./" + suffix
+            .path
     }
 }
 

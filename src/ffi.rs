@@ -46,6 +46,14 @@ pub struct DirectorySearchDto {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct GlobalSearchResultDto {
+    pub roots: Vec<String>,
+    pub query: String,
+    pub entries: Vec<DirectoryEntryDto>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct VolumeDto {
     pub path: String,
     pub name: Option<String>,
@@ -263,6 +271,46 @@ impl KiteCore {
             path: snapshot.root.to_string_lossy().into_owned(),
             query: snapshot.query,
             entries: entries.iter().map(entry_dto).collect(),
+            truncated: snapshot.truncated,
+        }))
+    }
+
+    pub fn search_directories(
+        &self,
+        paths: Vec<String>,
+        query: String,
+    ) -> Result<Option<GlobalSearchResultDto>, KiteError> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut active = self
+                .search_cancel
+                .lock()
+                .map_err(|_| KiteError::operation("搜索状态锁不可用"))?;
+            *active = Some(cancel.clone());
+        }
+
+        let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        let result = crate::fs::search_global_names(&roots, &query, cancel.as_ref());
+
+        if let Ok(mut active) = self.search_cancel.lock()
+            && active
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &cancel))
+        {
+            *active = None;
+        }
+
+        let Some(snapshot) = result.map_err(KiteError::operation)? else {
+            return Ok(None);
+        };
+        Ok(Some(GlobalSearchResultDto {
+            roots: snapshot
+                .roots
+                .iter()
+                .map(|root| root.to_string_lossy().into_owned())
+                .collect(),
+            query: snapshot.query,
+            entries: snapshot.entries.iter().map(entry_dto).collect(),
             truncated: snapshot.truncated,
         }))
     }
@@ -645,6 +693,44 @@ mod tests {
         assert_eq!(result.query, "target");
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].name, "target.txt");
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn core_searches_multiple_name_roots() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-core-global-search-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let trunk = directory.join("trunk");
+        let publish = directory.join("publish_s2");
+        std::fs::create_dir_all(trunk.join("PocoCheck")).expect("create trunk fixture");
+        std::fs::create_dir_all(publish.join("PocoCheck")).expect("create publish fixture");
+
+        let core = KiteCore::new();
+        let result = core
+            .search_directories(
+                vec![
+                    publish.to_string_lossy().into_owned(),
+                    trunk.to_string_lossy().into_owned(),
+                ],
+                "PocoCheck".to_string(),
+            )
+            .expect("global search succeeds")
+            .expect("global search returns a snapshot");
+        let _ = std::fs::remove_dir_all(&directory);
+
+        assert_eq!(result.query, "PocoCheck");
+        assert_eq!(result.roots.len(), 2);
+        assert_eq!(result.entries.len(), 2);
+        assert!(
+            std::path::Path::new(&result.entries[0].path)
+                .ends_with(std::path::Path::new("trunk").join("PocoCheck"))
+        );
         assert!(!result.truncated);
     }
 
