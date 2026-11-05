@@ -4661,7 +4661,10 @@ impl KiteApp {
             .filter(|volume| {
                 matches!(
                     volume.kind,
-                    VolumeKind::Fixed | VolumeKind::Usb | VolumeKind::Removable
+                    VolumeKind::Fixed
+                        | VolumeKind::Usb
+                        | VolumeKind::Removable
+                        | VolumeKind::Network
                 )
             })
             .map(|volume| volume.path.clone())
