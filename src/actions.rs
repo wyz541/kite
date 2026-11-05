@@ -16,6 +16,7 @@ actions!(
         SelectAll,
         FocusAddress,
         FocusSearch,
+        OpenGlobalSearch,
         CreateFolder,
         RenameSelection,
         RecycleSelection,
