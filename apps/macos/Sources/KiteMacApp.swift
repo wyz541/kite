@@ -178,8 +178,8 @@ struct KiteMacApp: App {
                 }
                 .keyboardShortcut("l", modifiers: [.command])
 
-                Button("搜索当前文件夹") {
-                    model.focusGlobalSearch()
+                Button("全局搜索…") {
+                    KiteGlobalSearchWindowController.shared.show(model: model)
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
 

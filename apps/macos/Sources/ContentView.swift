@@ -7,9 +7,7 @@ struct ContentView: View {
     @AppStorage("kite.macos.sidebar-visible") private var showsSidebar = true
     @AppStorage("kite.macos.preview-visible") private var showsPreview = true
     @State private var isEditingAddress = false
-    @State private var isGlobalSearchVisible = false
     @FocusState private var addressFocused: Bool
-    @FocusState private var globalSearchFocused: Bool
 
     var body: some View {
         ZStack {
@@ -26,13 +24,8 @@ struct ContentView: View {
                     }
 
                     VStack(spacing: KiteTheme.contentGap) {
-                        if model.globalSearch != nil || model.globalSearchLoading {
-                            KiteGlobalSearchResults(model: model)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            KiteColumnBrowser(model: model, showsPreview: $showsPreview)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
+                        KiteColumnBrowser(model: model, showsPreview: $showsPreview)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         statusBar
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -46,13 +39,6 @@ struct ContentView: View {
         .background(KiteWindowConfigurator())
         .onChange(of: model.focusedAddressRequest) { _ in
             beginAddressEditing()
-        }
-        .onChange(of: model.focusedGlobalSearchRequest) { _ in
-            openGlobalSearch()
-        }
-        .onChange(of: model.activeTabID) { _ in
-            isGlobalSearchVisible = false
-            globalSearchFocused = false
         }
         .animation(.snappy(duration: 0.22), value: showsSidebar)
     }
@@ -75,10 +61,6 @@ struct ContentView: View {
             HStack(spacing: KiteTheme.toolbarGap) {
                 toolbarLeadingControls
                 addressBar
-                if isGlobalSearchVisible {
-                    globalSearchBar
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
                 actionControls
             }
             .padding(.horizontal, KiteTheme.windowContentInset)
@@ -232,42 +214,6 @@ struct ContentView: View {
         }
     }
 
-    private var globalSearchBar: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 7)
-
-            TextField("搜索当前文件夹", text: $model.globalSearchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11.5))
-                .focused($globalSearchFocused)
-                .onSubmit {
-                    model.submitGlobalSearch()
-                }
-                .onExitCommand {
-                    closeGlobalSearch()
-                }
-
-            if model.globalSearchLoading {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-
-            KiteToolbarIconButton(
-                systemName: "xmark",
-                title: "关闭搜索"
-            ) {
-                closeGlobalSearch()
-            }
-            .scaleEffect(0.84)
-        }
-        .padding(.horizontal, 4)
-        .frame(width: 236, height: KiteTheme.toolbarControlHeight)
-        .kiteGlass(.panel, cornerRadius: KiteTheme.controlRadius)
-    }
-
     private var breadcrumbs: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 2) {
@@ -309,19 +255,15 @@ struct ContentView: View {
     }
 
     private var actionControls: some View {
-        let selectedEntries = model.globalSearch == nil ? model.selectedColumnEntries : []
+        let selectedEntries = model.selectedColumnEntries
         let selectedPaths = selectedEntries.map(\.path)
         return HStack(spacing: 2) {
             KiteToolbarIconButton(
                 systemName: "magnifyingglass",
-                title: "搜索当前文件夹",
-                isActive: isGlobalSearchVisible || model.globalSearch != nil
+                title: "全局搜索 (⌘⇧F)",
+                isActive: KiteGlobalSearchWindowController.shared.isVisible
             ) {
-                if isGlobalSearchVisible || model.globalSearch != nil {
-                    closeGlobalSearch()
-                } else {
-                    openGlobalSearch()
-                }
+                KiteGlobalSearchWindowController.shared.show(model: model)
             }
 
             KiteToolbarIconButton(
@@ -432,7 +374,7 @@ struct ContentView: View {
 
             Spacer(minLength: 8)
 
-            if model.globalSearch == nil, selectedEntries.count > 1 {
+            if selectedEntries.count > 1 {
                 Text(
                     "已选择 \(selectedEntries.count) 项 · "
                         + ByteCountFormatter.string(
@@ -444,7 +386,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-            } else if model.globalSearch == nil, let selectedEntry = selectedEntries.first {
+            } else if let selectedEntry = selectedEntries.first {
                 Text(selectedEntry.name)
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -452,33 +394,22 @@ struct ContentView: View {
                     .truncationMode(.middle)
             }
 
-            if let search = model.globalSearch {
-                Text("\(search.entries.count) 个搜索结果")
+            Text("\(model.columns.last?.entries.count ?? 0) 个项目")
+                .font(.system(size: 10.5, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            if let skipped = model.columns.last?.skipped, skipped > 0 {
+                Text("已跳过 \(skipped)")
                     .font(.system(size: 10.5, design: .rounded))
-                    .foregroundStyle(.secondary)
-                if search.truncated {
-                    Text("仅显示前 1000 个结果")
-                        .font(.system(size: 10.5, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                }
-            } else {
-                Text("\(model.columns.last?.entries.count ?? 0) 个项目")
-                    .font(.system(size: 10.5, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
+            }
 
-                if let skipped = model.columns.last?.skipped, skipped > 0 {
-                    Text("已跳过 \(skipped)")
-                        .font(.system(size: 10.5, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                }
+            if model.columns.last?.gitAvailable == true {
+                KiteStatusBadge(title: "Git", systemImage: "arrow.triangle.branch")
+            }
 
-                if model.columns.last?.gitAvailable == true {
-                    KiteStatusBadge(title: "Git", systemImage: "arrow.triangle.branch")
-                }
-
-                if model.columns.last?.svnAvailable == true {
-                    KiteStatusBadge(title: "SVN", systemImage: "arrow.triangle.branch")
-                }
+            if model.columns.last?.svnAvailable == true {
+                KiteStatusBadge(title: "SVN", systemImage: "arrow.triangle.branch")
             }
         }
         .padding(.horizontal, 12)
@@ -501,12 +432,6 @@ struct ContentView: View {
         if model.updateInProgress {
             return "正在检查更新…"
         }
-        if let search = model.globalSearch {
-            return "搜索“\(search.query)”"
-        }
-        if model.globalSearchLoading {
-            return "正在搜索“\(model.globalSearchText)”…"
-        }
         let name = FileManager.default.displayName(atPath: model.currentPath)
         return name.isEmpty ? model.currentPath : name
     }
@@ -521,9 +446,6 @@ struct ContentView: View {
         }
         if model.updateInProgress || model.updateStatusMessage != nil {
             return "arrow.triangle.2.circlepath"
-        }
-        if model.globalSearch != nil || model.globalSearchLoading {
-            return "magnifyingglass"
         }
         return "wind"
     }
@@ -565,26 +487,6 @@ struct ContentView: View {
         DispatchQueue.main.async {
             addressFocused = true
         }
-    }
-
-    private func openGlobalSearch() {
-        if let path = model.activeColumnSearchPath {
-            model.clearColumnSearch(path: path)
-        }
-        withAnimation(.snappy(duration: 0.22)) {
-            isGlobalSearchVisible = true
-        }
-        DispatchQueue.main.async {
-            globalSearchFocused = true
-        }
-    }
-
-    private func closeGlobalSearch() {
-        withAnimation(.snappy(duration: 0.22)) {
-            isGlobalSearchVisible = false
-        }
-        globalSearchFocused = false
-        model.clearGlobalSearch()
     }
 
     private func commitAddress() {

@@ -1172,6 +1172,229 @@ private struct KiteVcsBadge {
     }
 }
 
+struct KiteContentSearchResults: View {
+    @ObservedObject var model: KiteModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var selectedPath: String?
+
+    private var primaryTextColor: Color {
+        colorScheme == .dark ? .white : .black.opacity(0.88)
+    }
+
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? .white.opacity(0.64) : .black.opacity(0.58)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+
+                if let search = model.contentSearch {
+                    Text("“\(search.query)”的内容结果")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("\(search.files.count) 个文件")
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.primary.opacity(0.055), in: Capsule())
+                    Text("\(search.totalMatches) 处匹配")
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    if search.partial {
+                        Text("索引更新中")
+                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.orange)
+                    } else if search.truncated {
+                        Text("部分结果")
+                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    Text("正在搜索文件内容…")
+                        .font(.system(size: 12, weight: .semibold))
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(model.currentSearchScopeTitle)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.06))
+                .frame(height: 0.5)
+                .padding(.horizontal, 10)
+
+            if let search = model.contentSearch, search.files.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "text.magnifyingglass")
+                        .font(.system(size: 30, weight: .light))
+                        .foregroundStyle(.tertiary)
+                    Text("没有找到匹配的文件内容")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(secondaryTextColor)
+                    if search.partial {
+                        Text("索引仍在后台更新")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let search = model.contentSearch {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(search.files) { file in
+                            contentFileRow(file, search: search)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                }
+                .scrollIndicators(.hidden)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(0.42),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.2), lineWidth: 0.7)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: model.contentSearch?.query) { _ in
+            selectedPath = nil
+        }
+    }
+
+    private func contentFileRow(
+        _ file: BrowserContentFileMatch,
+        search: BrowserContentSearchState
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                selectedPath = file.path
+            } label: {
+                HStack(spacing: 9) {
+                    KiteFileIcon(path: file.path, isDirectory: false, size: 22)
+                        .frame(width: 24, height: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(file.name)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(primaryTextColor)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("\(file.matchCount) 处")
+                                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                                .foregroundStyle(secondaryTextColor)
+                        }
+                        Text(file.relativePath)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(secondaryTextColor)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(file.kindLabel)
+                        Text(ByteCountFormatter.string(
+                            fromByteCount: Int64(clamping: file.size),
+                            countStyle: .file
+                        ))
+                        if let modified = file.modifiedUnixMs {
+                            Text(Date(timeIntervalSince1970: TimeInterval(modified) / 1_000)
+                                .formatted(date: .numeric, time: .shortened))
+                        }
+                    }
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(secondaryTextColor)
+                    .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 7)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background {
+                    if selectedPath == file.path {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .kiteGlass(.selection, cornerRadius: 10)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    KitePlatform.open(file.path)
+                }
+            )
+            .contextMenu {
+                Button("打开") { KitePlatform.open(file.path) }
+                Button("在 Finder 中显示") { KitePlatform.revealInFinder(file.path) }
+                Button("拷贝路径") { KitePlatform.copyPath(file.path) }
+            }
+            .help(file.path)
+            .accessibilityLabel("\(file.name)，\(file.matchCount) 处内容匹配")
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(file.matches) { line in
+                    HStack(alignment: .top, spacing: 9) {
+                        Text("\(line.lineNumber)")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(secondaryTextColor)
+                            .frame(width: 42, alignment: .trailing)
+                        Text(line.text)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(primaryTextColor.opacity(0.82))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 0)
+                    }
+                }
+                if file.matchCount > UInt64(file.matches.count) {
+                    Text("还有 \(file.matchCount - UInt64(file.matches.count)) 处匹配")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 51)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 5)
+        }
+        .padding(.vertical, 2)
+        .background(
+            Color(nsColor: .windowBackgroundColor).opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.055), lineWidth: 0.5)
+        }
+        .help("索引状态：\(search.indexState)")
+    }
+}
+
 struct KiteGlobalSearchResults: View {
     @ObservedObject var model: KiteModel
     @State private var selectedPath: String?

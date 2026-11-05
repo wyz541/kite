@@ -22,6 +22,7 @@ use crate::fs::{
     load_directory, open_file, recycle_entry, rename_entry, search_directory, sort_entries,
     transfer_entry, validate_name, worse_status,
 };
+use crate::global_search_window;
 use crate::platform::{default_root_path, root_directory};
 use crate::preview_window::PreviewWindow;
 use crate::shell_fs;
@@ -1292,6 +1293,7 @@ impl KiteApp {
             KeyBinding::new("secondary-r", RefreshFolder, Some("Kite")),
             KeyBinding::new("secondary-l", FocusAddress, Some("Kite")),
             KeyBinding::new("secondary-f", FocusSearch, Some("Kite")),
+            KeyBinding::new("secondary-shift-f", OpenGlobalSearch, Some("Kite")),
             KeyBinding::new("secondary-1", ShowListView, Some("Kite")),
             KeyBinding::new("secondary-2", ShowColumnsView, Some("Kite")),
             KeyBinding::new("secondary-t", NewTab, Some("Kite")),
@@ -1320,7 +1322,11 @@ impl KiteApp {
                 MenuItem::action("下一个页签", NextTab),
                 MenuItem::action("上一个页签", PreviousTab),
             ]),
-            Menu::new("导航").items([MenuItem::action("聚焦路径栏", FocusAddress)]),
+            Menu::new("导航").items([
+                MenuItem::action("聚焦路径栏", FocusAddress),
+                MenuItem::separator(),
+                MenuItem::action("全局搜索…", OpenGlobalSearch),
+            ]),
             Menu::new("显示").items([
                 MenuItem::action("列表视图", ShowListView),
                 MenuItem::action("分栏视图", ShowColumnsView),
@@ -4637,6 +4643,47 @@ impl KiteApp {
         toolbar.into_any_element()
     }
 
+    fn open_global_search(
+        &mut self,
+        _: &OpenGlobalSearch,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let favorite_roots = self
+            .favorites
+            .iter()
+            .filter(|favorite| favorite.is_directory)
+            .map(|favorite| PathBuf::from(&favorite.path))
+            .collect::<Vec<_>>();
+        let local_roots = crate::devices::snapshot()
+            .volumes
+            .iter()
+            .filter(|volume| {
+                matches!(
+                    volume.kind,
+                    VolumeKind::Fixed | VolumeKind::Usb | VolumeKind::Removable
+                )
+            })
+            .map(|volume| volume.path.clone())
+            .collect::<Vec<_>>();
+        match global_search_window::open_global_search_window(
+            self.current_dir.clone(),
+            favorite_roots,
+            local_roots,
+            cx,
+        ) {
+            Ok(()) => {
+                self.error = None;
+                self.notice = Some("已打开全局搜索窗口".into());
+            }
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+            }
+        }
+        cx.notify();
+    }
+
     fn toggle_theme(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         let mode = if cx.theme().mode.is_dark() {
             ThemeMode::Light
@@ -7545,6 +7592,9 @@ impl Render for KiteApp {
             .on_action(
                 cx.listener(|this, _: &FocusSearch, window, cx| this.focus_search(window, cx)),
             )
+            .on_action(cx.listener(|this, action: &OpenGlobalSearch, window, cx| {
+                this.open_global_search(action, window, cx)
+            }))
             .on_action(
                 cx.listener(|this, _: &CreateFolder, window, cx| this.begin_new_folder(window, cx)),
             )
