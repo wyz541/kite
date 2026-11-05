@@ -128,7 +128,7 @@ private struct KiteGlobalSearchWindowView: View {
                 .font(.system(size: 10.5, weight: .medium))
             }
             .menuStyle(.borderlessButton)
-            .frame(width: 112)
+            .frame(width: 140)
 
             TextField(
                 model.globalSearchMode == .content ? "搜索文件内容" : "搜索文件名",
@@ -190,7 +190,9 @@ private struct KiteGlobalSearchWindowView: View {
                 Text("输入关键词开始全局搜索")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text("名称模式搜索文件名和文件夹名。内容模式搜索本地文本内容。")
+                Text(model.globalSearchScope.allowsLiveSearch
+                    ? "输入至少两个字符后自动搜索。"
+                    : "当前范围较大，请输入关键词后按 Enter 或点击搜索。")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
             }

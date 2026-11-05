@@ -4655,24 +4655,27 @@ impl KiteApp {
             .filter(|favorite| favorite.is_directory)
             .map(|favorite| PathBuf::from(&favorite.path))
             .collect::<Vec<_>>();
-        let local_roots = crate::devices::snapshot()
-            .volumes
+        let volumes = crate::devices::snapshot().volumes;
+        let local_roots = volumes
             .iter()
             .filter(|volume| {
                 matches!(
                     volume.kind,
-                    VolumeKind::Fixed
-                        | VolumeKind::Usb
-                        | VolumeKind::Removable
-                        | VolumeKind::Network
+                    VolumeKind::Fixed | VolumeKind::Usb | VolumeKind::Removable
                 )
             })
+            .map(|volume| volume.path.clone())
+            .collect::<Vec<_>>();
+        let network_roots = volumes
+            .iter()
+            .filter(|volume| matches!(volume.kind, VolumeKind::Network))
             .map(|volume| volume.path.clone())
             .collect::<Vec<_>>();
         match global_search_window::open_global_search_window(
             self.current_dir.clone(),
             favorite_roots,
             local_roots,
+            network_roots,
             cx,
         ) {
             Ok(()) => {
