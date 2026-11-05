@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fs::{self, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -176,6 +177,14 @@ pub struct SearchSnapshot {
     pub truncated: bool,
 }
 
+#[derive(Debug)]
+pub struct GlobalNameSearchSnapshot {
+    pub roots: Vec<PathBuf>,
+    pub query: String,
+    pub entries: Vec<FileEntry>,
+    pub truncated: bool,
+}
+
 pub fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
     let path = if path.is_absolute() {
         path.to_path_buf()
@@ -245,6 +254,63 @@ pub fn search_directory(
     sort: SortSpec,
     cancel: &AtomicBool,
 ) -> Result<Option<SearchSnapshot>, String> {
+    search_directory_inner(root, query, sort, cancel, false)
+}
+
+pub fn search_global_names(
+    roots: &[PathBuf],
+    query: &str,
+    cancel: &AtomicBool,
+) -> Result<Option<GlobalNameSearchSnapshot>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(None);
+    }
+    let roots = normalize_search_roots(roots);
+    if roots.is_empty() {
+        return Err("没有可搜索的文件夹".to_string());
+    }
+
+    let mut entries = Vec::<FileEntry>::new();
+    let mut truncated = false;
+    for root in &roots {
+        if cancel.load(AtomicOrdering::Relaxed) {
+            return Ok(None);
+        }
+        let Some(snapshot) =
+            search_directory_inner(root, query, SortSpec::default(), cancel, true)?
+        else {
+            continue;
+        };
+        truncated |= snapshot.truncated;
+        entries.extend(snapshot.entries);
+        if entries.len() >= SEARCH_RESULT_LIMIT {
+            entries.truncate(SEARCH_RESULT_LIMIT);
+            truncated = true;
+            break;
+        }
+    }
+
+    sort_global_name_entries(&mut entries, query);
+    let mut seen = HashSet::new();
+    entries.retain(|entry| seen.insert(path_key(&entry.path)));
+    entries.truncate(SEARCH_RESULT_LIMIT);
+
+    Ok(Some(GlobalNameSearchSnapshot {
+        roots,
+        query: query.to_string(),
+        entries,
+        truncated,
+    }))
+}
+
+fn search_directory_inner(
+    root: &Path,
+    query: &str,
+    sort: SortSpec,
+    cancel: &AtomicBool,
+    prune_generated: bool,
+) -> Result<Option<SearchSnapshot>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(None);
@@ -257,7 +323,13 @@ pub fn search_directory(
     builder
         .standard_filters(false)
         .hidden(true)
-        .follow_links(false);
+        .follow_links(false)
+        .threads(2);
+    if prune_generated {
+        builder.filter_entry(|entry| {
+            entry.depth() == 0 || !is_generated_search_directory(entry.path())
+        });
+    }
 
     builder.build_parallel().run(|| {
         let entries = Arc::clone(&entries);
@@ -328,6 +400,146 @@ pub fn search_directory(
         entries,
         truncated: truncated.load(AtomicOrdering::Relaxed),
     }))
+}
+
+fn normalize_search_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut normalized = roots
+        .iter()
+        .filter_map(|root| dunce::canonicalize(root).ok())
+        .filter(|root| root.is_dir())
+        .collect::<Vec<_>>();
+    normalized.sort_by_key(|root| root.components().count());
+    normalized.dedup();
+    let mut result = Vec::<PathBuf>::new();
+    for root in normalized {
+        if !result.iter().any(|parent| path_is_within(&root, parent)) {
+            result.push(root);
+        }
+    }
+    result
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    let path = path_key(path);
+    let root = path_key(root);
+    path == root
+        || path
+            .strip_prefix(&root)
+            .is_some_and(|suffix| suffix.starts_with(std::path::MAIN_SEPARATOR))
+}
+
+fn path_key(path: &Path) -> String {
+    let value = path.to_string_lossy().to_string();
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value
+    }
+}
+
+fn is_generated_search_directory(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let name = name.to_lowercase();
+    matches!(
+        name.as_str(),
+        ".git"
+            | ".svn"
+            | ".hg"
+            | "node_modules"
+            | "target"
+            | "build"
+            | "dist"
+            | ".cache"
+            | "library"
+            | "$recycle.bin"
+            | "system volume information"
+            | "windows"
+            | "program files"
+            | "program files (x86)"
+            | "programdata"
+    )
+}
+
+fn sort_global_name_entries(entries: &mut [FileEntry], query: &str) {
+    entries.sort_by(|left, right| {
+        name_match_rank(&right.name, query)
+            .cmp(&name_match_rank(&left.name, query))
+            .then_with(|| right.is_dir().cmp(&left.is_dir()))
+            .then_with(|| {
+                search_path_quality_rank(&right.path).cmp(&search_path_quality_rank(&left.path))
+            })
+            .then_with(|| {
+                left.path
+                    .components()
+                    .count()
+                    .cmp(&right.path.components().count())
+            })
+            .then_with(|| right.modified.cmp(&left.modified))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn name_match_rank(name: &str, query: &str) -> u8 {
+    let name = name.to_lowercase();
+    let query = query.to_lowercase();
+    let stem = Path::new(&name)
+        .file_stem()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.clone());
+    if name == query || stem == query {
+        return 4;
+    }
+    if name.starts_with(&query) {
+        return 3;
+    }
+    if name
+        .split(|character: char| !character.is_alphanumeric())
+        .any(|token| token == query)
+    {
+        return 2;
+    }
+    1
+}
+
+pub(crate) fn search_path_quality_rank(path: &Path) -> i16 {
+    let mut score = 0i16;
+    for component in path.components() {
+        let Some(segment) = component.as_os_str().to_str() else {
+            continue;
+        };
+        let segment = segment.to_lowercase();
+        if matches!(
+            segment.as_str(),
+            "trunk" | "main" | "master" | "develop" | "development" | "active" | "src" | "source"
+        ) {
+            score += 2;
+        } else if segment.starts_with("publish")
+            || matches!(
+                segment.as_str(),
+                "release"
+                    | "releases"
+                    | "dist"
+                    | "build"
+                    | "target"
+                    | "out"
+                    | "output"
+                    | "archive"
+                    | "archives"
+                    | "backup"
+                    | "backups"
+                    | "bak"
+                    | "cache"
+                    | "temp"
+                    | "tmp"
+            )
+        {
+            score -= 2;
+        }
+    }
+    score.clamp(-6, 6)
 }
 
 fn file_entry_from_metadata(path: PathBuf, name: String, metadata: &Metadata) -> FileEntry {
@@ -718,6 +930,42 @@ mod tests {
         let cancelled_result = search_directory(&root, "target", SortSpec::default(), &cancelled)
             .expect("cancelled search should not fail");
         assert!(cancelled_result.is_none());
+
+        fs::remove_dir_all(root).expect("clean test directory");
+    }
+
+    #[test]
+    fn global_name_search_prefers_development_trees_and_skips_generated_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "kite-global-name-rank-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("publish_s2").join("PocoCheck")).expect("create publish tree");
+        fs::create_dir_all(root.join("trunk").join("PocoCheck")).expect("create trunk tree");
+        fs::create_dir_all(root.join("node_modules").join("PocoCheck"))
+            .expect("create generated tree");
+
+        let cancel = AtomicBool::new(false);
+        let snapshot = search_global_names(std::slice::from_ref(&root), "PocoCheck", &cancel)
+            .expect("global name search")
+            .expect("non-empty search");
+
+        assert_eq!(snapshot.entries.len(), 2);
+        assert!(
+            snapshot.entries[0]
+                .path
+                .ends_with(Path::new("trunk").join("PocoCheck"))
+        );
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .all(|entry| !entry.path.to_string_lossy().contains("node_modules"))
+        );
 
         fs::remove_dir_all(root).expect("clean test directory");
     }
