@@ -117,6 +117,7 @@ private struct KiteGlobalSearchWindowView: View {
                             Text(scope.title)
                         }
                     }
+                    .disabled(!model.globalSearchScopeHasRoots(scope))
                 }
             } label: {
                 HStack(spacing: 4) {

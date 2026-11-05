@@ -54,7 +54,7 @@ mod platform {
     use super::{DeviceSnapshot, PortableDevice, StorageVolume, VolumeKind};
     use std::ffi::c_void;
     use std::mem::size_of;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::ptr;
     use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
         CM_Get_Device_IDW, DIGCF_PRESENT, GUID_DEVCLASS_WPD, SP_DEVINFO_DATA, SPDRP_DEVICEDESC,
@@ -90,6 +90,21 @@ mod platform {
             volumes: storage_volumes(),
             portable_devices: portable_devices(),
         }
+    }
+
+    pub fn is_network_path(path: &Path) -> bool {
+        let path_text = path.as_os_str().to_string_lossy();
+        if path_text.starts_with(r"\\") || path_text.starts_with("//") {
+            return true;
+        }
+        let Some(root) = path.ancestors().last() else {
+            return false;
+        };
+        let root_text = root.as_os_str().to_string_lossy();
+        if root_text.is_empty() {
+            return false;
+        }
+        unsafe { GetDriveTypeW(wide(&root_text).as_ptr()) == DRIVE_REMOTE }
     }
 
     fn storage_volumes() -> Vec<StorageVolume> {
@@ -373,9 +388,12 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
+        use std::path::Path;
+
         use super::super::VolumeKind;
         use super::{
-            DRIVE_FIXED, DRIVE_REMOVABLE, classify_volume, portable_shell_path, read_ascii,
+            DRIVE_FIXED, DRIVE_REMOVABLE, classify_volume, is_network_path, portable_shell_path,
+            read_ascii,
         };
         use windows_sys::Win32::Storage::FileSystem::BusTypeUsb;
 
@@ -410,12 +428,19 @@ mod platform {
                 r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\\?\usb#vid_05ac&pid_12a8&mi_00#6&2e02eb0c&0&0000#{6ac27878-a6fa-4155-ba85-f98f491d4f33}"
             );
         }
+
+        #[test]
+        fn recognizes_unc_paths_as_network_locations() {
+            assert!(is_network_path(Path::new(r"\\server\share\folder")));
+            assert!(!is_network_path(Path::new(r"C:\Users")));
+        }
     }
 }
 
 #[cfg(target_os = "macos")]
 mod platform {
     use super::{DeviceSnapshot, StorageVolume, VolumeKind};
+    use std::path::Path;
     use sysinfo::Disks;
 
     pub fn snapshot() -> DeviceSnapshot {
@@ -452,11 +477,20 @@ mod platform {
             portable_devices: Vec::new(),
         }
     }
+
+    pub fn is_network_path(path: &Path) -> bool {
+        Disks::new_with_refreshed_list().list().iter().any(|disk| {
+            let file_system = disk.file_system().to_string_lossy().to_lowercase();
+            matches!(file_system.as_str(), "smbfs" | "nfs" | "afpfs")
+                && path.starts_with(disk.mount_point())
+        })
+    }
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod platform {
     use super::DeviceSnapshot;
+    use std::path::Path;
 
     pub fn snapshot() -> DeviceSnapshot {
         DeviceSnapshot {
@@ -464,9 +498,17 @@ mod platform {
             portable_devices: Vec::new(),
         }
     }
+
+    pub fn is_network_path(_path: &Path) -> bool {
+        false
+    }
 }
 
 pub use platform::snapshot;
+
+pub fn is_network_path(path: &std::path::Path) -> bool {
+    platform::is_network_path(path)
+}
 
 #[cfg(test)]
 mod tests {
