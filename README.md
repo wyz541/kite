@@ -92,7 +92,10 @@ macOS 可与 Finder 共享文件剪贴板。
 - 详细信息模式下，点击名称、日期、类型或大小表头排序，再次点击切换方向。
 - 支持文件类型筛选、分组和显示规则重置。
 - macOS 和 Windows 支持分栏递归搜索。
-- 两端提供全局工具栏搜索。
+- 两端通过独立全局搜索窗口搜索文件名或文件内容。
+- Windows 使用 `Ctrl+Shift+F` 打开全局搜索窗口。
+- macOS 使用 `Command+Shift+F` 打开全局搜索窗口。
+- 内容结果包含文件信息、匹配行号和匹配片段。
 - 两端提供详细信息列开关和列宽预设。
 
 ### 文件管理
@@ -147,7 +150,8 @@ macOS 可与 Finder 共享文件剪贴板。
 | 分栏排序字段、筛选和分组 | 已支持 | 已支持 |
 | 分栏递归搜索 | 已支持 | 已支持 |
 | 分栏目录变化自动刷新 | 已支持 | 已支持 |
-| 全局工具栏搜索 | 已支持 | 已支持 |
+| 独立全局搜索窗口 | 已支持 | 已支持 |
+| 全局文件内容搜索 | 已支持 | 已支持 |
 | 分栏批量选择 | 已支持 | 已支持 |
 | 批量复制、剪切和删除 | 已支持 | 已支持 |
 | ZIP、TAR.GZ 压缩与解压 | 已支持 | 已支持 |
@@ -168,7 +172,12 @@ Kite 仍处于 `0.6.x` 活跃开发阶段。
 
 - Windows 提供 x64 构建，macOS 提供 Apple Silicon 构建。
 - 分栏视图支持批量选择。列表视图仍只保留一个当前行。
-- 搜索只匹配项目名称，最多显示 1000 个结果。
+- 文件名搜索最多显示 1000 个结果。
+- 内容搜索最多显示 50 个文件。
+- 内容搜索首次使用会在后台建立本地索引。
+- 内容搜索只索引 UTF-8 和 ASCII 文本。
+- 内容搜索不解析 PDF、Word、Excel 或压缩包。
+- 内容搜索默认跳过隐藏项、构建目录、依赖目录和超过 8 MiB 的文件。
 - WPD/MTP 删除操作不会进入回收站。
 - Windows 禁止重命名或删除 WPD/MTP 设备根目录。
 - WPD/MTP 写入速度取决于设备和 Windows Shell。
@@ -279,6 +288,7 @@ cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 - [收藏架构](docs/architecture/favorites.md)
 - [macOS 分栏显示规则](docs/architecture/macos-column-rules.md)
 - [macOS 分栏搜索](docs/architecture/macos-column-search.md)
+- [全局文件内容搜索](docs/architecture/content-search.md)
 - [分栏自动刷新](docs/architecture/auto-refresh.md)
 - [图标系统](docs/design/icon-system.md)
 - [搜索实现调研](docs/RUST_SEARCH_ENGINE_RESEARCH.md)
