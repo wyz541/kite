@@ -4,6 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::actions::{
+    SetGlobalSearchScopeCurrentFolder, SetGlobalSearchScopeFavorites,
+    SetGlobalSearchScopeLocalDisks, SetGlobalSearchScopeNetworkVolumes,
+};
 use crate::content_search::{
     self, CONTENT_SEARCH_MAX_FILES, ContentFileMatch, ContentSearchSnapshot,
 };
@@ -12,6 +16,7 @@ use crate::table::icon_for;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Selectable as _, StyledExt as _, h_flex, v_flex,
@@ -30,6 +35,7 @@ enum GlobalSearchScope {
     CurrentFolder,
     Favorites,
     LocalDisks,
+    NetworkVolumes,
 }
 
 impl GlobalSearchScope {
@@ -37,16 +43,17 @@ impl GlobalSearchScope {
         match self {
             Self::CurrentFolder => "当前文件夹",
             Self::Favorites => "收藏文件夹",
-            Self::LocalDisks => "所有磁盘",
+            Self::LocalDisks => "本地磁盘",
+            Self::NetworkVolumes => "网络卷",
         }
     }
 
-    fn next(self) -> Self {
-        match self {
-            Self::CurrentFolder => Self::Favorites,
-            Self::Favorites => Self::LocalDisks,
-            Self::LocalDisks => Self::CurrentFolder,
-        }
+    fn allows_live_search(self) -> bool {
+        self == Self::CurrentFolder
+    }
+
+    fn prepares_content_index_in_background(self) -> bool {
+        matches!(self, Self::CurrentFolder | Self::Favorites)
     }
 }
 
@@ -66,6 +73,7 @@ pub(crate) struct GlobalSearchWindow {
     current_folder: PathBuf,
     favorite_roots: Vec<PathBuf>,
     local_roots: Vec<PathBuf>,
+    network_roots: Vec<PathBuf>,
     mode: GlobalSearchMode,
     scope: GlobalSearchScope,
     query_input: Entity<InputState>,
@@ -86,6 +94,7 @@ impl GlobalSearchWindow {
         current_folder: PathBuf,
         favorite_roots: Vec<PathBuf>,
         local_roots: Vec<PathBuf>,
+        network_roots: Vec<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -120,6 +129,7 @@ impl GlobalSearchWindow {
             current_folder,
             favorite_roots,
             local_roots,
+            network_roots,
             mode: GlobalSearchMode::Name,
             scope: GlobalSearchScope::CurrentFolder,
             query_input,
@@ -141,6 +151,7 @@ impl GlobalSearchWindow {
             GlobalSearchScope::CurrentFolder => vec![self.current_folder.clone()],
             GlobalSearchScope::Favorites => self.favorite_roots.clone(),
             GlobalSearchScope::LocalDisks => self.local_roots.clone(),
+            GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
         }
     }
 
@@ -166,15 +177,21 @@ impl GlobalSearchWindow {
         cx.notify();
     }
 
-    fn cycle_scope(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.scope = self.scope.next();
+    fn set_scope(&mut self, scope: GlobalSearchScope, window: &mut Window, cx: &mut Context<Self>) {
+        if self.scope == scope {
+            return;
+        }
+        self.scope = scope;
         self.cancel_search();
         self.cancel_live_search();
         self.name_results = None;
         self.content_results = None;
         self.expanded_groups.clear();
+        self.loading = false;
         self.error = None;
-        if self.mode == GlobalSearchMode::Content {
+        if self.mode == GlobalSearchMode::Content
+            && self.scope.prepares_content_index_in_background()
+        {
             self.prepare_content_index();
         }
         self.query_input.update(cx, |input, cx| {
@@ -185,6 +202,9 @@ impl GlobalSearchWindow {
     }
 
     fn prepare_content_index(&self) {
+        if !self.scope.prepares_content_index_in_background() {
+            return;
+        }
         if let Ok(service) = content_search::shared_service() {
             let _ = service.ensure_roots(&self.scope_roots());
         }
@@ -215,6 +235,10 @@ impl GlobalSearchWindow {
     }
 
     fn schedule_live_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.scope.allows_live_search() {
+            self.cancel_live_search();
+            return;
+        }
         let query = self.query_input.read(cx).value().trim().to_string();
         if query.chars().count() < 2 {
             self.cancel_live_search();
@@ -234,6 +258,11 @@ impl GlobalSearchWindow {
     }
 
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.loading && !self.scope.allows_live_search() {
+            self.error = Some("当前范围正在搜索，请等待本次搜索结束".into());
+            cx.notify();
+            return;
+        }
         let query = query.trim().to_string();
         if query.is_empty() {
             self.error = Some("请输入搜索内容".into());
@@ -372,18 +401,37 @@ impl GlobalSearchWindow {
                         .cleanable(true),
                 ),
             )
-            .child(
+            .child({
+                let selected_scope = self.scope;
                 Button::new("global-search-scope")
                     .ghost()
                     .compact()
                     .label(format!("范围 · {}", self.scope.label()))
-                    .tooltip(format!("当前搜索范围：{}。点击切换", self.scope.label()))
-                    .on_click(
-                        cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.cycle_scope(window, cx)
-                        }),
-                    ),
-            )
+                    .tooltip(format!("当前搜索范围：{}", self.scope.label()))
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        menu.item(
+                            PopupMenuItem::new("当前文件夹")
+                                .checked(selected_scope == GlobalSearchScope::CurrentFolder)
+                                .action(Box::new(SetGlobalSearchScopeCurrentFolder)),
+                        )
+                        .item(
+                            PopupMenuItem::new("收藏文件夹")
+                                .checked(selected_scope == GlobalSearchScope::Favorites)
+                                .action(Box::new(SetGlobalSearchScopeFavorites)),
+                        )
+                        .item(
+                            PopupMenuItem::new("本地磁盘")
+                                .checked(selected_scope == GlobalSearchScope::LocalDisks)
+                                .action(Box::new(SetGlobalSearchScopeLocalDisks)),
+                        )
+                        .item(
+                            PopupMenuItem::new("网络卷")
+                                .checked(selected_scope == GlobalSearchScope::NetworkVolumes)
+                                .action(Box::new(SetGlobalSearchScopeNetworkVolumes)),
+                        )
+                    })
+            })
             .child(
                 Button::new("global-search-submit")
                     .primary()
@@ -541,7 +589,7 @@ impl GlobalSearchWindow {
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("“{}”的名称结果", results.query))
                     .child(format!("{} 项", results.total_entries))
-                    .when(results.truncated, |this| this.child("结果已截断")),
+                    .when(results.truncated, |this| this.child("结果不完整")),
             )
             .child(if results.groups.is_empty() {
                 div()
@@ -586,7 +634,7 @@ impl GlobalSearchWindow {
                     .child(format!("{} 个文件", results.files.len()))
                     .child(format!("{} 处匹配", results.total_matches))
                     .when(results.partial, |this| this.child("索引更新中"))
-                    .when(results.truncated, |this| this.child("结果已截断")),
+                    .when(results.truncated, |this| this.child("结果不完整")),
             )
             .child(if results.files.is_empty() {
                 div()
@@ -749,12 +797,12 @@ impl Render for GlobalSearchWindow {
             if let Some(results) = self.content_results.as_ref() {
                 self.render_content_results(results, cx)
             } else {
-                empty_global_search_state(cx)
+                empty_global_search_state(cx, self.scope.allows_live_search())
             }
         } else if let Some(results) = self.name_results.as_ref() {
             self.render_name_results(results, cx)
         } else {
-            empty_global_search_state(cx)
+            empty_global_search_state(cx, self.scope.allows_live_search())
         };
 
         v_flex()
@@ -764,6 +812,26 @@ impl Render for GlobalSearchWindow {
             .p_3()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchScopeCurrentFolder, window, cx| {
+                    this.set_scope(GlobalSearchScope::CurrentFolder, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchScopeFavorites, window, cx| {
+                    this.set_scope(GlobalSearchScope::Favorites, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchScopeLocalDisks, window, cx| {
+                    this.set_scope(GlobalSearchScope::LocalDisks, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchScopeNetworkVolumes, window, cx| {
+                    this.set_scope(GlobalSearchScope::NetworkVolumes, window, cx)
+                }),
+            )
             .child(
                 h_flex()
                     .gap_2()
@@ -791,7 +859,7 @@ impl Render for GlobalSearchWindow {
     }
 }
 
-fn empty_global_search_state(cx: &App) -> AnyElement {
+fn empty_global_search_state(cx: &App, allows_live_search: bool) -> AnyElement {
     v_flex()
         .size_full()
         .items_center()
@@ -809,7 +877,11 @@ fn empty_global_search_state(cx: &App) -> AnyElement {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("名称模式搜索文件名，内容模式搜索本地文本内容"),
+                .child(if allows_live_search {
+                    "输入至少两个字符后自动搜索"
+                } else {
+                    "当前范围较大，请输入关键词后按 Enter 或点击搜索"
+                }),
         )
         .into_any_element()
 }
@@ -897,6 +969,7 @@ pub(crate) fn open_global_search_window(
     current_folder: PathBuf,
     favorite_roots: Vec<PathBuf>,
     local_roots: Vec<PathBuf>,
+    network_roots: Vec<PathBuf>,
     cx: &mut App,
 ) -> Result<(), String> {
     let options = WindowOptions {
@@ -910,7 +983,14 @@ pub(crate) fn open_global_search_window(
     };
     gpui_kit::open_window(options, cx, move |window, cx| {
         cx.new(|cx| {
-            GlobalSearchWindow::new(current_folder, favorite_roots, local_roots, window, cx)
+            GlobalSearchWindow::new(
+                current_folder,
+                favorite_roots,
+                local_roots,
+                network_roots,
+                window,
+                cx,
+            )
         })
     })
     .map(|_| ())
