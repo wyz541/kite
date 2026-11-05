@@ -8,6 +8,8 @@ pub mod ffi;
 pub mod file_watcher;
 pub mod fs;
 pub mod platform;
+#[cfg(windows)]
+pub mod recycle_bin;
 pub mod session;
 pub mod text_editor;
 pub mod ui_preferences;

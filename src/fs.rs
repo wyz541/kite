@@ -475,7 +475,14 @@ pub fn rename_entry(path: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 pub fn recycle_entry(path: &Path) -> Result<(), String> {
-    trash::delete(path).map_err(|error| format!("移到回收站失败：{error}"))
+    #[cfg(windows)]
+    {
+        crate::recycle_bin::recycle(path)
+    }
+    #[cfg(not(windows))]
+    {
+        trash::delete(path).map_err(|error| format!("移到回收站失败：{error}"))
+    }
 }
 
 #[cfg(target_os = "windows")]
