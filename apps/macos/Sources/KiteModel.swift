@@ -1263,8 +1263,16 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    func globalSearchScopeHasRoots(_ scope: GlobalSearchScope) -> Bool {
+        !roots(for: scope).isEmpty
+    }
+
     private func searchRoots() -> [String] {
-        switch globalSearchScope {
+        roots(for: globalSearchScope)
+    }
+
+    private func roots(for scope: GlobalSearchScope) -> [String] {
+        switch scope {
         case .currentFolder:
             return [currentPath]
         case .favorites:
@@ -1274,10 +1282,27 @@ final class KiteModel: ObservableObject {
                 .filter { ["fixed", "usb", "removable"].contains($0.kind) }
                 .map(\.path)
         case .networkVolumes:
-            return volumes
+            var roots = volumes
                 .filter { $0.kind == "network" }
                 .map(\.path)
+            roots.append(contentsOf: favorites
+                .filter { $0.isDirectory && isNetworkPath($0.path) }
+                .map(\.path))
+            if roots.isEmpty && isNetworkPath(currentPath) {
+                roots.append(currentPath)
+            }
+            var seen = Set<String>()
+            return roots.filter { seen.insert($0).inserted }
         }
+    }
+
+    private func isNetworkPath(_ path: String) -> Bool {
+        guard let values = try? URL(fileURLWithPath: path).resourceValues(
+            forKeys: [.volumeIsLocalKey]
+        ) else {
+            return false
+        }
+        return values.volumeIsLocal == false
     }
 
     private func scheduleGlobalSearch() {

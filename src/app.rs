@@ -4666,11 +4666,22 @@ impl KiteApp {
             })
             .map(|volume| volume.path.clone())
             .collect::<Vec<_>>();
-        let network_roots = volumes
+        let mut network_roots = volumes
             .iter()
             .filter(|volume| matches!(volume.kind, VolumeKind::Network))
             .map(|volume| volume.path.clone())
             .collect::<Vec<_>>();
+        network_roots.extend(
+            favorite_roots
+                .iter()
+                .filter(|path| crate::devices::is_network_path(path))
+                .cloned(),
+        );
+        if network_roots.is_empty() && crate::devices::is_network_path(&self.current_dir) {
+            network_roots.push(self.current_dir.clone());
+        }
+        network_roots.sort();
+        network_roots.dedup();
         match global_search_window::open_global_search_window(
             self.current_dir.clone(),
             favorite_roots,
