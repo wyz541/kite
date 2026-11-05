@@ -10,7 +10,8 @@ if ! grep -Fq "| 能力 | Windows | macOS |" "$matrix"; then
 fi
 
 required_features=(
-  "全局工具栏搜索"
+  "独立全局搜索窗口"
+  "全局文件内容搜索"
   "分栏批量选择"
   "批量复制、剪切和删除"
   "自定义详细信息列"

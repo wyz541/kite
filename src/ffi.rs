@@ -6,6 +6,7 @@ use std::sync::{
 use std::time::UNIX_EPOCH;
 
 use crate::archive::{self, ArchiveFormat};
+use crate::content_search::{self, ContentFileMatch, ContentLineMatch, ContentSearchSnapshot};
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
 use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory, transfer_entry};
@@ -97,6 +98,48 @@ pub struct TextDocumentDto {
     pub has_bom: bool,
     pub content_sha256: String,
     pub byte_len: u64,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ContentLineMatchDto {
+    pub line_number: u64,
+    pub column_start: Option<u64>,
+    pub column_end: Option<u64>,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ContentFileMatchDto {
+    pub path: String,
+    pub root: String,
+    pub relative_path: String,
+    pub name: String,
+    pub kind_label: String,
+    pub size: u64,
+    pub modified_unix_ms: Option<i64>,
+    pub score: f64,
+    pub match_count: u64,
+    pub matches: Vec<ContentLineMatchDto>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ContentSearchResultDto {
+    pub query: String,
+    pub roots: Vec<String>,
+    pub files: Vec<ContentFileMatchDto>,
+    pub index_state: String,
+    pub partial: bool,
+    pub truncated: bool,
+    pub scanned_documents: u64,
+    pub total_matches: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct ContentIndexStatusDto {
+    pub state: String,
+    pub indexed_files: u64,
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
@@ -230,6 +273,73 @@ impl KiteCore {
         {
             cancel.store(true, Ordering::Relaxed);
         }
+    }
+
+    pub fn prepare_content_search(&self, roots: Vec<String>) -> Result<(), KiteError> {
+        let service = content_search::shared_service().map_err(KiteError::operation)?;
+        let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        service
+            .ensure_roots(&roots)
+            .map(|_| ())
+            .map_err(KiteError::operation)
+    }
+
+    pub fn content_search_status(&self) -> ContentIndexStatusDto {
+        match content_search::shared_service() {
+            Ok(service) => {
+                let status = service.status();
+                ContentIndexStatusDto {
+                    state: status.state.as_str().to_string(),
+                    indexed_files: status.indexed_files,
+                    message: status.message,
+                }
+            }
+            Err(message) => ContentIndexStatusDto {
+                state: "error".to_string(),
+                indexed_files: 0,
+                message: Some(message),
+            },
+        }
+    }
+
+    pub fn note_content_search_interaction(&self) {
+        if let Ok(service) = content_search::shared_service() {
+            service.note_interaction();
+        }
+    }
+
+    pub fn set_content_search_paused(&self, paused: bool) {
+        if let Ok(service) = content_search::shared_service() {
+            service.set_indexing_paused(paused);
+        }
+    }
+
+    pub fn cancel_content_search(&self) {
+        if let Ok(service) = content_search::shared_service() {
+            service.cancel_search();
+        }
+    }
+
+    pub fn clear_content_search_index(&self) -> Result<(), KiteError> {
+        content_search::shared_service()
+            .map_err(KiteError::operation)?
+            .clear()
+            .map_err(KiteError::operation)
+    }
+
+    pub fn search_content(
+        &self,
+        roots: Vec<String>,
+        query: String,
+        regex: bool,
+        max_files: u32,
+    ) -> Result<Option<ContentSearchResultDto>, KiteError> {
+        let service = content_search::shared_service().map_err(KiteError::operation)?;
+        let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        service
+            .search(&roots, &query, regex, max_files.max(1) as usize)
+            .map(|snapshot| snapshot.map(content_search_result_dto))
+            .map_err(KiteError::operation)
     }
 
     pub fn devices(&self) -> DeviceSnapshotDto {
@@ -410,6 +520,48 @@ fn entry_dto(entry: &FileEntry) -> DirectoryEntryDto {
     }
 }
 
+fn content_search_result_dto(snapshot: ContentSearchSnapshot) -> ContentSearchResultDto {
+    ContentSearchResultDto {
+        query: snapshot.query,
+        roots: snapshot
+            .roots
+            .iter()
+            .map(|root| root.to_string_lossy().into_owned())
+            .collect(),
+        files: snapshot.files.iter().map(content_file_match_dto).collect(),
+        index_state: snapshot.index_state.as_str().to_string(),
+        partial: snapshot.partial,
+        truncated: snapshot.truncated,
+        scanned_documents: snapshot.scanned_documents,
+        total_matches: snapshot.total_matches,
+        duration_ms: snapshot.duration_ms,
+    }
+}
+
+fn content_file_match_dto(file: &ContentFileMatch) -> ContentFileMatchDto {
+    ContentFileMatchDto {
+        path: file.path.to_string_lossy().into_owned(),
+        root: file.root.to_string_lossy().into_owned(),
+        relative_path: file.relative_path.clone(),
+        name: file.name.clone(),
+        kind_label: file.kind_label.clone(),
+        size: file.size,
+        modified_unix_ms: file.modified_unix_ms,
+        score: file.score as f64,
+        match_count: file.match_count,
+        matches: file.matches.iter().map(content_line_match_dto).collect(),
+    }
+}
+
+fn content_line_match_dto(line: &ContentLineMatch) -> ContentLineMatchDto {
+    ContentLineMatchDto {
+        line_number: line.line_number,
+        column_start: line.column_start,
+        column_end: line.column_end,
+        text: line.text.clone(),
+    }
+}
+
 fn vcs_status_text(status: VcsStatus) -> String {
     format!("{} ({})", status.label(), status.code())
 }
@@ -494,6 +646,40 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].name, "target.txt");
         assert!(!result.truncated);
+    }
+
+    #[test]
+    fn core_searches_file_content_and_returns_lines() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-core-content-search-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("create content search fixture");
+        std::fs::write(
+            directory.join("notes.txt"),
+            b"first line\nsearch needle\nlast line\n",
+        )
+        .expect("write content search fixture");
+
+        let core = KiteCore::new();
+        let root = directory.to_string_lossy().into_owned();
+        core.prepare_content_search(vec![root.clone()])
+            .expect("prepare content index");
+        let result = core
+            .search_content(vec![root], "needle".to_string(), false, 20)
+            .expect("content search succeeds")
+            .expect("content search returns a result");
+        let _ = std::fs::remove_dir_all(&directory);
+
+        assert_eq!(result.files.len(), 1);
+        assert_eq!(result.files[0].name, "notes.txt");
+        assert_eq!(result.files[0].matches[0].line_number, 2);
+        assert!(result.files[0].matches[0].text.contains("needle"));
+        assert!(result.total_matches >= 1);
     }
 
     #[test]

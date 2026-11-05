@@ -559,6 +559,104 @@ struct BrowserGlobalSearchState {
     let truncated: Bool
 }
 
+enum GlobalSearchMode: String, CaseIterable, Identifiable {
+    case name
+    case content
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name: return "名称"
+        case .content: return "内容"
+        }
+    }
+}
+
+enum ContentSearchScope: String, CaseIterable, Identifiable {
+    case currentFolder
+    case favorites
+    case localDisks
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .currentFolder: return "当前文件夹"
+        case .favorites: return "收藏范围"
+        case .localDisks: return "本地磁盘"
+        }
+    }
+}
+
+struct BrowserContentLineMatch: Identifiable {
+    let lineNumber: UInt64
+    let columnStart: UInt64?
+    let columnEnd: UInt64?
+    let text: String
+
+    var id: String { "\(lineNumber):\(columnStart ?? 0):\(text)" }
+}
+
+struct BrowserContentFileMatch: Identifiable {
+    let path: String
+    let root: String
+    let relativePath: String
+    let name: String
+    let kindLabel: String
+    let size: UInt64
+    let modifiedUnixMs: Int64?
+    let score: Double
+    let matchCount: UInt64
+    let matches: [BrowserContentLineMatch]
+
+    var id: String { path }
+
+    init(dto: ContentFileMatchDto) {
+        path = dto.path
+        root = dto.root
+        relativePath = dto.relativePath
+        name = dto.name
+        kindLabel = dto.kindLabel
+        size = dto.size
+        modifiedUnixMs = dto.modifiedUnixMs
+        score = dto.score
+        matchCount = dto.matchCount
+        matches = dto.matches.map { line in
+            BrowserContentLineMatch(
+                lineNumber: line.lineNumber,
+                columnStart: line.columnStart,
+                columnEnd: line.columnEnd,
+                text: line.text
+            )
+        }
+    }
+}
+
+struct BrowserContentSearchState {
+    let query: String
+    let roots: [String]
+    let files: [BrowserContentFileMatch]
+    let indexState: String
+    let partial: Bool
+    let truncated: Bool
+    let scannedDocuments: UInt64
+    let totalMatches: UInt64
+    let durationMs: UInt64
+
+    init(dto: ContentSearchResultDto) {
+        query = dto.query
+        roots = dto.roots
+        files = dto.files.map(BrowserContentFileMatch.init(dto:))
+        indexState = dto.indexState
+        partial = dto.partial
+        truncated = dto.truncated
+        scannedDocuments = dto.scannedDocuments
+        totalMatches = dto.totalMatches
+        durationMs = dto.durationMs
+    }
+}
+
 struct UpdateDownloadState: Equatable {
     let downloadedBytes: UInt64
     let totalBytes: UInt64
@@ -592,9 +690,11 @@ final class KiteModel: ObservableObject {
     private var storedColumnViewRules: StoredColumnViewRules
     private var columnSearchGeneration: UInt64 = 0
     private var globalSearchGeneration: UInt64 = 0
+    private var contentSearchGeneration: UInt64 = 0
     private var columnSearchDebounceTask: Task<Void, Never>?
     private var columnAutoRefreshGeneration: UInt64 = 0
     private var columnAutoRefreshTask: Task<Void, Never>?
+    private var contentSearchPowerPolicyTask: Task<Void, Never>?
     private lazy var columnDirectoryWatcher = DirectoryWatcher { [weak self] in
         self?.directoryContentsDidChange()
     }
@@ -613,8 +713,12 @@ final class KiteModel: ObservableObject {
     @Published var columnSearchText = ""
     @Published private(set) var columnSearchLoading = false
     @Published var globalSearchText = ""
+    @Published var globalSearchMode: GlobalSearchMode = .name
+    @Published var contentSearchScope: ContentSearchScope = .currentFolder
     @Published private(set) var globalSearch: BrowserGlobalSearchState?
     @Published private(set) var globalSearchLoading = false
+    @Published private(set) var contentSearch: BrowserContentSearchState?
+    @Published private(set) var contentSearchLoading = false
 
     init(core: KiteCore = KiteCore()) {
         let storedColumnViewRules = Self.loadStoredColumnViewRules()
@@ -624,6 +728,18 @@ final class KiteModel: ObservableObject {
         self.volumes = core.devices().volumes
         restoreOrCreateTabs()
         syncColumnDirectoryWatchers()
+        updateContentSearchPowerPolicy()
+        contentSearchPowerPolicyTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { return }
+                self?.updateContentSearchPowerPolicy()
+            }
+        }
+    }
+
+    deinit {
+        contentSearchPowerPolicyTask?.cancel()
     }
 
     var activeTab: BrowserTab? {
@@ -925,7 +1041,27 @@ final class KiteModel: ObservableObject {
         columnSearchText = ""
     }
 
+    var hasGlobalSearchActivity: Bool {
+        globalSearch != nil
+            || globalSearchLoading
+            || contentSearch != nil
+            || contentSearchLoading
+    }
+
+    var currentSearchScopeTitle: String {
+        contentSearchScope.title
+    }
+
     func submitGlobalSearch() {
+        switch globalSearchMode {
+        case .name:
+            submitNameGlobalSearch()
+        case .content:
+            submitContentGlobalSearch()
+        }
+    }
+
+    private func submitNameGlobalSearch() {
         let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             clearGlobalSearch()
@@ -936,8 +1072,11 @@ final class KiteModel: ObservableObject {
         let generation = globalSearchGeneration
         let rootPath = currentPath
         core.cancelDirectorySearch()
+        core.cancelContentSearch()
         globalSearchLoading = true
+        contentSearchLoading = false
         globalSearch = nil
+        contentSearch = nil
         errorMessage = nil
         let core = self.core
 
@@ -965,11 +1104,127 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    private func submitContentGlobalSearch() {
+        let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            clearGlobalSearch()
+            return
+        }
+        let roots = contentSearchRoots()
+        guard !roots.isEmpty else {
+            errorMessage = "当前搜索范围没有可搜索的文件夹"
+            return
+        }
+
+        contentSearchGeneration &+= 1
+        let generation = contentSearchGeneration
+        core.cancelDirectorySearch()
+        core.cancelContentSearch()
+        core.noteContentSearchInteraction()
+        globalSearchLoading = false
+        contentSearchLoading = true
+        globalSearch = nil
+        contentSearch = nil
+        errorMessage = nil
+        let core = self.core
+
+        Task {
+            do {
+                try await Task.detached(priority: .utility) {
+                    try core.prepareContentSearch(roots: roots)
+                }.value
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try core.searchContent(
+                        roots: roots,
+                        query: query,
+                        regex: false,
+                        maxFiles: 50
+                    )
+                }.value
+
+                guard generation == self.contentSearchGeneration else { return }
+                self.contentSearchLoading = false
+                guard let result else { return }
+                self.contentSearch = BrowserContentSearchState(dto: result)
+                self.errorMessage = nil
+            } catch {
+                guard generation == self.contentSearchGeneration else { return }
+                self.contentSearchLoading = false
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func globalSearchModeDidChange() {
+        globalSearchGeneration &+= 1
+        contentSearchGeneration &+= 1
+        core.cancelDirectorySearch()
+        core.cancelContentSearch()
+        globalSearchLoading = false
+        contentSearchLoading = false
+        globalSearch = nil
+        contentSearch = nil
+        errorMessage = nil
+        if globalSearchMode == .content {
+            prepareContentIndex()
+        }
+    }
+
+    func contentSearchScopeDidChange() {
+        contentSearchGeneration &+= 1
+        core.cancelContentSearch()
+        contentSearchLoading = false
+        contentSearch = nil
+        if globalSearchMode == .content {
+            prepareContentIndex()
+        }
+    }
+
+    func noteContentSearchInteraction() {
+        core.noteContentSearchInteraction()
+    }
+
+    private func prepareContentIndex() {
+        updateContentSearchPowerPolicy()
+        let roots = contentSearchRoots()
+        guard !roots.isEmpty else { return }
+        let core = self.core
+        Task.detached(priority: .utility) {
+            try? core.prepareContentSearch(roots: roots)
+        }
+    }
+
+    private func contentSearchRoots() -> [String] {
+        switch contentSearchScope {
+        case .currentFolder:
+            return [currentPath]
+        case .favorites:
+            return favorites.filter(\.isDirectory).map(\.path)
+        case .localDisks:
+            return volumes
+                .filter { ["fixed", "usb", "removable"].contains($0.kind) }
+                .map(\.path)
+        }
+    }
+
+    private func updateContentSearchPowerPolicy() {
+        let processInfo = ProcessInfo.processInfo
+        let thermalPressure = processInfo.thermalState == .serious
+            || processInfo.thermalState == .critical
+        core.setContentSearchPaused(
+            paused: processInfo.isLowPowerModeEnabled || thermalPressure
+        )
+    }
+
     func clearGlobalSearch() {
         globalSearchGeneration &+= 1
+        contentSearchGeneration &+= 1
         core.cancelDirectorySearch()
+        core.cancelContentSearch()
         globalSearchLoading = false
+        contentSearchLoading = false
         globalSearch = nil
+        contentSearch = nil
         globalSearchText = ""
     }
 
@@ -1034,7 +1289,7 @@ final class KiteModel: ObservableObject {
     }
 
     func refresh() {
-        if globalSearch != nil || globalSearchLoading {
+        if hasGlobalSearchActivity {
             submitGlobalSearch()
             reloadVolumes()
             return

@@ -2,7 +2,7 @@
 
 Kite macOS uses SwiftUI for the application shell and AppKit for native file-system integration.
 
-The Rust `kite_core` library provides file listing, sorting, device discovery, VCS state, and typed UniFFI records.
+The Rust `kite_core` library provides file listing, sorting, device discovery, VCS state, indexed content search, and typed UniFFI records.
 The Swift application does not embed GPUI.
 The macOS 26 build uses Liquid Glass for the navigation shell, tab rail, sidebar, selection lens, preview pane, and status bar.
 macOS 13 through 15 use a native material fallback.
@@ -34,7 +34,9 @@ The build script creates `apps/macos/build/Kite.app`.
 
 - SwiftUI column browser.
 - Column multi-selection with range and toggle selection.
-- Global toolbar search over the active directory tree.
+- Independent global search window for file names or indexed file content.
+- `Command+Shift+F` opens the global search window.
+- Content search scopes: current folder, favorites, and local disks.
 - Configurable detail columns and persisted column-width presets.
 - SwiftUI tab rail with new, close, and switch commands.
 - Tab and directory restoration on app relaunch.
@@ -70,7 +72,8 @@ Kite handles `misc/mvis` and `FNDR/show` Apple Events for reveal requests.
 
 - `ContentView.swift`: window shell, tab rail, breadcrumb toolbar, and status bar.
 - `KiteSidebar.swift`: locations, favorites, and volumes.
-- `KiteColumnBrowser.swift`: column cards, file rows, and context menus.
+- `KiteColumnBrowser.swift`: column cards, file rows, and search result views.
+- `KiteGlobalSearchWindow.swift`: separate global search window.
 - `KitePreviewPane.swift`: Quick Look preview, actions, and metadata.
 - `GlassSurface.swift`: Liquid Glass components, fallback materials, and the Kite backdrop.
 
