@@ -613,6 +613,7 @@ enum GlobalSearchScope: String, CaseIterable, Identifiable {
     case currentFolder
     case favorites
     case localDisks
+    case networkVolumes
 
     var id: String { rawValue }
 
@@ -620,8 +621,17 @@ enum GlobalSearchScope: String, CaseIterable, Identifiable {
         switch self {
         case .currentFolder: return "当前文件夹"
         case .favorites: return "收藏文件夹"
-        case .localDisks: return "所有磁盘"
+        case .localDisks: return "本地磁盘"
+        case .networkVolumes: return "网络卷"
         }
+    }
+
+    var allowsLiveSearch: Bool {
+        self == .currentFolder
+    }
+
+    var preparesContentIndexInBackground: Bool {
+        self == .currentFolder || self == .favorites
     }
 }
 
@@ -1091,6 +1101,10 @@ final class KiteModel: ObservableObject {
     }
 
     func submitGlobalSearch() {
+        if !globalSearchScope.allowsLiveSearch && (globalSearchLoading || contentSearchLoading) {
+            errorMessage = "当前范围正在搜索，请等待本次搜索结束"
+            return
+        }
         cancelGlobalSearchDebounce()
         switch globalSearchMode {
         case .name:
@@ -1239,6 +1253,7 @@ final class KiteModel: ObservableObject {
     }
 
     private func prepareContentIndex() {
+        guard globalSearchScope.preparesContentIndexInBackground else { return }
         updateContentSearchPowerPolicy()
         let roots = searchRoots()
         guard !roots.isEmpty else { return }
@@ -1256,13 +1271,18 @@ final class KiteModel: ObservableObject {
             return favorites.filter(\.isDirectory).map(\.path)
         case .localDisks:
             return volumes
-                .filter { ["fixed", "usb", "removable", "network"].contains($0.kind) }
+                .filter { ["fixed", "usb", "removable"].contains($0.kind) }
+                .map(\.path)
+        case .networkVolumes:
+            return volumes
+                .filter { $0.kind == "network" }
                 .map(\.path)
         }
     }
 
     private func scheduleGlobalSearch() {
         cancelGlobalSearchDebounce()
+        guard globalSearchScope.allowsLiveSearch else { return }
         let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.count >= 2 else { return }
         globalSearchDebounceTask = Task { [weak self] in
