@@ -1445,8 +1445,8 @@ struct KiteGlobalSearchResults: View {
                         .padding(.vertical, 2)
                         .background(Color.primary.opacity(0.055), in: Capsule())
                     if search.truncated {
-                        Text("1000+")
-                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        Text("结果不完整")
+                            .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
                 } else {
