@@ -47,6 +47,13 @@ Kite v0.6.55 adds a separate global search window on Windows and macOS. Search n
 - Add the global search toolbar action and menu command.
 - Reuse the shared Rust index and UniFFI result records.
 
+## Windows Recycle Bin
+
+- Recover when Windows reports `Some operations were aborted`.
+- Retry through the interactive Windows Shell operation.
+- Prompt before permanent deletion when the Recycle Bin cannot accept the item.
+- Show clear cancellation, permission, and missing-path messages.
+
 ## Verification
 
 - Rust formatting check.
@@ -58,6 +65,7 @@ Kite v0.6.55 adds a separate global search window on Windows and macOS. Search n
 - Windows Clippy.
 - Windows release build.
 - Windows Chrome and Edge regression tests.
+- Windows Recycle Bin fallback compile and regression checks.
 - Linux checks.
 - Platform parity check.
 - Release parity check.
