@@ -262,6 +262,22 @@ enum KitePlatform {
         URL(fileURLWithPath: path).standardizedFileURL.path != "/"
     }
 
+    static func canCompress(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        return canModify(path) && url.deletingLastPathComponent().path != url.path
+    }
+
+    static func archiveFormat(_ path: String) -> String? {
+        let name = URL(fileURLWithPath: path).lastPathComponent.lowercased()
+        if name.hasSuffix(".zip") {
+            return "zip"
+        }
+        if name.hasSuffix(".tar.gz") || name.hasSuffix(".tgz") {
+            return "tar.gz"
+        }
+        return nil
+    }
+
     static var canSetDefaultFolderHandler: Bool {
         if #available(macOS 26.0, *) {
             return false

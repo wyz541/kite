@@ -75,6 +75,22 @@ jobs:
         shell: pwsh
         run: ./.github/scripts/windows-drag-upload-e2e.ps1 -KiteExe target/release/kite-explorer.exe -OutputDir "$env:RUNNER_TEMP\windows-drag-e2e"
 
+      - name: Build Windows release package
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Upload Windows release package
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/Kite.exe
+            dist/Kite-v*-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload Windows drag E2E logs
         if: failure()
         uses: actions/upload-artifact@v4

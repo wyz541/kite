@@ -9,6 +9,7 @@ use gpui_kit::prelude::StatefulInteractiveElement as _;
 use gpui_kit::*;
 
 use crate::actions::{ContextMenuAction, ContextMenuCommand, VcsMenuCommand};
+use crate::archive;
 use crate::platform::HostPlatform;
 
 #[cfg(target_os = "windows")]
@@ -267,6 +268,7 @@ trait ContextMenuProvider {
 }
 
 struct CoreMenuProvider;
+struct ArchiveMenuProvider;
 struct VcsMenuProvider;
 struct SystemMenuProvider;
 struct RefreshMenuProvider;
@@ -370,6 +372,53 @@ impl ContextMenuProvider for CoreMenuProvider {
     }
 }
 
+impl ContextMenuProvider for ArchiveMenuProvider {
+    fn append(
+        &self,
+        target: &ContextMenuTarget,
+        _: ContextMenuPolicy,
+        model: &mut ContextMenuModel,
+    ) {
+        let can_compress = !target.loading
+            && target.supports_transfer_ops
+            && !target.is_shell_namespace
+            && target.path.parent().is_some();
+        let can_extract = !target.loading
+            && target.supports_transfer_ops
+            && !target.is_shell_namespace
+            && !target.is_dir
+            && archive::is_supported_archive(&target.path);
+
+        model.separator();
+        model.submenu(
+            "压缩",
+            IconName::FileArchive,
+            can_compress,
+            vec![
+                archive_menu_item("ZIP (.zip)", ContextMenuCommand::CompressZip, can_compress),
+                archive_menu_item(
+                    "TAR.GZ (.tar.gz)",
+                    ContextMenuCommand::CompressTarGz,
+                    can_compress,
+                ),
+            ],
+        );
+        model.submenu(
+            "解压",
+            IconName::FolderOpen,
+            can_extract,
+            vec![
+                archive_menu_item(
+                    "解压到当前文件夹",
+                    ContextMenuCommand::ExtractHere,
+                    can_extract,
+                ),
+                archive_menu_item("解压到…", ContextMenuCommand::ExtractTo, can_extract),
+            ],
+        );
+    }
+}
+
 impl ContextMenuProvider for VcsMenuProvider {
     fn append(
         &self,
@@ -420,7 +469,6 @@ impl ContextMenuProvider for RefreshMenuProvider {
         if policy.compact {
             return;
         }
-        model.separator();
         model.item(
             "刷新",
             IconName::RotateCw,
@@ -520,6 +568,19 @@ fn svn_menu_entries(enabled: bool) -> Vec<ContextMenuNode> {
     ]
 }
 
+fn archive_menu_item(
+    label: &'static str,
+    command: ContextMenuCommand,
+    enabled: bool,
+) -> ContextMenuNode {
+    ContextMenuNode::Item {
+        label,
+        icon: IconName::FileArchive,
+        command,
+        enabled,
+    }
+}
+
 fn menu_item(
     label: &'static str,
     icon: IconName,
@@ -535,11 +596,12 @@ fn menu_item(
 }
 
 fn build_model(target: &ContextMenuTarget, policy: ContextMenuPolicy) -> ContextMenuModel {
-    let providers: [&dyn ContextMenuProvider; 4] = [
+    let providers: [&dyn ContextMenuProvider; 5] = [
+        &RefreshMenuProvider,
         &CoreMenuProvider,
+        &ArchiveMenuProvider,
         &VcsMenuProvider,
         &SystemMenuProvider,
-        &RefreshMenuProvider,
     ];
     let mut model = ContextMenuModel::default();
     for provider in providers {
@@ -677,6 +739,27 @@ mod tests {
         )
     }
 
+    fn archive_target() -> ContextMenuTarget {
+        ContextMenuTarget::entry(
+            PathBuf::from(r"C:\repo\report.zip"),
+            "report.zip".to_string(),
+            false,
+            PathBuf::from(r"C:\repo"),
+            ContextMenuCapabilities {
+                loading: false,
+                can_paste: true,
+                git_available: false,
+                svn_available: false,
+                supports_transfer_ops: true,
+                supports_cut: true,
+                supports_rename: true,
+                supports_delete: true,
+                supports_favorite: true,
+                is_shell_namespace: false,
+            },
+        )
+    }
+
     fn windows_policy() -> ContextMenuPolicy {
         ContextMenuPolicy::for_platform(HostPlatform::Windows)
     }
@@ -727,8 +810,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
+        assert_eq!(labels.first(), Some(&"刷新"));
         assert!(labels.contains(&"Git"));
         assert!(labels.contains(&"SVN"));
+        assert!(labels.contains(&"压缩"));
+        assert!(labels.contains(&"解压"));
         assert!(labels.contains(&"新建文件夹"));
         assert!(labels.contains(&"新建文件"));
         assert!(labels.contains(&"添加到收藏"));
@@ -741,6 +827,67 @@ mod tests {
                 label: "显示更多选项 (Show more options)",
                 command: ContextMenuCommand::SystemMenu,
                 enabled: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn compression_menu_contains_zip_and_tar_gz() {
+        let model = build_model(&target(), windows_policy());
+        let commands = submenu_entries(&model, "压缩")
+            .iter()
+            .filter_map(|entry| match entry {
+                ContextMenuNode::Item { command, .. } => Some(*command),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(commands.contains(&ContextMenuCommand::CompressZip));
+        assert!(commands.contains(&ContextMenuCommand::CompressTarGz));
+    }
+
+    #[test]
+    fn extraction_menu_is_only_enabled_for_supported_archives() {
+        let archive_model = build_model(&archive_target(), windows_policy());
+        let commands = submenu_entries(&archive_model, "解压")
+            .iter()
+            .filter_map(|entry| match entry {
+                ContextMenuNode::Item {
+                    command, enabled, ..
+                } if *enabled => Some(*command),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(commands.contains(&ContextMenuCommand::ExtractHere));
+        assert!(commands.contains(&ContextMenuCommand::ExtractTo));
+
+        let text_model = build_model(
+            &ContextMenuTarget::entry(
+                PathBuf::from(r"C:\repo\notes.txt"),
+                "notes.txt".to_string(),
+                false,
+                PathBuf::from(r"C:\repo"),
+                ContextMenuCapabilities {
+                    loading: false,
+                    can_paste: true,
+                    git_available: false,
+                    svn_available: false,
+                    supports_transfer_ops: true,
+                    supports_cut: true,
+                    supports_rename: true,
+                    supports_delete: true,
+                    supports_favorite: true,
+                    is_shell_namespace: false,
+                },
+            ),
+            windows_policy(),
+        );
+        assert!(text_model.entries.iter().any(|entry| matches!(
+            entry,
+            ContextMenuNode::Submenu {
+                label: "解压",
+                enabled: false,
                 ..
             }
         )));
@@ -852,6 +999,9 @@ mod tests {
 
         assert!(!labels.contains(&"Git"));
         assert!(!labels.contains(&"SVN"));
+        assert!(labels.contains(&"压缩"));
+        assert!(!labels.contains(&"解压"));
+        assert!(!labels.contains(&"刷新"));
         assert!(labels.contains(&"macOS 系统菜单…"));
     }
 

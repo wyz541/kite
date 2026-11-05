@@ -103,6 +103,7 @@ macOS 可与 Finder 共享文件剪贴板。
 - Windows 使用 Ctrl 点击切换选择，Shift 点击选择范围。
 - macOS 使用 Command 点击切换选择，Shift 点击选择范围。
 - 将文件或文件夹拷贝到指定目录。
+- 右键菜单支持 ZIP 和 TAR.GZ 压缩、解压。
 - 与系统文件剪贴板互通。
 - 复制冲突自动生成唯一名称，不静默覆盖。
 - 拒绝将文件夹复制到自身内部。
@@ -149,6 +150,7 @@ macOS 可与 Finder 共享文件剪贴板。
 | 全局工具栏搜索 | 已支持 | 已支持 |
 | 分栏批量选择 | 已支持 | 已支持 |
 | 批量复制、剪切和删除 | 已支持 | 已支持 |
+| ZIP、TAR.GZ 压缩与解压 | 已支持 | 已支持 |
 | 自定义详细信息列 | 已支持 | 已支持 |
 | 列宽预设与布局恢复 | 已支持 | 已支持 |
 | 文件预览 | GPUI 预览 | Quick Look |
@@ -259,7 +261,7 @@ cargo clippy --locked --all-targets --features windows-ui -- -D warnings
       └───────────────────┘     └───────────────────┘
 ```
 
-- Rust Core 负责文件读取、搜索、排序、会话、收藏、更新和 VCS。
+- Rust Core 负责文件读取、搜索、排序、会话、收藏、归档、更新和 VCS。
 - Windows 前端负责 GPUI 界面、Windows Shell、原生菜单、系统剪贴板和 Explorer 集成。
 - macOS 前端负责 SwiftUI 界面、AppKit 窗口、系统剪贴板、Quick Look 和 Finder 集成。
 - 两端不共享 UI 渲染器，只共享经过类型化的 Core 能力。
@@ -271,6 +273,7 @@ cargo clippy --locked --all-targets --features windows-ui -- -D warnings
 - [项目宪法与设计原则](docs/design/manifesto.md)
 - [平台边界](docs/architecture/platforms.md)
 - [右键菜单架构](docs/architecture/context-menu.md)
+- [压缩与解压实现](docs/architecture/context-menu.md#压缩菜单)
 - [默认文件管理器](docs/architecture/default-file-manager.md)
 - [更新器架构](docs/architecture/updater.md)
 - [收藏架构](docs/architecture/favorites.md)
