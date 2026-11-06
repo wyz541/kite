@@ -106,30 +106,13 @@ private struct KiteGlobalSearchWindowView: View {
             .controlSize(.small)
             .frame(width: 110)
 
-            Menu {
-                ForEach(GlobalSearchScope.allCases) { scope in
-                    Button {
-                        model.globalSearchScope = scope
-                    } label: {
-                        if model.globalSearchScope == scope {
-                            Label(scope.title, systemImage: "checkmark")
-                        } else {
-                            Text(scope.title)
-                        }
-                    }
-                    .disabled(!model.globalSearchScopeHasRoots(scope))
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "scope")
-                        .font(.system(size: 9, weight: .semibold))
-                    Text(model.currentSearchScopeTitle)
-                        .lineLimit(1)
-                }
-                .font(.system(size: 10.5, weight: .medium))
+            HStack(spacing: 4) {
+                Image(systemName: "scope")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                KiteSearchScopeControl(model: model)
+                    .frame(width: 190, height: 22)
             }
-            .menuStyle(.borderlessButton)
-            .frame(width: 140)
 
             TextField(
                 model.globalSearchMode == .content ? "搜索文件内容" : "搜索文件名",

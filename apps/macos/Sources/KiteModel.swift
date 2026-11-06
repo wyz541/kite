@@ -622,7 +622,16 @@ enum GlobalSearchScope: String, CaseIterable, Identifiable {
         case .currentFolder: return "当前文件夹"
         case .favorites: return "收藏文件夹"
         case .localDisks: return "本地磁盘"
-        case .rootDisk: return "根磁盘"
+        case .rootDisk: return "整个系统"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .currentFolder: return "folder"
+        case .favorites: return "star"
+        case .localDisks: return "internaldrive"
+        case .rootDisk: return "internaldrive.fill"
         }
     }
 
@@ -1098,6 +1107,46 @@ final class KiteModel: ObservableObject {
 
     var currentSearchScopeTitle: String {
         globalSearchScope.title
+    }
+
+    var currentSearchScopeSummary: String {
+        "\(globalSearchScope.title) · \(globalSearchScopeDetail(globalSearchScope))"
+    }
+
+    func globalSearchScopeMenuTitle(_ scope: GlobalSearchScope) -> String {
+        if let reason = globalSearchScopeDisabledReason(scope) {
+            return "\(scope.title) · \(reason)"
+        }
+        return "\(scope.title) · \(globalSearchScopeDetail(scope))"
+    }
+
+    func globalSearchScopeDisabledReason(_ scope: GlobalSearchScope) -> String? {
+        guard !globalSearchScopeHasRoots(scope) else { return nil }
+        switch scope {
+        case .currentFolder: return "当前文件夹不可用"
+        case .favorites: return "暂无收藏文件夹"
+        case .localDisks: return "未检测到本地磁盘"
+        case .rootDisk: return "系统根目录不可用"
+        }
+    }
+
+    func globalSearchScopeDetail(_ scope: GlobalSearchScope) -> String {
+        switch scope {
+        case .currentFolder:
+            if currentPath == "/" { return "/" }
+            let name = URL(fileURLWithPath: currentPath).lastPathComponent
+            return name.isEmpty ? currentPath : name
+        case .favorites:
+            let count = favorites.filter(\.isDirectory).count
+            return count == 1 ? "1 个位置" : "\(count) 个位置"
+        case .localDisks:
+            let count = volumes
+                .filter { ["fixed", "usb", "removable"].contains($0.kind) }
+                .count
+            return count == 1 ? "1 个卷" : "\(count) 个卷"
+        case .rootDisk:
+            return "/"
+        }
     }
 
     func submitGlobalSearch() {

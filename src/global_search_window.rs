@@ -55,6 +55,15 @@ impl GlobalSearchScope {
     fn prepares_content_index_in_background(self) -> bool {
         matches!(self, Self::CurrentFolder | Self::Favorites)
     }
+
+    fn icon(self) -> IconName {
+        match self {
+            Self::CurrentFolder => IconName::FolderOpen,
+            Self::Favorites => IconName::Star,
+            Self::LocalDisks => IconName::HardDrive,
+            Self::NetworkVolumes => IconName::Network,
+        }
+    }
 }
 
 struct GlobalNameResults {
@@ -153,6 +162,53 @@ impl GlobalSearchWindow {
             GlobalSearchScope::LocalDisks => self.local_roots.clone(),
             GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
         }
+    }
+
+    fn scope_has_roots(&self, scope: GlobalSearchScope) -> bool {
+        match scope {
+            GlobalSearchScope::CurrentFolder => self.current_folder.is_dir(),
+            GlobalSearchScope::Favorites => !self.favorite_roots.is_empty(),
+            GlobalSearchScope::LocalDisks => !self.local_roots.is_empty(),
+            GlobalSearchScope::NetworkVolumes => !self.network_roots.is_empty(),
+        }
+    }
+
+    fn scope_detail(&self, scope: GlobalSearchScope) -> String {
+        match scope {
+            GlobalSearchScope::CurrentFolder => self
+                .current_folder
+                .file_name()
+                .filter(|name| !name.is_empty())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| self.current_folder.display().to_string()),
+            GlobalSearchScope::Favorites => format!("{} 个位置", self.favorite_roots.len()),
+            GlobalSearchScope::LocalDisks => format!("{} 个卷", self.local_roots.len()),
+            GlobalSearchScope::NetworkVolumes => format!("{} 个卷", self.network_roots.len()),
+        }
+    }
+
+    fn scope_disabled_reason(&self, scope: GlobalSearchScope) -> Option<&'static str> {
+        if self.scope_has_roots(scope) {
+            return None;
+        }
+        match scope {
+            GlobalSearchScope::CurrentFolder => Some("当前文件夹不可用"),
+            GlobalSearchScope::Favorites => Some("暂无收藏文件夹"),
+            GlobalSearchScope::LocalDisks => Some("未检测到本地磁盘"),
+            GlobalSearchScope::NetworkVolumes => Some("未检测到网络卷"),
+        }
+    }
+
+    fn scope_menu_label(&self, scope: GlobalSearchScope) -> String {
+        compose_scope_menu_label(
+            scope.label(),
+            &self.scope_detail(scope),
+            self.scope_disabled_reason(scope),
+        )
+    }
+
+    fn scope_trigger_label(&self) -> String {
+        self.scope_menu_label(self.scope)
     }
 
     fn set_mode(&mut self, mode: GlobalSearchMode, window: &mut Window, cx: &mut Context<Self>) {
@@ -403,39 +459,56 @@ impl GlobalSearchWindow {
             )
             .child({
                 let selected_scope = self.scope;
-                let has_favorites = !self.favorite_roots.is_empty();
-                let has_local_roots = !self.local_roots.is_empty();
-                let has_network_roots = !self.network_roots.is_empty();
+                let trigger_label = self.scope_trigger_label();
+                let current_folder_label = self.scope_menu_label(GlobalSearchScope::CurrentFolder);
+                let favorites_label = self.scope_menu_label(GlobalSearchScope::Favorites);
+                let local_disks_label = self.scope_menu_label(GlobalSearchScope::LocalDisks);
+                let network_volumes_label =
+                    self.scope_menu_label(GlobalSearchScope::NetworkVolumes);
+                let has_current_folder = self.scope_has_roots(GlobalSearchScope::CurrentFolder);
+                let has_favorites = self.scope_has_roots(GlobalSearchScope::Favorites);
+                let has_local_roots = self.scope_has_roots(GlobalSearchScope::LocalDisks);
+                let has_network_roots = self.scope_has_roots(GlobalSearchScope::NetworkVolumes);
                 Button::new("global-search-scope")
                     .ghost()
                     .compact()
-                    .label(format!("范围 · {}", self.scope.label()))
-                    .tooltip(format!("当前搜索范围：{}", self.scope.label()))
+                    .icon(self.scope.icon())
+                    .label(format!("范围 · {trigger_label}"))
+                    .tooltip(format!("当前搜索范围：{trigger_label}"))
                     .dropdown_caret(true)
                     .dropdown_menu(move |menu, _, _| {
-                        menu.item(
-                            PopupMenuItem::new("当前文件夹")
-                                .checked(selected_scope == GlobalSearchScope::CurrentFolder)
-                                .action(Box::new(SetGlobalSearchScopeCurrentFolder)),
-                        )
-                        .item(
-                            PopupMenuItem::new("收藏文件夹")
-                                .checked(selected_scope == GlobalSearchScope::Favorites)
-                                .disabled(!has_favorites)
-                                .action(Box::new(SetGlobalSearchScopeFavorites)),
-                        )
-                        .item(
-                            PopupMenuItem::new("本地磁盘")
-                                .checked(selected_scope == GlobalSearchScope::LocalDisks)
-                                .disabled(!has_local_roots)
-                                .action(Box::new(SetGlobalSearchScopeLocalDisks)),
-                        )
-                        .item(
-                            PopupMenuItem::new("网络卷")
-                                .checked(selected_scope == GlobalSearchScope::NetworkVolumes)
-                                .disabled(!has_network_roots)
-                                .action(Box::new(SetGlobalSearchScopeNetworkVolumes)),
-                        )
+                        menu.min_w(px(280.))
+                            .max_w(px(340.))
+                            .label("搜索范围")
+                            .separator()
+                            .item(
+                                PopupMenuItem::new(current_folder_label.clone())
+                                    .icon(GlobalSearchScope::CurrentFolder.icon())
+                                    .checked(selected_scope == GlobalSearchScope::CurrentFolder)
+                                    .disabled(!has_current_folder)
+                                    .action(Box::new(SetGlobalSearchScopeCurrentFolder)),
+                            )
+                            .item(
+                                PopupMenuItem::new(favorites_label.clone())
+                                    .icon(GlobalSearchScope::Favorites.icon())
+                                    .checked(selected_scope == GlobalSearchScope::Favorites)
+                                    .disabled(!has_favorites)
+                                    .action(Box::new(SetGlobalSearchScopeFavorites)),
+                            )
+                            .item(
+                                PopupMenuItem::new(local_disks_label.clone())
+                                    .icon(GlobalSearchScope::LocalDisks.icon())
+                                    .checked(selected_scope == GlobalSearchScope::LocalDisks)
+                                    .disabled(!has_local_roots)
+                                    .action(Box::new(SetGlobalSearchScopeLocalDisks)),
+                            )
+                            .item(
+                                PopupMenuItem::new(network_volumes_label.clone())
+                                    .icon(GlobalSearchScope::NetworkVolumes.icon())
+                                    .checked(selected_scope == GlobalSearchScope::NetworkVolumes)
+                                    .disabled(!has_network_roots)
+                                    .action(Box::new(SetGlobalSearchScopeNetworkVolumes)),
+                            )
                     })
             })
             .child(
@@ -971,6 +1044,13 @@ fn content_file_icon(path: &Path) -> IconName {
     }
 }
 
+fn compose_scope_menu_label(label: &str, detail: &str, disabled_reason: Option<&str>) -> String {
+    match disabled_reason {
+        Some(reason) => format!("{label} · {reason}"),
+        None => format!("{label} · {detail}"),
+    }
+}
+
 pub(crate) fn open_global_search_window(
     current_folder: PathBuf,
     favorite_roots: Vec<PathBuf>,
@@ -1001,4 +1081,25 @@ pub(crate) fn open_global_search_window(
     })
     .map(|_| ())
     .map_err(|error| format!("无法打开全局搜索窗口：{error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compose_scope_menu_label;
+
+    #[test]
+    fn scope_label_uses_detail_when_available() {
+        assert_eq!(
+            compose_scope_menu_label("本地磁盘", "2 个卷", None),
+            "本地磁盘 · 2 个卷"
+        );
+    }
+
+    #[test]
+    fn scope_label_uses_disabled_reason_instead_of_detail() {
+        assert_eq!(
+            compose_scope_menu_label("收藏文件夹", "0 个位置", Some("暂无收藏文件夹")),
+            "收藏文件夹 · 暂无收藏文件夹"
+        );
+    }
 }
