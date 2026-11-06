@@ -39,6 +39,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::scroll::{ScrollableMask, Scrollbar, ScrollbarHandle, ScrollbarMode};
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
@@ -53,6 +54,7 @@ use kite_core::file_watcher::{DirectoryWatcher, trace_directory_refresh};
 
 const SIDEBAR_WIDTH: f32 = 218.;
 const TOOLBAR_CONTROL_HEIGHT: f32 = 40.;
+const STORAGE_SIDEBAR_ROW_HEIGHT: f32 = 52.;
 const COLUMN_WIDTH: f32 = 274.;
 const DETAILED_COLUMN_MIN_WIDTH: f32 = 250.;
 const DETAILED_COLUMN_MAX_WIDTH: f32 = 640.;
@@ -77,12 +79,50 @@ struct PathSegment {
     clickable: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StorageSummary {
+    drive_letter: Option<SharedString>,
+    free_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StoragePressure {
+    Normal,
+    Low,
+    Critical,
+}
+
+impl StorageSummary {
+    fn free_percent(&self) -> Option<f32> {
+        let free_bytes = self.free_bytes?;
+        let total_bytes = self.total_bytes?;
+        if total_bytes == 0 {
+            return None;
+        }
+        Some((free_bytes as f64 / total_bytes as f64 * 100.0).clamp(0.0, 100.0) as f32)
+    }
+
+    fn pressure(&self) -> StoragePressure {
+        match self.free_percent() {
+            Some(percent) if percent < 5.0 => StoragePressure::Critical,
+            Some(percent) if percent < 10.0 => StoragePressure::Low,
+            _ => StoragePressure::Normal,
+        }
+    }
+
+    fn capacity_label(&self) -> Option<SharedString> {
+        storage_capacity_label(self.free_bytes, self.total_bytes)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct QuickLink {
     label: SharedString,
     path: PathBuf,
     icon: IconName,
     detail: Option<SharedString>,
+    storage: Option<StorageSummary>,
 }
 
 #[derive(Clone)]
@@ -92,6 +132,7 @@ struct SidebarItem {
     path: PathBuf,
     icon: IconName,
     detail: Option<SharedString>,
+    storage: Option<StorageSummary>,
     active: bool,
     is_directory: bool,
     favorite: bool,
@@ -4711,66 +4752,183 @@ impl KiteApp {
         Theme::change(mode, Some(window), cx);
     }
     fn sidebar_item(&self, item: SidebarItem, cx: &mut Context<Self>) -> AnyElement {
+        let SidebarItem {
+            id,
+            label,
+            path,
+            icon,
+            detail,
+            storage,
+            active,
+            is_directory,
+            favorite,
+        } = item;
         let accent = cx.theme().accent;
         let active_fg = cx.theme().accent_foreground;
         let fg = cx.theme().sidebar_foreground;
         let muted = cx.theme().muted_foreground;
-        let row_id = item.id.clone();
-        let navigation_path = item.path.clone();
-        let is_directory = item.is_directory;
-        let is_favorite = item.favorite;
+        let row_id = id.clone();
+        let navigation_path = path.clone();
         let context = self.focus_handle.clone();
         let open_action = ContextMenuAction {
-            target: item.path.clone(),
-            working_directory: item.path.clone(),
+            target: path.clone(),
+            working_directory: path.clone(),
             command: ContextMenuCommand::Open,
         };
         let copy_path_action = ContextMenuAction {
-            target: item.path.clone(),
-            working_directory: item.path.clone(),
+            target: path.clone(),
+            working_directory: path.clone(),
             command: ContextMenuCommand::CopyPath,
         };
         let properties_action = ContextMenuAction {
-            target: item.path.clone(),
-            working_directory: item.path.clone(),
+            target: path.clone(),
+            working_directory: path.clone(),
             command: ContextMenuCommand::ShowProperties,
         };
-        let remove_action = is_favorite.then(|| ContextMenuAction {
-            target: item.path.clone(),
-            working_directory: item.path.clone(),
+        let remove_action = favorite.then(|| ContextMenuAction {
+            target: path.clone(),
+            working_directory: path.clone(),
             command: ContextMenuCommand::RemoveFavorite,
         });
+        let storage_row = storage.is_some();
+
+        let main_content: AnyElement = if let Some(storage) = storage {
+            let free_percent = storage.free_percent();
+            let pressure = storage.pressure();
+            let progress_color = match pressure {
+                StoragePressure::Critical => cx.theme().danger,
+                StoragePressure::Low => cx.theme().warning,
+                StoragePressure::Normal if active => active_fg,
+                StoragePressure::Normal => cx.theme().primary,
+            };
+            let detail_color = match pressure {
+                StoragePressure::Normal if active => active_fg.opacity(0.72),
+                StoragePressure::Normal => muted,
+                StoragePressure::Low | StoragePressure::Critical if active => active_fg,
+                StoragePressure::Low | StoragePressure::Critical => progress_color,
+            };
+            let warning_foreground = if active { active_fg } else { progress_color };
+            let badge_background = if active {
+                active_fg.opacity(0.18)
+            } else {
+                muted.opacity(0.12)
+            };
+            let badge_foreground = if active { active_fg } else { fg };
+            let progress_id = format!("{row_id}-capacity");
+            let accessibility_label = free_percent
+                .map(|percent| format!("{label} 可用空间 {percent:.0}%"))
+                .unwrap_or_else(|| format!("{label} 容量未知"));
+
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .gap_1()
+                        .when_some(storage.drive_letter, |this, drive_letter| {
+                            this.child(
+                                div()
+                                    .h(px(18.))
+                                    .flex_shrink_0()
+                                    .px_1()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_sm()
+                                    .bg(badge_background)
+                                    .text_xs()
+                                    .font_medium()
+                                    .text_color(badge_foreground)
+                                    .child(drive_letter),
+                            )
+                        })
+                        .child(div().flex_1().min_w_0().truncate().child(label)),
+                )
+                .when_some(detail, |this, detail| {
+                    this.child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .gap_1()
+                            .when(pressure != StoragePressure::Normal, |this| {
+                                this.child(
+                                    Icon::new(IconName::TriangleAlert)
+                                        .size_3()
+                                        .text_color(warning_foreground),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(detail_color)
+                                    .child(detail),
+                            ),
+                    )
+                })
+                .when_some(free_percent, |this, percent| {
+                    this.child(
+                        Progress::new(progress_id)
+                            .value(percent)
+                            .color(progress_color)
+                            .with_size(Size::XSmall)
+                            .accessibility_label(accessibility_label),
+                    )
+                })
+                .into_any_element()
+        } else {
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap_1()
+                .child(div().flex_1().min_w_0().truncate().child(label))
+                .when_some(detail, |this, detail| {
+                    this.child(
+                        div()
+                            .flex_shrink_0()
+                            .text_xs()
+                            .text_color(if active { active_fg } else { muted })
+                            .child(detail),
+                    )
+                })
+                .into_any_element()
+        };
+
         let row = div()
             .id(row_id)
-            .h(px(30.))
+            .h(px(if storage_row {
+                STORAGE_SIDEBAR_ROW_HEIGHT
+            } else {
+                30.
+            }))
             .w_full()
             .flex()
             .items_center()
             .gap_1()
             .px_1()
+            .when(storage_row, |this| this.py_1().gap_2())
             .rounded_md()
             .cursor_pointer()
             .text_sm()
-            .text_color(if item.active { active_fg } else { fg })
-            .when(item.active, |this| this.bg(accent))
-            .when(!item.active, |this| {
+            .text_color(if active { active_fg } else { fg })
+            .when(active, |this| this.bg(accent))
+            .when(!active, |this| {
                 this.hover(move |style| style.bg(muted.opacity(0.12)))
             })
-            .child(Icon::new(item.icon).size_4().text_color(if item.active {
-                active_fg
-            } else {
-                muted
-            }))
-            .child(div().flex_1().min_w_0().truncate().child(item.label))
-            .when_some(item.detail, |this, detail| {
-                this.child(
-                    div()
-                        .flex_shrink_0()
-                        .text_xs()
-                        .text_color(if item.active { active_fg } else { muted })
-                        .child(detail),
-                )
-            })
+            .child(
+                Icon::new(icon)
+                    .size_4()
+                    .text_color(if active { active_fg } else { muted }),
+            )
+            .child(main_content)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 if is_directory {
                     this.navigate_to(navigation_path.clone(), NavigationIntent::Push, window, cx);
@@ -4828,6 +4986,7 @@ impl KiteApp {
                     IconName::File
                 },
                 detail: None,
+                storage: None,
                 active,
                 is_directory: favorite.is_directory,
                 favorite: true,
@@ -4944,6 +5103,7 @@ impl KiteApp {
                     path: link.path,
                     icon: link.icon,
                     detail: link.detail,
+                    storage: link.storage,
                     active,
                     is_directory: true,
                     favorite: false,
@@ -4997,6 +5157,7 @@ impl KiteApp {
                         path: device.path,
                         icon: device.icon,
                         detail: device.detail,
+                        storage: device.storage,
                         active,
                         is_directory: true,
                         favorite: false,
@@ -5027,6 +5188,7 @@ impl KiteApp {
                     path: drive.path,
                     icon: drive.icon,
                     detail: drive.detail,
+                    storage: drive.storage,
                     active,
                     is_directory: true,
                     favorite: false,
@@ -6500,7 +6662,29 @@ fn push_quick_link(links: &mut Vec<QuickLink>, label: &str, path: Option<PathBuf
         path,
         icon,
         detail: None,
+        storage: None,
     });
+}
+
+fn storage_capacity_label(
+    free_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+) -> Option<SharedString> {
+    match (free_bytes, total_bytes) {
+        (Some(free), Some(total)) => {
+            Some(format!("{} 可用 / {}", format_size(free), format_size(total)).into())
+        }
+        (Some(free), None) => Some(format!("{} 可用", format_size(free)).into()),
+        (None, Some(total)) => Some(format_size(total).into()),
+        (None, None) => None,
+    }
+}
+
+fn drive_letter_label(path: &Path) -> Option<SharedString> {
+    let first = path.to_string_lossy().chars().next()?;
+    first
+        .is_ascii_alphabetic()
+        .then(|| SharedString::from(format!("{first}:")))
 }
 
 fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLink>) {
@@ -6529,14 +6713,21 @@ fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLi
             });
         let icon = match volume.kind {
             VolumeKind::Usb => IconName::Usb,
+            VolumeKind::Network => IconName::Network,
             VolumeKind::Optical => IconName::Disc,
             _ => IconName::HardDrive,
         };
+        let storage = StorageSummary {
+            drive_letter: drive_letter_label(&volume.path),
+            free_bytes: volume.free_bytes,
+            total_bytes: volume.total_bytes,
+        };
         let link = QuickLink {
-            label: crate::platform::volume_label(name, &volume.path).into(),
+            label: name.into(),
             path: volume.path.clone(),
             icon,
-            detail: volume.capacity_label().map(SharedString::from),
+            detail: storage.capacity_label(),
+            storage: Some(storage),
         };
 
         if volume.kind.is_removable() {
@@ -6552,7 +6743,11 @@ fn volume_quick_links(volumes: &[StorageVolume]) -> (Vec<QuickLink>, Vec<QuickLi
 fn same_quick_links(left: &[QuickLink], right: &[QuickLink]) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
-            left.label == right.label && left.path == right.path && left.detail == right.detail
+            left.label == right.label
+                && left.path == right.path
+                && left.icon == right.icon
+                && left.detail == right.detail
+                && left.storage == right.storage
         })
 }
 
@@ -7859,6 +8054,59 @@ mod update_ui_tests {
 
         assert!(!notice.contains('%'));
         assert!(notice.contains("1.0 KB"));
+    }
+}
+
+#[cfg(test)]
+mod storage_summary_tests {
+    use super::{StoragePressure, StorageSummary, drive_letter_label, storage_capacity_label};
+    use std::path::Path;
+
+    fn summary(free_bytes: u64, total_bytes: u64) -> StorageSummary {
+        StorageSummary {
+            drive_letter: None,
+            free_bytes: Some(free_bytes),
+            total_bytes: Some(total_bytes),
+        }
+    }
+
+    #[test]
+    fn formats_capacity_with_free_space_first() {
+        let free = 300 * 1024_u64.pow(3);
+        let total = 500 * 1024_u64.pow(3);
+
+        assert_eq!(
+            storage_capacity_label(Some(free), Some(total)).as_deref(),
+            Some("300.0 GB 可用 / 500.0 GB")
+        );
+    }
+
+    #[test]
+    fn capacity_label_keeps_each_known_value() {
+        assert_eq!(
+            storage_capacity_label(Some(1024), None).as_deref(),
+            Some("1.0 KB 可用")
+        );
+        assert_eq!(
+            storage_capacity_label(None, Some(1024)).as_deref(),
+            Some("1.0 KB")
+        );
+        assert!(storage_capacity_label(None, None).is_none());
+    }
+
+    #[test]
+    fn storage_pressure_uses_free_space_percentage() {
+        assert_eq!(summary(100, 100).pressure(), StoragePressure::Normal);
+        assert_eq!(summary(10, 100).pressure(), StoragePressure::Normal);
+        assert_eq!(summary(9, 100).pressure(), StoragePressure::Low);
+        assert_eq!(summary(5, 100).pressure(), StoragePressure::Low);
+        assert_eq!(summary(4, 100).pressure(), StoragePressure::Critical);
+    }
+
+    #[test]
+    fn extracts_drive_letter_for_windows_roots() {
+        assert_eq!(drive_letter_label(Path::new(r"C:\")).as_deref(), Some("C:"));
+        assert!(drive_letter_label(Path::new(r"\\server\share")).is_none());
     }
 }
 
