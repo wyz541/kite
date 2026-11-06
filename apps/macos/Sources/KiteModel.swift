@@ -622,7 +622,9 @@ enum GlobalSearchScope: String, CaseIterable, Identifiable {
         case .currentFolder: return "当前文件夹"
         case .favorites: return "收藏文件夹"
         case .localDisks: return "本地磁盘"
-        case .rootDisk: return "整个系统"
+        case .rootDisk:
+            let name = FileManager.default.displayName(atPath: "/")
+            return name.isEmpty || name == "/" ? "Macintosh HD" : name
         }
     }
 
