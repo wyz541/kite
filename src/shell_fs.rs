@@ -1,8 +1,8 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use crate::fs::{DirectorySnapshot, EntryKind, FileEntry, SortSpec, sort_entries};
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
@@ -16,34 +16,108 @@ use windows::Win32::System::SystemServices::{
 use windows::Win32::UI::Shell::{
     BHID_EnumItems, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_RENAMEONCOLLISION, FileOperation,
     IEnumShellItems, IFileOperation, IFileOperationProgressSink, IShellItem,
-    SHCreateItemFromParsingName, SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY,
-    SIGDN_PARENTRELATIVEPARSING, ShellExecuteW,
+    SHCreateItemFromParsingName, SHCreateItemFromRelativeName, SIGDN_DESKTOPABSOLUTEPARSING,
+    SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{PCWSTR, PWSTR};
+
+type ItemCapabilities = (bool, bool, bool);
+
+static DISPLAY_NAME_CACHE: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+static ITEM_CAPABILITY_CACHE: OnceLock<Mutex<HashMap<PathBuf, ItemCapabilities>>> = OnceLock::new();
+
+fn display_name_cache() -> &'static Mutex<HashMap<PathBuf, String>> {
+    DISPLAY_NAME_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn item_capability_cache() -> &'static Mutex<HashMap<PathBuf, ItemCapabilities>> {
+    ITEM_CAPABILITY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn clear_shell_caches() {
+    display_name_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+    item_capability_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
+
+fn cached_display_name(path: &Path) -> Option<String> {
+    display_name_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(path)
+        .cloned()
+}
+
+fn cache_display_name(path: &Path, name: &str) {
+    display_name_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf(), name.to_string());
+}
+
+fn cached_item_capabilities_or_else(
+    path: &Path,
+    compute: impl FnOnce() -> Option<ItemCapabilities>,
+) -> ItemCapabilities {
+    if let Some(capabilities) = item_capability_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(path)
+        .copied()
+    {
+        return capabilities;
+    }
+    let Some(capabilities) = compute() else {
+        return (false, false, false);
+    };
+    item_capability_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf(), capabilities);
+    capabilities
+}
+
+fn item_capabilities_for(item: &IShellItem) -> Option<ItemCapabilities> {
+    let attributes =
+        unsafe { item.GetAttributes(SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_CANMOVE) }.ok()?;
+    Some((
+        attributes.0 & SFGAO_CANRENAME.0 != 0,
+        attributes.0 & SFGAO_CANDELETE.0 != 0,
+        attributes.0 & SFGAO_CANMOVE.0 != 0,
+    ))
+}
+
+fn prime_shell_metadata(path: &Path, item: &IShellItem) {
+    if let Some(name) =
+        display_name_for_item(item, SIGDN_NORMALDISPLAY).filter(|value| !value.is_empty())
+    {
+        cache_display_name(path, &name);
+    }
+    if let Some(capabilities) = item_capabilities_for(item) {
+        item_capability_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(path.to_path_buf(), capabilities);
+    }
+}
 
 pub(crate) fn is_shell_namespace_path(path: &Path) -> bool {
     let value = path.as_os_str().to_string_lossy();
     value.starts_with("::{") || value.starts_with("shell:")
 }
 
-pub(crate) fn item_capabilities(path: &Path) -> (bool, bool, bool) {
-    let Ok(_com) = ComGuard::new() else {
-        return (false, false, false);
-    };
-    let Ok(item) = resolve_item(path) else {
-        return (false, false, false);
-    };
-    let Ok(attributes) =
-        (unsafe { item.GetAttributes(SFGAO_CANRENAME | SFGAO_CANDELETE | SFGAO_CANMOVE) })
-    else {
-        return (false, false, false);
-    };
-    (
-        attributes.0 & SFGAO_CANRENAME.0 != 0,
-        attributes.0 & SFGAO_CANDELETE.0 != 0,
-        attributes.0 & SFGAO_CANMOVE.0 != 0,
-    )
+pub(crate) fn item_capabilities(path: &Path) -> ItemCapabilities {
+    cached_item_capabilities_or_else(path, || {
+        let _com = ComGuard::new().ok()?;
+        let item = resolve_item(path).ok()?;
+        item_capabilities_for(&item)
+    })
 }
 
 pub(crate) fn can_rename_item(path: &Path) -> bool {
@@ -175,6 +249,7 @@ fn perform_operations(operation: &IFileOperation, action: &str) -> Result<(), St
             return Err(format!("{action}已取消"));
         }
     }
+    clear_shell_caches();
     Ok(())
 }
 
@@ -185,6 +260,7 @@ fn wide(value: &str) -> Vec<u16> {
 pub(crate) fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
     let _com = ComGuard::new()?;
     let folder = resolve_item(path).map_err(|error| format!("无法读取移动设备目录：{error}"))?;
+    prime_shell_metadata(path, &folder);
     let enumerator: IEnumShellItems = unsafe {
         folder
             .BindToHandler(None::<&IBindCtx>, &BHID_EnumItems)
@@ -204,7 +280,7 @@ pub(crate) fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySna
             break;
         }
         for item in batch.into_iter().take(fetched as usize).flatten() {
-            match shell_entry(&item) {
+            match shell_entry(path, &item) {
                 Some(entry) => entries.push(entry),
                 None => skipped += 1,
             }
@@ -227,18 +303,13 @@ pub(crate) fn parent_path(path: &Path) -> Option<PathBuf> {
 }
 
 pub(crate) fn display_name(path: &Path) -> Option<String> {
-    thread_local! {
-        static DISPLAY_NAMES: RefCell<HashMap<PathBuf, String>> = RefCell::new(HashMap::new());
-    }
-    if let Some(name) = DISPLAY_NAMES.with(|names| names.borrow().get(path).cloned()) {
+    if let Some(name) = cached_display_name(path) {
         return Some(name);
     }
     let _com = ComGuard::new().ok()?;
     let item = resolve_item(path).ok()?;
     let name = display_name_for_item(&item, SIGDN_NORMALDISPLAY)?;
-    DISPLAY_NAMES.with(|names| {
-        names.borrow_mut().insert(path.to_path_buf(), name.clone());
-    });
+    cache_display_name(path, &name);
     Some(name)
 }
 
@@ -324,6 +395,20 @@ fn resolve_item(path: &Path) -> Result<IShellItem, String> {
 }
 
 fn find_child_item(parent: &IShellItem, relative_name: &OsStr) -> Result<IShellItem, String> {
+    let direct_name = relative_name
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    if let Ok(item) = unsafe {
+        SHCreateItemFromRelativeName::<_, _, _, IShellItem>(
+            parent,
+            PCWSTR(direct_name.as_ptr()),
+            None::<&IBindCtx>,
+        )
+    } {
+        return Ok(item);
+    }
+
     let expected = relative_name.to_string_lossy();
     let enumerator: IEnumShellItems = unsafe {
         parent
@@ -361,12 +446,37 @@ fn find_child_item(parent: &IShellItem, relative_name: &OsStr) -> Result<IShellI
 
     Err(format!("无法定位移动设备项目：{expected}"))
 }
-fn shell_entry(item: &IShellItem) -> Option<FileEntry> {
+fn relative_child_path(parent: &Path, relative: &str) -> Option<PathBuf> {
+    if relative.is_empty() {
+        return None;
+    }
+    let relative = Path::new(relative);
+    let mut saw_component = false;
+    for component in relative.components() {
+        match component {
+            Component::Normal(_) => saw_component = true,
+            Component::CurDir => {}
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir => return None,
+        }
+    }
+    saw_component.then(|| parent.join(relative))
+}
+
+fn shell_path_for_item(parent: &Path, item: &IShellItem) -> Option<PathBuf> {
+    if let Some(path) = display_name_for_item(item, SIGDN_PARENTRELATIVEPARSING)
+        .and_then(|relative| relative_child_path(parent, &relative))
+    {
+        return Some(path);
+    }
+    display_name_for_item(item, SIGDN_DESKTOPABSOLUTEPARSING)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn shell_entry(parent: &Path, item: &IShellItem) -> Option<FileEntry> {
     let name =
         display_name_for_item(item, SIGDN_NORMALDISPLAY).filter(|value| !value.is_empty())?;
-    let path = display_name_for_item(item, SIGDN_DESKTOPABSOLUTEPARSING)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)?;
+    let path = shell_path_for_item(parent, item)?;
     let is_dir = unsafe { item.GetAttributes(SFGAO_FOLDER) }
         .map(|attributes| (attributes.0 & SFGAO_FOLDER.0) != 0)
         .unwrap_or(false);
@@ -433,8 +543,12 @@ impl Drop for ComGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::is_shell_namespace_path;
-    use std::path::Path;
+    use super::{
+        cached_item_capabilities_or_else, clear_shell_caches, is_shell_namespace_path,
+        relative_child_path,
+    };
+    use std::cell::Cell;
+    use std::path::{Path, PathBuf};
 
     #[test]
     #[ignore = "requires a connected portable device"]
@@ -444,32 +558,23 @@ mod tests {
             .into_iter()
             .next()
             .expect("portable device");
-        let snapshot = super::load_directory(
+        let root_snapshot = super::load_directory(
             Path::new(&device.shell_path),
             crate::fs::SortSpec::default(),
         )
         .expect("load portable device");
-        eprintln!(
-            "loaded {} entries from {}",
-            snapshot.entries.len(),
-            device.name
-        );
+        assert!(!root_snapshot.entries.is_empty());
 
-        let child = snapshot
+        let child = root_snapshot
             .entries
             .iter()
             .find(|entry| entry.is_dir())
-            .expect("portable device directory")
-            .clone();
+            .expect("portable device directory");
         let child_snapshot = super::load_directory(&child.path, crate::fs::SortSpec::default())
             .unwrap_or_else(|error| {
                 panic!("load portable directory {}: {error}", child.path.display())
             });
-        eprintln!(
-            "loaded {} entries from {}",
-            child_snapshot.entries.len(),
-            child.name
-        );
+        assert!(!child_snapshot.entries.is_empty());
     }
 
     #[test]
@@ -479,5 +584,54 @@ mod tests {
         )));
         assert!(is_shell_namespace_path(Path::new("shell:MyComputerFolder")));
         assert!(!is_shell_namespace_path(Path::new(r"C:\Users")));
+    }
+
+    #[test]
+    fn joins_parent_relative_names_to_the_current_shell_directory() {
+        let parent =
+            Path::new(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\\?\usb#vid_2d95&pid_6013");
+        let expected = parent.join(r"SID-{10001,,487650308096}");
+        assert_eq!(
+            relative_child_path(parent, r"SID-{10001,,487650308096}"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn rejects_absolute_and_parent_relative_shell_names() {
+        let parent = Path::new(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}");
+        assert_eq!(relative_child_path(parent, ""), None);
+        assert_eq!(relative_child_path(parent, "."), None);
+        assert_eq!(relative_child_path(parent, r"C:\Windows"), None);
+        assert_eq!(relative_child_path(parent, r"\Windows"), None);
+        assert_eq!(relative_child_path(parent, r"..\Windows"), None);
+    }
+
+    #[test]
+    fn caches_item_capabilities_after_the_first_lookup() {
+        clear_shell_caches();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = PathBuf::from(format!(
+            "kite-test-shell-capabilities-{}-{unique}",
+            std::process::id()
+        ));
+        let calls = Cell::new(0);
+
+        let first = cached_item_capabilities_or_else(&path, || {
+            calls.set(calls.get() + 1);
+            Some((true, false, true))
+        });
+        let second = cached_item_capabilities_or_else(&path, || {
+            calls.set(calls.get() + 1);
+            Some((false, true, false))
+        });
+
+        assert_eq!(first, (true, false, true));
+        assert_eq!(second, first);
+        assert_eq!(calls.get(), 1);
+        clear_shell_caches();
     }
 }
