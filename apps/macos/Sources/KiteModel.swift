@@ -613,7 +613,7 @@ enum GlobalSearchScope: String, CaseIterable, Identifiable {
     case currentFolder
     case favorites
     case localDisks
-    case networkVolumes
+    case rootDisk
 
     var id: String { rawValue }
 
@@ -622,7 +622,7 @@ enum GlobalSearchScope: String, CaseIterable, Identifiable {
         case .currentFolder: return "当前文件夹"
         case .favorites: return "收藏文件夹"
         case .localDisks: return "本地磁盘"
-        case .networkVolumes: return "网络卷"
+        case .rootDisk: return "根磁盘"
         }
     }
 
@@ -1281,28 +1281,9 @@ final class KiteModel: ObservableObject {
             return volumes
                 .filter { ["fixed", "usb", "removable"].contains($0.kind) }
                 .map(\.path)
-        case .networkVolumes:
-            var roots = volumes
-                .filter { $0.kind == "network" }
-                .map(\.path)
-            roots.append(contentsOf: favorites
-                .filter { $0.isDirectory && isNetworkPath($0.path) }
-                .map(\.path))
-            if roots.isEmpty && isNetworkPath(currentPath) {
-                roots.append(currentPath)
-            }
-            var seen = Set<String>()
-            return roots.filter { seen.insert($0).inserted }
+        case .rootDisk:
+            return ["/"]
         }
-    }
-
-    private func isNetworkPath(_ path: String) -> Bool {
-        guard let values = try? URL(fileURLWithPath: path).resourceValues(
-            forKeys: [.volumeIsLocalKey]
-        ) else {
-            return false
-        }
-        return values.volumeIsLocal == false
     }
 
     private func scheduleGlobalSearch() {
