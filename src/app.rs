@@ -1274,6 +1274,7 @@ impl KiteApp {
             self.drives = drives;
         }
         if portable_changed {
+            shell_fs::clear_shell_caches();
             self.portable_devices = snapshot.portable_devices;
         }
         if volumes_changed || portable_changed {
