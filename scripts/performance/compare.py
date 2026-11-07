@@ -51,7 +51,12 @@ def escape_cell(value: str) -> str:
     return value.replace("|", "\\|")
 
 
-def build_rows(baseline: dict, candidate: dict, threshold: float) -> list[dict]:
+def build_rows(
+    baseline: dict,
+    candidate: dict,
+    threshold: float,
+    use_baseline_noise: bool,
+) -> list[dict]:
     baseline_results = scenario_map(baseline)
     candidate_results = scenario_map(candidate)
     rows = []
@@ -60,6 +65,17 @@ def build_rows(baseline: dict, candidate: dict, threshold: float) -> list[dict]:
         after = candidate_results[key]
         before_summary = before["summary"]
         after_summary = after["summary"]
+        scenario_threshold = threshold
+        if use_baseline_noise and before.get("noise"):
+            scenario_threshold = max(
+                scenario_threshold,
+                float(
+                    before["noise"].get(
+                        "recommended_comparison_threshold_pct",
+                        scenario_threshold,
+                    )
+                ),
+            )
         p95_change = change_percent(
             float(before_summary.get("p95_ms", 0.0)),
             float(after_summary.get("p95_ms", 0.0)),
@@ -79,7 +95,8 @@ def build_rows(baseline: dict, candidate: dict, threshold: float) -> list[dict]:
                 "baseline_p95": float(before_summary.get("p95_ms", 0.0)),
                 "candidate_p95": float(after_summary.get("p95_ms", 0.0)),
                 "p95_change": p95_change,
-                "classification": classify(p95_change, threshold),
+                "comparison_threshold_pct": scenario_threshold,
+                "classification": classify(p95_change, scenario_threshold),
                 "baseline_n": int(before_summary.get("sample_count", 0)),
                 "candidate_n": int(after_summary.get("sample_count", 0)),
             }
@@ -95,13 +112,20 @@ def build_rows(baseline: dict, candidate: dict, threshold: float) -> list[dict]:
     return rows
 
 
-def render_markdown(baseline: dict, candidate: dict, rows: list[dict], threshold: float) -> str:
+def render_markdown(
+    baseline: dict,
+    candidate: dict,
+    rows: list[dict],
+    threshold: float,
+    use_baseline_noise: bool,
+) -> str:
     lines = [
         "# Kite performance comparison",
         "",
         f"- Baseline: `{baseline.get('kite_version')}` / `{baseline.get('git_commit')}` / `{baseline.get('profile')}`",
         f"- Candidate: `{candidate.get('kite_version')}` / `{candidate.get('git_commit')}` / `{candidate.get('profile')}`",
-        f"- Regression threshold: `{threshold:.1f}%` on p95",
+        f"- Global threshold: `{threshold:.1f}%` on p95",
+        f"- Scenario noise thresholds: `{'enabled' if use_baseline_noise else 'disabled'}`",
         "",
     ]
     if baseline.get("profile") != candidate.get("profile"):
@@ -117,19 +141,20 @@ def render_markdown(baseline: dict, candidate: dict, rows: list[dict], threshold
 
     lines.extend(
         [
-            "| Area | Scenario | Boundary | Baseline p95 ms | Candidate p95 ms | p95 delta | p50 delta | n | Result |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| Area | Scenario | Boundary | Baseline p95 ms | Candidate p95 ms | p95 delta | Threshold | p50 delta | n | Result |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
     for row in rows:
         lines.append(
-            "| {area} | {scenario} | {boundary} | {baseline_p95:.3f} | {candidate_p95:.3f} | {p95} | {p50} | {n}/{m} | {result} |".format(
+            "| {area} | {scenario} | {boundary} | {baseline_p95:.3f} | {candidate_p95:.3f} | {p95} | {threshold} | {p50} | {n}/{m} | {result} |".format(
                 area=escape_cell(row["area"]),
                 scenario=escape_cell(row["scenario"]),
                 boundary=escape_cell(row["boundary"]),
                 baseline_p95=row["baseline_p95"],
                 candidate_p95=row["candidate_p95"],
                 p95=format_change(row["p95_change"]),
+                threshold=f"{row['comparison_threshold_pct']:.1f}%",
                 p50=format_change(row["p50_change"]),
                 n=row["baseline_n"],
                 m=row["candidate_n"],
@@ -145,6 +170,7 @@ def main() -> int:
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--threshold", type=float, default=20.0)
     parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--use-baseline-noise", action="store_true")
     parser.add_argument("--fail-on-regression", action="store_true")
     args = parser.parse_args()
 
@@ -153,8 +179,19 @@ def main() -> int:
     if args.threshold < 0:
         raise SystemExit("--threshold must be zero or greater")
 
-    rows = build_rows(baseline, candidate, args.threshold)
-    markdown = render_markdown(baseline, candidate, rows, args.threshold)
+    rows = build_rows(
+        baseline,
+        candidate,
+        args.threshold,
+        args.use_baseline_noise,
+    )
+    markdown = render_markdown(
+        baseline,
+        candidate,
+        rows,
+        args.threshold,
+        args.use_baseline_noise,
+    )
     if args.markdown:
         args.markdown.parent.mkdir(parents=True, exist_ok=True)
         args.markdown.write_text(markdown, encoding="utf-8")
