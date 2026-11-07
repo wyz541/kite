@@ -1,0 +1,582 @@
+{
+  "schema_version": 1,
+  "generated_at_unix_ms": 1794030929296,
+  "platform": "darwin",
+  "platform_release": "27.0.0",
+  "platform_machine": "arm64",
+  "host": {
+    "os": "darwin",
+    "os_version": "27.0.1",
+    "architecture": "arm64",
+    "cpu_model": "Apple M1 Max",
+    "memory_bytes": 68719476736
+  },
+  "app_name": "Kite.app",
+  "app_versions": [
+    "0.6.61"
+  ],
+  "profile": "startup",
+  "fixture_entries": 10000,
+  "target_event": "macos.first_content",
+  "method": {
+    "launch": "new process for every sample",
+    "first_process": "run 0 starts after fixture creation",
+    "warm_restart": "later runs reuse OS caches",
+    "cache_control": "OS caches are not purged",
+    "time_origin": "wall clock immediately before process creation",
+    "first_content": "first SwiftUI KiteColumnBrowser onAppear after the initial directory is loaded",
+    "rss": "process resident memory polled every 20 ms; maximum observed value"
+  },
+  "summary": {
+    "launch_to_first_content": {
+      "sample_count": 10,
+      "min_ms": 795.0,
+      "p50_ms": 809.0,
+      "p95_ms": 817.65,
+      "max_ms": 819.0,
+      "mean_ms": 809.0
+    },
+    "entry_to_first_content": {
+      "sample_count": 10,
+      "min_ms": 720.0,
+      "p50_ms": 729.5,
+      "p95_ms": 735.55,
+      "max_ms": 736.0,
+      "mean_ms": 728.8
+    },
+    "peak_rss_bytes_max": 166445056,
+    "phase_summaries": {
+      "first_process": {
+        "launch_to_first_content": {
+          "sample_count": 1,
+          "min_ms": 795.0,
+          "p50_ms": 795.0,
+          "p95_ms": 795.0,
+          "max_ms": 795.0,
+          "mean_ms": 795.0
+        },
+        "entry_to_first_content": {
+          "sample_count": 1,
+          "min_ms": 720.0,
+          "p50_ms": 720.0,
+          "p95_ms": 720.0,
+          "max_ms": 720.0,
+          "mean_ms": 720.0
+        },
+        "peak_rss_bytes_max": 164446208
+      },
+      "warm_restart": {
+        "launch_to_first_content": {
+          "sample_count": 9,
+          "min_ms": 801.0,
+          "p50_ms": 810.0,
+          "p95_ms": 817.8,
+          "max_ms": 819.0,
+          "mean_ms": 810.5555555555555
+        },
+        "entry_to_first_content": {
+          "sample_count": 9,
+          "min_ms": 720.0,
+          "p50_ms": 730.0,
+          "p95_ms": 735.6,
+          "max_ms": 736.0,
+          "mean_ms": 729.7777777777778
+        },
+        "peak_rss_bytes_max": 166445056
+      }
+    }
+  },
+  "runs": [
+    {
+      "status": "ok",
+      "pid": 32710,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 795,
+      "entry_to_first_content_ms": 720.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 164446208,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 32710,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030921105,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 338,
+          "event": "macos.model_ready",
+          "pid": 32710,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030921443,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 719,
+          "event": "macos.content_view_appeared",
+          "pid": 32710,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030921825,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 720,
+          "event": "macos.first_content",
+          "pid": 32710,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030921825,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 0,
+      "phase": "first_process"
+    },
+    {
+      "status": "ok",
+      "pid": 32938,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 808,
+      "entry_to_first_content_ms": 730.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 159432704,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 32938,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030921913,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 342,
+          "event": "macos.model_ready",
+          "pid": 32938,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030922256,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 730,
+          "event": "macos.content_view_appeared",
+          "pid": 32938,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030922643,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 730,
+          "event": "macos.first_content",
+          "pid": 32938,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030922644,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 1,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 33166,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 801,
+      "entry_to_first_content_ms": 720.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 163332096,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 33166,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030922735,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 339,
+          "event": "macos.model_ready",
+          "pid": 33166,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030923074,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 719,
+          "event": "macos.content_view_appeared",
+          "pid": 33166,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030923455,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 720,
+          "event": "macos.first_content",
+          "pid": 33166,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030923455,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 2,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 33394,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 819,
+      "entry_to_first_content_ms": 728.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 160497664,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 33394,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030923568,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 336,
+          "event": "macos.model_ready",
+          "pid": 33394,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030923904,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 728,
+          "event": "macos.content_view_appeared",
+          "pid": 33394,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030924296,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 728,
+          "event": "macos.first_content",
+          "pid": 33394,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030924297,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 3,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 33624,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 807,
+      "entry_to_first_content_ms": 733.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 161120256,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 33624,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030924381,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 342,
+          "event": "macos.model_ready",
+          "pid": 33624,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030924724,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 733,
+          "event": "macos.content_view_appeared",
+          "pid": 33624,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030925114,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 733,
+          "event": "macos.first_content",
+          "pid": 33624,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030925114,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 4,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 33854,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 816,
+      "entry_to_first_content_ms": 736.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 166445056,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 33854,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030925213,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 346,
+          "event": "macos.model_ready",
+          "pid": 33854,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030925559,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 735,
+          "event": "macos.content_view_appeared",
+          "pid": 33854,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030925948,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 736,
+          "event": "macos.first_content",
+          "pid": 33854,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030925949,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 5,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 34083,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 810,
+      "entry_to_first_content_ms": 731.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 161480704,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 34083,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030926062,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 345,
+          "event": "macos.model_ready",
+          "pid": 34083,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030926407,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 731,
+          "event": "macos.content_view_appeared",
+          "pid": 34083,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030926793,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 731,
+          "event": "macos.first_content",
+          "pid": 34083,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030926794,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 6,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 34311,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 806,
+      "entry_to_first_content_ms": 726.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 162562048,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 34311,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030926889,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 339,
+          "event": "macos.model_ready",
+          "pid": 34311,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030927228,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 726,
+          "event": "macos.content_view_appeared",
+          "pid": 34311,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030927615,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 726,
+          "event": "macos.first_content",
+          "pid": 34311,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030927616,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 7,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 34539,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 815,
+      "entry_to_first_content_ms": 735.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 165412864,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 34539,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030927714,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 340,
+          "event": "macos.model_ready",
+          "pid": 34539,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030928054,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 734,
+          "event": "macos.content_view_appeared",
+          "pid": 34539,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030928449,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 735,
+          "event": "macos.first_content",
+          "pid": 34539,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030928449,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 8,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 34768,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 813,
+      "entry_to_first_content_ms": 729.0,
+      "launch_to_process_entry_ms": null,
+      "peak_rss_bytes": 164675584,
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "macos.model_start",
+          "pid": 34768,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030928547,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 349,
+          "event": "macos.model_ready",
+          "pid": 34768,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030928896,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 729,
+          "event": "macos.content_view_appeared",
+          "pid": 34768,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030929276,
+          "version": "0.6.61"
+        },
+        {
+          "elapsed_ms": 729,
+          "event": "macos.first_content",
+          "pid": 34768,
+          "platform": "macos",
+          "schema_version": 1,
+          "timestamp_unix_ms": 1794030929277,
+          "version": "0.6.61"
+        }
+      ],
+      "run_index": 9,
+      "phase": "warm_restart"
+    }
+  ],
+  "errors": []
+}

@@ -499,6 +499,7 @@ impl Focusable for KiteWindow {
 
 impl Render for KiteWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        kite_core::perf_trace::mark_once("windows.first_window_render");
         let tab_bar = self.render_tab_bar(cx);
         let active_view = self.active_view();
 

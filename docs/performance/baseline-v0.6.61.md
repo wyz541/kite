@@ -7,6 +7,7 @@
 - Raw samples: [v0.6.61-macos-arm64.json](results/v0.6.61-macos-arm64.json)
 - Reproducibility: [second run and variance report](reproducibility-v0.6.61.md)
 - Cross-platform CI baseline: [Windows and macOS](baseline-v0.6.61-ci.md)
+- Startup and first-content baseline: [macOS arm64](startup-macos-v0.6.61.md)
 
 ## Environment
 
