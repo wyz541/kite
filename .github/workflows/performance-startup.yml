@@ -1,0 +1,92 @@
+name: Startup Performance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/performance-startup.yml"
+      - "scripts/performance/startup.py"
+      - "apps/macos/Sources/**"
+      - "src/app.rs"
+      - "src/main.rs"
+      - "src/perf_trace.rs"
+      - "src/tabs.rs"
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Number of process starts
+        required: true
+        default: "10"
+        type: string
+      entries:
+        description: Files in the startup fixture
+        required: true
+        default: "10000"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    name: Startup ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: macos-arm64
+            runner: macos-26
+    env:
+      KITE_PERF_SAMPLES: ${{ github.event.inputs.samples || '3' }}
+      KITE_PERF_ENTRIES: ${{ github.event.inputs.entries || '10000' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Windows release
+        if: runner.os == 'Windows'
+        run: cargo build --locked --release --features windows-ui
+
+      - name: Measure Windows startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python scripts/performance/startup.py `
+            --app target/release/kite-explorer.exe `
+            --samples "$env:KITE_PERF_SAMPLES" `
+            --entries "$env:KITE_PERF_ENTRIES" `
+            --output target/performance/startup-windows-x64.json `
+            --markdown target/performance/startup-windows-x64.md
+
+      - name: Build macOS release
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash apps/macos/build.sh
+
+      - name: Measure macOS startup
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python3 scripts/performance/startup.py \
+            --app apps/macos/build/Kite.app \
+            --samples "$KITE_PERF_SAMPLES" \
+            --entries "$KITE_PERF_ENTRIES" \
+            --output target/performance/startup-macos-arm64.json \
+            --markdown target/performance/startup-macos-arm64.md
+
+      - name: Upload startup results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kite-startup-${{ matrix.platform }}
+          path: target/performance/startup-${{ matrix.platform }}.*
+          if-no-files-found: warn

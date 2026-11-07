@@ -5,6 +5,8 @@
 当前实体机基线：[v0.6.61 macOS arm64](baseline-v0.6.61.md)。
 当前跨平台 CI 基线：[v0.6.61 Windows 与 macOS](baseline-v0.6.61-ci.md)。
 当前复现检查：[v0.6.61 双次运行](reproducibility-v0.6.61.md)。
+当前 macOS 启动基线：[v0.6.61 启动与首内容](startup-macos-v0.6.61.md)。
+当前跨平台启动 CI 基线：[v0.6.61 Windows 与 macOS](startup-ci-v0.6.61.md)。
 
 ## 1. 目标
 
@@ -77,7 +79,7 @@ cargo run --locked --release --features performance --bin kite-perf -- \
 
 | 功能域 | 自动测量 | 当前缺口 |
 | --- | --- | --- |
-| 启动与路径启动 | 无 | Windows 和 macOS 原生首屏 |
+| 启动与路径启动 | 进程启动到首个稳定内容事件，含 RSS | 合成器确认的首帧、默认处理程序入口 |
 | 分栏导航 | 目录读取、五种排序 | 分栏渲染、筛选、分组、丢帧 |
 | 页签与会话 | 20 页签保存和恢复 | 页签打开、切换、关闭和渲染 |
 | 目录监听 | Windows 监听创建延迟 | macOS 监听、刷新应用、丢帧 |
@@ -129,16 +131,55 @@ cargo run --locked --release --features performance --bin kite-perf -- \
 
 两个平台必须使用相同动作、相同数据规模和相同停止条件。
 
-## 7. 跨平台工作流
+## 7. 启动测量
+
+启动测量器使用 release 应用和新进程。macOS 事件是首批目录加载后的 `KiteColumnBrowser.onAppear`。Windows 事件是首批目录加载后的首次 `KiteApp` 渲染。
+
+macOS：
+
+```bash
+bash apps/macos/build.sh
+python3 scripts/performance/startup.py   --app apps/macos/build/Kite.app   --samples 10   --entries 10000   --output docs/performance/results/v0.6.61-macos-arm64-startup.json   --markdown docs/performance/startup-macos-v0.6.61.md
+```
+
+Windows：
+
+```powershell
+cargo build --release --locked --features windows-ui
+python scripts/performance/startup.py `
+  --app target/release/kite-explorer.exe `
+  --samples 10 `
+  --entries 10000 `
+  --output target/performance/startup-windows.json `
+  --markdown target/performance/startup-windows.md
+```
+
+工作流 `.github/workflows/performance-startup.yml` 在两个平台构建 release 应用并上传启动结果。相关 PR 路径会触发 3 次快速测量。手工运行可以增加样本数和夹具规模。
+
+测量器记录：
+
+- 从进程创建到首个内容事件的时间。
+- 从应用入口到首个内容事件的时间。
+- 每个样本的峰值 RSS。
+- 全部追踪事件和原始样本。
+
+边界：
+
+- 首内容事件是可见内容代理。它不是合成器确认的首帧。
+- 测量器不清理系统缓存。`first_process` 只表示首次进程；`warm_restart` 使用热缓存。
+- 原生交互丢帧、默认文件管理器入口和 Finder 入口仍需独立测量。
+
+## 8. 跨平台工作流
 
 工作流文件是 `.github/workflows/performance.yml`。
 
 - Pull Request 使用 `ci` 配置。
 - 手工运行可以选择 `smoke`、`ci`、`standard` 或 `extended`。
 - 两个平台上传 JSON、Markdown 和测试日志。
+- 启动工作流对相关 PR 路径运行 3 次。手工运行可以使用更多样本。
 - 工作流不阻断合并。先积累足够的抖动数据，再设置硬阈值。
 
-## 8. 版本比较
+## 9. 版本比较
 
 比较两个 JSON 报告：
 
@@ -154,7 +195,7 @@ python3 scripts/performance/compare.py \
 
 需要让脚本在发现回归时返回失败时，增加 `--fail-on-regression`。
 
-## 9. 发布候选流程
+## 10. 发布候选流程
 
 1. 构建 release 版本。
 2. 在 Windows x64 和 macOS arm64 运行 `standard` 配置。
@@ -165,7 +206,7 @@ python3 scripts/performance/compare.py \
 7. 将确认的回归拆成独立 Issue。
 8. 将报告路径和比较结论写入性能追踪 Issue。
 
-## 10. 解释边界
+## 11. 解释边界
 
 - 时间来自单一进程。系统负载会影响结果。
 - 操作系统缓存没有统一清理。读取类结果通常偏热。

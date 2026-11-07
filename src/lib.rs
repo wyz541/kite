@@ -8,6 +8,7 @@ pub mod ffi;
 #[cfg(windows)]
 pub mod file_watcher;
 pub mod fs;
+pub mod perf_trace;
 pub mod platform;
 #[cfg(windows)]
 pub mod recycle_bin;

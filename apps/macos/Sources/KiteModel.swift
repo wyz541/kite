@@ -779,6 +779,7 @@ final class KiteModel: ObservableObject {
     @Published private(set) var contentSearchLoading = false
 
     init(core: KiteCore = KiteCore()) {
+        PerformanceTrace.mark("macos.model_start")
         let storedColumnViewRules = Self.loadStoredColumnViewRules()
         self.core = core
         self.storedColumnViewRules = storedColumnViewRules
@@ -794,6 +795,7 @@ final class KiteModel: ObservableObject {
                 self?.updateContentSearchPowerPolicy()
             }
         }
+        PerformanceTrace.mark("macos.model_ready")
     }
 
     deinit {
@@ -2127,6 +2129,18 @@ final class KiteModel: ObservableObject {
 
     private func restoreOrCreateTabs() {
         let fallbackPath = core.defaultDirectory()
+        if let performancePath = ProcessInfo.processInfo.environment["KITE_PERF_START_PATH"],
+           !performancePath.isEmpty {
+            do {
+                let tab = try makeTab(path: performancePath)
+                tabs = [tab]
+                activeTabID = tab.id
+                errorMessage = nil
+                return
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
         if let state = core.loadSession() {
             let requestedIndex = min(Int(state.activeTab), max(state.tabs.count - 1, 0))
             var restoredTabs: [BrowserTab] = []
