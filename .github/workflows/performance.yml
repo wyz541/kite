@@ -32,6 +32,11 @@ on:
         description: Optional cold/build sample override
         required: false
         type: string
+      rounds:
+        description: Independent process runs for aggregation
+        required: true
+        default: "3"
+        type: string
 
 permissions:
   contents: read
@@ -72,20 +77,33 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($benchmarkProfile)) { $benchmarkProfile = "ci" }
           $samples = "${{ github.event.inputs.samples }}"
           $coldSamples = "${{ github.event.inputs.cold_samples }}"
-          $arguments = @(
-            "run", "--locked", "--release", "--features", "performance",
-            "--bin", "kite-perf", "--",
-            "--profile", $benchmarkProfile,
-            "--output", "target/performance/${{ matrix.platform }}.json",
-            "--markdown", "target/performance/${{ matrix.platform }}.md"
-          )
-          if (-not [string]::IsNullOrWhiteSpace($samples)) {
-            $arguments += @("--samples", $samples)
+          $roundsRaw = "${{ github.event.inputs.rounds }}"
+          if ([string]::IsNullOrWhiteSpace($roundsRaw)) { $roundsRaw = "1" }
+          $rounds = [int]$roundsRaw
+          $reports = @()
+          for ($run = 1; $run -le $rounds; $run++) {
+            $output = "target/performance/${{ matrix.platform }}-run-$run.json"
+            $markdown = "target/performance/${{ matrix.platform }}-run-$run.md"
+            $arguments = @(
+              "run", "--locked", "--release", "--features", "performance",
+              "--bin", "kite-perf", "--",
+              "--profile", $benchmarkProfile,
+              "--output", $output,
+              "--markdown", $markdown
+            )
+            if (-not [string]::IsNullOrWhiteSpace($samples)) {
+              $arguments += @("--samples", $samples)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($coldSamples)) {
+              $arguments += @("--cold-samples", $coldSamples)
+            }
+            cargo @arguments
+            $reports += $output
           }
-          if (-not [string]::IsNullOrWhiteSpace($coldSamples)) {
-            $arguments += @("--cold-samples", $coldSamples)
-          }
-          cargo @arguments
+          python scripts/performance/aggregate.py @reports `
+            --minimum-runs 1 `
+            --output "target/performance/${{ matrix.platform }}-aggregate.json" `
+            --markdown "target/performance/${{ matrix.platform }}-aggregate.md"
 
       - name: Run performance benchmark on macOS
         if: runner.os == 'macOS'
@@ -93,25 +111,39 @@ jobs:
         run: |
           profile="${{ github.event.inputs.profile }}"
           profile="${profile:-ci}"
-          args=(
-            run --locked --release --features performance --bin kite-perf --
-            --profile "$profile"
-            --output "target/performance/${{ matrix.platform }}.json"
-            --markdown "target/performance/${{ matrix.platform }}.md"
-          )
-          if [[ -n "${{ github.event.inputs.samples }}" ]]; then
-            args+=(--samples "${{ github.event.inputs.samples }}")
-          fi
-          if [[ -n "${{ github.event.inputs.cold_samples }}" ]]; then
-            args+=(--cold-samples "${{ github.event.inputs.cold_samples }}")
-          fi
-          cargo "${args[@]}"
+          rounds="${{ github.event.inputs.rounds }}"
+          rounds="${rounds:-1}"
+          reports=()
+          for ((run = 1; run <= rounds; run++)); do
+            output="target/performance/${{ matrix.platform }}-run-$run.json"
+            markdown="target/performance/${{ matrix.platform }}-run-$run.md"
+            args=(
+              run --locked --release --features performance --bin kite-perf --
+              --profile "$profile"
+              --output "$output"
+              --markdown "$markdown"
+            )
+            if [[ -n "${{ github.event.inputs.samples }}" ]]; then
+              args+=(--samples "${{ github.event.inputs.samples }}")
+            fi
+            if [[ -n "${{ github.event.inputs.cold_samples }}" ]]; then
+              args+=(--cold-samples "${{ github.event.inputs.cold_samples }}")
+            fi
+            cargo "${args[@]}"
+            reports+=("$output")
+          done
+          python3 scripts/performance/aggregate.py "${reports[@]}" \
+            --minimum-runs 1 \
+            --output "target/performance/${{ matrix.platform }}-aggregate.json" \
+            --markdown "target/performance/${{ matrix.platform }}-aggregate.md"
 
       - name: Upload performance results
         uses: actions/upload-artifact@v4
         with:
           name: kite-performance-${{ matrix.platform }}
           path: |
-            target/performance/${{ matrix.platform }}.json
-            target/performance/${{ matrix.platform }}.md
+            target/performance/${{ matrix.platform }}-run-*.json
+            target/performance/${{ matrix.platform }}-run-*.md
+            target/performance/${{ matrix.platform }}-aggregate.json
+            target/performance/${{ matrix.platform }}-aggregate.md
           if-no-files-found: error
