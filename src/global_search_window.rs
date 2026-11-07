@@ -11,7 +11,7 @@ use crate::actions::{
 use crate::content_search::{
     self, CONTENT_SEARCH_MAX_FILES, ContentFileMatch, ContentSearchSnapshot,
 };
-use crate::fs::{FileEntry, format_size, search_global_names};
+use crate::fs::{FileEntry, format_size};
 use crate::table::icon_for;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -144,6 +144,11 @@ impl GlobalSearchWindow {
             },
         );
 
+        let mut index_roots = favorite_roots.clone();
+        index_roots.extend(local_roots.iter().cloned());
+        index_roots.push(current_folder.clone());
+        kite_core::global_name_search::ensure_roots(&index_roots);
+
         Self {
             current_folder,
             favorite_roots,
@@ -173,27 +178,6 @@ impl GlobalSearchWindow {
             GlobalSearchScope::LocalDisks => self.local_roots.clone(),
             GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
         }
-    }
-
-    // Indexed results are a fast preview. The full traversal remains authoritative.
-    fn indexed_name_search_roots(&self) -> Vec<PathBuf> {
-        let mut roots = match self.scope {
-            GlobalSearchScope::CurrentFolder => Vec::new(),
-            GlobalSearchScope::Favorites => self.favorite_roots.clone(),
-            GlobalSearchScope::LocalDisks => {
-                let mut roots = Vec::new();
-                if let Some(home) = dirs::home_dir() {
-                    roots.push(home);
-                }
-                roots.push(self.current_folder.clone());
-                roots.extend(self.favorite_roots.iter().cloned());
-                roots
-            }
-            GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
-        };
-        roots.sort();
-        roots.dedup();
-        roots
     }
 
     fn scope_has_roots(&self, scope: GlobalSearchScope) -> bool {
@@ -270,6 +254,8 @@ impl GlobalSearchWindow {
             return;
         }
         self.scope = scope;
+        let roots = self.scope_roots();
+        kite_core::global_name_search::ensure_roots(&roots);
         self.cancel_search();
         self.cancel_live_search();
         self.name_results = None;
@@ -382,7 +368,7 @@ impl GlobalSearchWindow {
         cx.notify();
 
         if mode == GlobalSearchMode::Name && self.scope != GlobalSearchScope::CurrentFolder {
-            let indexed_roots = self.indexed_name_search_roots();
+            let indexed_roots = roots.clone();
             let indexed_query = query.clone();
             let indexed_cancel = Arc::clone(&cancel);
             self._indexed_search_task = cx.spawn_in(window, async move |this, cx| {
@@ -925,7 +911,13 @@ impl Render for GlobalSearchWindow {
                 .child(error.clone())
                 .into_any_element()
         } else if self.loading && self.name_results.is_none() && self.content_results.is_none() {
-            let scope_count = self.scope_roots().len();
+            let roots = self.scope_roots();
+            let scope_count = roots.len();
+            let index_progress = kite_core::global_name_search::status(&roots)
+                .into_iter()
+                .filter_map(|status| status.message)
+                .collect::<Vec<_>>()
+                .join("；");
             div()
                 .flex_1()
                 .items_center()
@@ -942,12 +934,17 @@ impl Render for GlobalSearchWindow {
                                 .items_center()
                                 .gap_2()
                                 .child(Icon::new(IconName::Search).size_4())
-                                .child(if self.scope.allows_live_search() {
+                                .child(if !index_progress.is_empty() {
+                                    "正在建立名称索引…"
+                                } else if self.scope.allows_live_search() {
                                     "正在搜索…"
                                 } else {
                                     "正在扫描所有搜索位置…"
                                 }),
                         )
+                        .when(!index_progress.is_empty(), |this| {
+                            this.child(index_progress.clone())
+                        })
                         .when(!self.scope.allows_live_search(), |this| {
                             this.child(if scope_count > 1 {
                                 format!("共 {scope_count} 个位置。修改关键词可取消本次搜索。")
@@ -1055,7 +1052,7 @@ fn search_name_roots(
     query: &str,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameResults>, String> {
-    let Some(snapshot) = search_global_names(roots, query, cancel)? else {
+    let Some(snapshot) = kite_core::global_name_search::search_names(roots, query, cancel)? else {
         return Ok(None);
     };
     Ok(Some(global_name_results(snapshot)))

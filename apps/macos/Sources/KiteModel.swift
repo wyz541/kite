@@ -558,6 +558,7 @@ struct BrowserGlobalSearchState {
     let entries: [BrowserEntry]
     let groups: [BrowserGlobalSearchGroup]
     let truncated: Bool
+    let partial: Bool
 
     init(dto: GlobalSearchResultDto) {
         roots = dto.roots
@@ -565,6 +566,7 @@ struct BrowserGlobalSearchState {
         entries = dto.entries.map(BrowserEntry.init(dto:))
         groups = Self.group(entries)
         truncated = dto.truncated
+        partial = dto.partial
     }
 
     private static func group(_ entries: [BrowserEntry]) -> [BrowserGlobalSearchGroup] {
@@ -1189,6 +1191,21 @@ final class KiteModel: ObservableObject {
         contentSearch = nil
         errorMessage = nil
         let core = self.core
+
+        Task {
+            do {
+                let indexedResult = try await Task.detached(priority: .userInitiated) {
+                    try core.searchIndexedNames(paths: roots, query: query)
+                }.value
+
+                guard generation == self.globalSearchGeneration, self.globalSearchLoading else { return }
+                if let indexedResult {
+                    self.globalSearch = BrowserGlobalSearchState(dto: indexedResult)
+                }
+            } catch {
+                return
+            }
+        }
 
         Task {
             do {

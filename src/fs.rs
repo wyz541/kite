@@ -19,6 +19,12 @@ const DIRECTORY_SEARCH_THREADS: usize = 2;
 const GLOBAL_NAME_SEARCH_THREADS: usize = 1;
 const GLOBAL_NAME_SEARCH_ROOT_THREADS: usize = 3;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static GLOBAL_NAME_SEARCH_WALKS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
     Directory,
@@ -182,7 +188,7 @@ pub struct SearchSnapshot {
     pub truncated: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GlobalNameSearchSnapshot {
     pub roots: Vec<PathBuf>,
     pub query: String,
@@ -288,6 +294,8 @@ pub fn search_global_names(
     query: &str,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
+    #[cfg(test)]
+    GLOBAL_NAME_SEARCH_WALKS.with(|count| count.set(count.get() + 1));
     let query = query.trim();
     if query.is_empty() {
         return Ok(None);
@@ -548,8 +556,32 @@ pub(crate) fn is_generated_search_directory(path: &Path) -> bool {
     }
     matches!(
         name.as_str(),
-        ".git" | ".svn" | ".hg" | "node_modules" | "target" | "build" | "dist" | ".cache"
+        ".git"
+            | ".svn"
+            | ".hg"
+            | "node_modules"
+            | "target"
+            | "build"
+            | "dist"
+            | ".cache"
+            | "name-index-v2"
+            | "search-index-v1"
     )
+}
+
+pub(crate) fn has_generated_parent(path: &Path, root: &Path) -> bool {
+    let root_key = path_key(root);
+    let mut current = path.parent();
+    while let Some(parent) = current {
+        if path_key(parent) == root_key {
+            break;
+        }
+        if is_generated_search_directory(parent) {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 pub(crate) fn sort_global_name_entries(entries: &mut [FileEntry], query: &str) {
@@ -1026,6 +1058,20 @@ mod tests {
         assert!(cancelled_result.is_none());
 
         fs::remove_dir_all(root).expect("clean test directory");
+    }
+
+    #[test]
+    fn detects_generated_parents_below_search_root() {
+        let root = Path::new("workspace");
+        assert!(has_generated_parent(
+            &root.join("node_modules").join("crate").join("index.js"),
+            root
+        ));
+        assert!(!has_generated_parent(
+            &root.join("node_modules").join("crate").join("index.js"),
+            &root.join("node_modules")
+        ));
+        assert!(!has_generated_parent(&root.join("target.txt"), root));
     }
 
     #[test]

@@ -51,6 +51,7 @@ pub struct GlobalSearchResultDto {
     pub query: String,
     pub entries: Vec<DirectoryEntryDto>,
     pub truncated: bool,
+    pub partial: bool,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -167,6 +168,7 @@ impl KiteError {
 #[derive(Debug, uniffi::Object)]
 pub struct KiteCore {
     search_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    indexed_search_cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 #[uniffi::export]
@@ -175,6 +177,7 @@ impl KiteCore {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             search_cancel: Mutex::new(None),
+            indexed_search_cancel: Mutex::new(None),
         })
     }
 
@@ -290,7 +293,7 @@ impl KiteCore {
         }
 
         let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        let result = crate::fs::search_global_names(&roots, &query, cancel.as_ref());
+        let result = crate::global_name_search::search_names(&roots, &query, cancel.as_ref());
 
         if let Ok(mut active) = self.search_cancel.lock()
             && active
@@ -312,14 +315,55 @@ impl KiteCore {
             query: snapshot.query,
             entries: snapshot.entries.iter().map(entry_dto).collect(),
             truncated: snapshot.truncated,
+            partial: snapshot.partial,
+        }))
+    }
+
+    pub fn search_indexed_names(
+        &self,
+        paths: Vec<String>,
+        query: String,
+    ) -> Result<Option<GlobalSearchResultDto>, KiteError> {
+        let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut active = self
+                .indexed_search_cancel
+                .lock()
+                .map_err(|_| KiteError::operation("索引搜索状态锁不可用"))?;
+            *active = Some(Arc::clone(&cancel));
+        }
+        let result = crate::indexed_search::search_indexed_names(&roots, &query, cancel.as_ref());
+        if let Ok(mut active) = self.indexed_search_cancel.lock()
+            && active
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &cancel))
+        {
+            *active = None;
+        }
+        let Some(snapshot) = result.map_err(KiteError::operation)? else {
+            return Ok(None);
+        };
+        Ok(Some(GlobalSearchResultDto {
+            roots: snapshot
+                .roots
+                .iter()
+                .map(|root| root.to_string_lossy().into_owned())
+                .collect(),
+            query: snapshot.query,
+            entries: snapshot.entries.iter().map(entry_dto).collect(),
+            truncated: snapshot.truncated,
+            partial: snapshot.partial,
         }))
     }
 
     pub fn cancel_directory_search(&self) {
-        if let Ok(active) = self.search_cancel.lock()
-            && let Some(cancel) = active.as_ref()
-        {
-            cancel.store(true, Ordering::Relaxed);
+        for slot in [&self.search_cancel, &self.indexed_search_cancel] {
+            if let Ok(active) = slot.lock()
+                && let Some(cancel) = active.as_ref()
+            {
+                cancel.store(true, Ordering::Relaxed);
+            }
         }
     }
 

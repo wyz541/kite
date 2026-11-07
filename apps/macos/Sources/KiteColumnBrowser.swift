@@ -1445,6 +1445,11 @@ struct KiteGlobalSearchResults: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.primary.opacity(0.055), in: Capsule())
+                    if search.partial {
+                        Text("索引结果，正在核对全部文件…")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
                     if search.truncated {
                         Text("结果不完整")
                             .font(.system(size: 9.5, weight: .medium))
