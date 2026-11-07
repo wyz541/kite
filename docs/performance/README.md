@@ -2,7 +2,8 @@
 
 结论：`kite-perf` 为 Rust Core 的主要性能路径生成可复现 JSON 报告。原生 UI、网络和受控设备仍使用独立边界，不混入 Core 数值。
 
-当前基线：[v0.6.61 macOS arm64](baseline-v0.6.61.md)。
+当前实体机基线：[v0.6.61 macOS arm64](baseline-v0.6.61.md)。
+当前跨平台 CI 基线：[v0.6.61 Windows 与 macOS](baseline-v0.6.61-ci.md)。
 当前复现检查：[v0.6.61 双次运行](reproducibility-v0.6.61.md)。
 
 ## 1. 目标
