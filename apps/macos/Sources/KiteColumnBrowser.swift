@@ -60,6 +60,7 @@ struct KiteColumnBrowser: View {
                             animated: false
                         )
                         model.syncColumnDirectoryWatchers()
+                        PerformanceTrace.markOnce("macos.first_content")
                     }
                     .onChange(of: model.columns.map(\.id)) { _ in
                         model.syncColumnDirectoryWatchers()
