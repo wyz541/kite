@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "generated_at_unix_ms": 1794033947244,
+  "platform": "win32",
+  "platform_release": "2025Server",
+  "platform_machine": "AMD64",
+  "host": {
+    "os": "win32",
+    "os_version": "unknown",
+    "architecture": "AMD64",
+    "cpu_model": "Generic x64 CPU",
+    "memory_bytes": 0
+  },
+  "app_name": "kite-explorer.exe",
+  "app_versions": [
+    "0.6.61"
+  ],
+  "profile": "startup",
+  "fixture_entries": 10000,
+  "target_event": "windows.first_content_render",
+  "method": {
+    "launch": "new process for every sample",
+    "first_process": "run 0 starts after fixture creation",
+    "warm_restart": "later runs reuse OS caches",
+    "cache_control": "OS caches are not purged",
+    "time_origin": "wall clock immediately before process creation",
+    "first_content": "first KiteApp render after the initial directory load completes",
+    "rss": "process resident memory polled every 20 ms; maximum observed value"
+  },
+  "summary": {
+    "launch_to_first_content": {
+      "sample_count": 3,
+      "min_ms": 494.0,
+      "p50_ms": 558.0,
+      "p95_ms": 828.9,
+      "max_ms": 859.0,
+      "mean_ms": 637.0
+    },
+    "entry_to_first_content": {
+      "sample_count": 3,
+      "min_ms": 467.0,
+      "p50_ms": 532.0,
+      "p95_ms": 804.6999999999999,
+      "max_ms": 835.0,
+      "mean_ms": 611.3333333333334
+    },
+    "peak_rss_bytes_max": 66793472,
+    "phase_summaries": {
+      "first_process": {
+        "launch_to_first_content": {
+          "sample_count": 1,
+          "min_ms": 859.0,
+          "p50_ms": 859.0,
+          "p95_ms": 859.0,
+          "max_ms": 859.0,
+          "mean_ms": 859.0
+        },
+        "entry_to_first_content": {
+          "sample_count": 1,
+          "min_ms": 835.0,
+          "p50_ms": 835.0,
+          "p95_ms": 835.0,
+          "max_ms": 835.0,
+          "mean_ms": 835.0
+        },
+        "peak_rss_bytes_max": 66793472
+      },
+      "warm_restart": {
+        "launch_to_first_content": {
+          "sample_count": 2,
+          "min_ms": 494.0,
+          "p50_ms": 526.0,
+          "p95_ms": 554.8000000000001,
+          "max_ms": 558.0,
+          "mean_ms": 526.0
+        },
+        "entry_to_first_content": {
+          "sample_count": 2,
+          "min_ms": 467.0,
+          "p50_ms": 499.5,
+          "p95_ms": 528.75,
+          "max_ms": 532.0,
+          "mean_ms": 499.5
+        },
+        "peak_rss_bytes_max": 64217088
+      }
+    }
+  },
+  "runs": [
+    {
+      "status": "ok",
+      "pid": 5984,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 859,
+      "entry_to_first_content_ms": 835.0,
+      "launch_to_process_entry_ms": 23,
+      "peak_rss_bytes": 66793472,
+      "events": [
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5984,
+          "event": "process_entry",
+          "timestamp_unix_ms": 1794033945252,
+          "elapsed_ms": 0
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5984,
+          "event": "windows.app_model_ready",
+          "timestamp_unix_ms": 1794033945356,
+          "elapsed_ms": 103
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5984,
+          "event": "windows.first_window_render",
+          "timestamp_unix_ms": 1794033945364,
+          "elapsed_ms": 112
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5984,
+          "event": "windows.first_directory_loaded",
+          "timestamp_unix_ms": 1794033946084,
+          "elapsed_ms": 831
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5984,
+          "event": "windows.first_content_render",
+          "timestamp_unix_ms": 1794033946088,
+          "elapsed_ms": 835
+        }
+      ],
+      "run_index": 0,
+      "phase": "first_process"
+    },
+    {
+      "status": "ok",
+      "pid": 5280,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 558,
+      "entry_to_first_content_ms": 532.0,
+      "launch_to_process_entry_ms": 26,
+      "peak_rss_bytes": 64192512,
+      "events": [
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5280,
+          "event": "process_entry",
+          "timestamp_unix_ms": 1794033946154,
+          "elapsed_ms": 0
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5280,
+          "event": "windows.app_model_ready",
+          "timestamp_unix_ms": 1794033946341,
+          "elapsed_ms": 186
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5280,
+          "event": "windows.first_window_render",
+          "timestamp_unix_ms": 1794033946347,
+          "elapsed_ms": 193
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5280,
+          "event": "windows.first_directory_loaded",
+          "timestamp_unix_ms": 1794033946681,
+          "elapsed_ms": 526
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 5280,
+          "event": "windows.first_content_render",
+          "timestamp_unix_ms": 1794033946686,
+          "elapsed_ms": 532
+        }
+      ],
+      "run_index": 1,
+      "phase": "warm_restart"
+    },
+    {
+      "status": "ok",
+      "pid": 2360,
+      "version": "0.6.61",
+      "launch_to_first_content_ms": 494,
+      "entry_to_first_content_ms": 467.0,
+      "launch_to_process_entry_ms": 26,
+      "peak_rss_bytes": 64217088,
+      "events": [
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 2360,
+          "event": "process_entry",
+          "timestamp_unix_ms": 1794033946749,
+          "elapsed_ms": 0
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 2360,
+          "event": "windows.app_model_ready",
+          "timestamp_unix_ms": 1794033946867,
+          "elapsed_ms": 117
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 2360,
+          "event": "windows.first_window_render",
+          "timestamp_unix_ms": 1794033946875,
+          "elapsed_ms": 126
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 2360,
+          "event": "windows.first_directory_loaded",
+          "timestamp_unix_ms": 1794033947211,
+          "elapsed_ms": 461
+        },
+        {
+          "schema_version": 1,
+          "platform": "windows",
+          "version": "0.6.61",
+          "pid": 2360,
+          "event": "windows.first_content_render",
+          "timestamp_unix_ms": 1794033947217,
+          "elapsed_ms": 467
+        }
+      ],
+      "run_index": 2,
+      "phase": "warm_restart"
+    }
+  ],
+  "errors": []
+}
