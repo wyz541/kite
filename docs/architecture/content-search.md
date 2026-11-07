@@ -1,6 +1,6 @@
 # 全局名称与内容搜索
 
-> 结论：Kite 完整遍历已选名称搜索范围。Kite 使用 Tantivy 本地索引查找内容候选文件。Kite 使用 `grep-searcher` 验证精确文本并生成匹配行。后台任务始终让位于前台交互。
+> 结论：Kite 先查询系统文件名索引，再遍历补齐未索引结果。Kite 使用 Tantivy 本地索引查找内容候选文件。Kite 使用 `grep-searcher` 验证精确文本并生成匹配行。后台任务始终让位于前台交互。
 
 状态：已实现
 日期：2026-11-05
@@ -36,12 +36,18 @@ Windows 当前路径位于 UNC 或远程盘时，网络范围可回退到当前�
 ```mermaid
 flowchart LR
     UI[搜索界面<br/>模式与范围] --> CORE[Rust Core]
-    CORE --> INDEX[Tantivy<br/>本地索引]
+    CORE --> SYSTEM[Windows Search<br/>系统文件名索引]
+    CORE --> WALK[文件遍历<br/>补齐未索引项目]
+    SYSTEM --> MERGE[合并与排序]
+    WALK --> MERGE
+    MERGE --> NAME[名称结果]
+    CORE --> INDEX[Tantivy<br/>内容索引]
     INDEX --> CANDIDATE[候选文件]
     CANDIDATE --> VERIFY[grep-searcher<br/>精确行匹配]
     WATCH[notify<br/>文件监听] --> INDEX
-    VERIFY --> RESULT[文件与匹配行]
-    RESULT --> UI
+    VERIFY --> CONTENT[文件与匹配行]
+    NAME --> UI
+    CONTENT --> UI
 ```
 
 内容快路径查询只读取索引和少量候选文件。
@@ -97,7 +103,10 @@ Rust Core 也接受正则查询。
 界面显示结果截断和索引更新状态。
 
 名称查询最多返回 1000 项。
-名称查询扫描所有选定根目录。
+Windows 名称查询先查询用户目录、当前目录和收藏目录的系统索引结果。
+索引结果先显示，并标记为“索引结果”。
+Kite 同时扫描所有选定根目录。
+浏览遍历补齐未索引卷和索引遗漏项。
 名称查询最多同时扫描 3 个根目录。
 达到 1000 项结果上限时，结果标记为不完整。
 修改关键词或关闭窗口会取消名称查询。
@@ -219,7 +228,8 @@ Windows 使用 GPUI 下拉菜单，并按 macOS 基准保持相同的信息层�
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/content_search.rs` | 索引、查询、片段、监听和资源控制 |
+| `src/content_search.rs` | 内容索引、查询、片段、监听和资源控制 |
+| `src/indexed_search.rs` | Windows Search 文件名索引加速和范围检测 |
 | `src/ffi.rs` | UniFFI 请求、状态和结果 |
 | `src/global_search_window.rs` | Windows 独立搜索窗口 |
 | `src/app.rs` | Windows 全局搜索入口和快捷键 |
@@ -252,6 +262,11 @@ CI 还运行 Rust 格式检查、全部 Core 测试、Clippy、Windows 构建和
 - 当前文件夹范围在输入两个及以上字符后，等待 280 ms 自动查询。
 - 多磁盘范围只在按 Enter 或点击搜索后查询。
 - 名称搜索扫描所有选定根目录，直到达到 1000 项结果上限或用户取消。
+- Windows Search 只加速已收录的用户目录、当前目录和收藏目录。
+- Windows Search 可能遗漏刚创建或未收录的项目。
+- 本地磁盘范围的索引加速不覆盖全部子目录。
+- 全量遍历会补齐索引遗漏项。
+- macOS Spotlight 加速尚未接入。
 - 名称搜索不读取文件内容。
 - 名称搜索不进入隐藏目录和生成目录。
 - 内容搜索结果为每个文件保留 3 条片段。
