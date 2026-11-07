@@ -38,6 +38,7 @@ use tabs::KiteWindow;
 
 #[cfg(windows)]
 fn main() {
+    kite_core::perf_trace::start();
     file_clipboard::trace_drag("Kite process started");
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)

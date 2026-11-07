@@ -1063,6 +1063,7 @@ impl KiteApp {
             window,
             cx,
         );
+        kite_core::perf_trace::mark("windows.app_model_ready");
         app
     }
 
@@ -1412,6 +1413,7 @@ impl KiteApp {
         self.invalidate_columns();
         self.load_generation = self.load_generation.wrapping_add(1);
         let generation = self.load_generation;
+        let initial_load = matches!(intent, NavigationIntent::Initial);
         let sort = self.table.read(cx).delegate().sort_spec();
         let load_path = path.clone();
 
@@ -1486,6 +1488,9 @@ impl KiteApp {
                         }
                         this.refresh_vcs_statuses(this.current_dir.clone(), cx);
                         this.path_bar_scroll_pending = true;
+                        if initial_load {
+                            kite_core::perf_trace::mark_once("windows.first_directory_loaded");
+                        }
                     }
                     Err(error) => {
                         this.error = Some(error.into());
@@ -7617,6 +7622,9 @@ impl EventEmitter<TabRequest> for KiteApp {}
 
 impl Render for KiteApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.loading {
+            kite_core::perf_trace::mark_once("windows.first_content_render");
+        }
         let selected_entries = self.selected_entries(cx);
         let selected_count = selected_entries.len();
         let selected = selected_entries.first().cloned();
