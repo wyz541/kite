@@ -123,6 +123,14 @@ impl GlobalSearchWindow {
                     this.start_immediate_search(query, window, cx);
                 }
                 InputEvent::Change => {
+                    if !this.scope.allows_live_search() && this.loading {
+                        this.cancel_search();
+                        this.loading = false;
+                        this.name_results = None;
+                        this.content_results = None;
+                        this.expanded_groups.clear();
+                        this.error = None;
+                    }
                     if this.mode == GlobalSearchMode::Content
                         && let Ok(service) = content_search::shared_service()
                     {
@@ -315,9 +323,8 @@ impl GlobalSearchWindow {
 
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.loading && !self.scope.allows_live_search() {
-            self.error = Some("当前范围正在搜索，请等待本次搜索结束".into());
-            cx.notify();
-            return;
+            self.cancel_search();
+            self.loading = false;
         }
         let query = query.trim().to_string();
         if query.is_empty() {
@@ -862,6 +869,7 @@ impl Render for GlobalSearchWindow {
                 .child(error.clone())
                 .into_any_element()
         } else if self.loading && self.name_results.is_none() && self.content_results.is_none() {
+            let scope_count = self.scope_roots().len();
             div()
                 .flex_1()
                 .items_center()
@@ -869,8 +877,29 @@ impl Render for GlobalSearchWindow {
                 .gap_2()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(Icon::new(IconName::Search).size_4())
-                .child("正在搜索…")
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(Icon::new(IconName::Search).size_4())
+                                .child(if self.scope.allows_live_search() {
+                                    "正在搜索…"
+                                } else {
+                                    "正在扫描所有搜索位置…"
+                                }),
+                        )
+                        .when(!self.scope.allows_live_search(), |this| {
+                            this.child(if scope_count > 1 {
+                                format!("共 {scope_count} 个位置。修改关键词可取消本次搜索。")
+                            } else {
+                                "修改关键词可取消本次搜索。".to_string()
+                            })
+                        }),
+                )
                 .into_any_element()
         } else if self.mode == GlobalSearchMode::Content {
             if let Some(results) = self.content_results.as_ref() {

@@ -5,8 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::time::SystemTime;
 
 use chrono::{DateTime, Local};
 use ignore::{WalkBuilder, WalkState};
@@ -17,8 +17,7 @@ pub const SEARCH_RESULT_LIMIT: usize = 1_000;
 
 const DIRECTORY_SEARCH_THREADS: usize = 2;
 const GLOBAL_NAME_SEARCH_THREADS: usize = 1;
-const GLOBAL_NAME_SEARCH_TIME_BUDGET: Duration = Duration::from_secs(5);
-const GLOBAL_NAME_SEARCH_SCAN_LIMIT: usize = 250_000;
+const GLOBAL_NAME_SEARCH_ROOT_THREADS: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
@@ -191,13 +190,6 @@ pub struct GlobalNameSearchSnapshot {
     pub truncated: bool,
 }
 
-struct SearchBudget {
-    deadline: Instant,
-    max_entries: usize,
-    scanned_entries: AtomicUsize,
-    exhausted: AtomicBool,
-}
-
 struct LowPriorityGuard(Option<ThreadPriority>);
 
 impl LowPriorityGuard {
@@ -215,36 +207,6 @@ impl Drop for LowPriorityGuard {
         if let Some(priority) = self.0 {
             let _ = set_current_thread_priority(priority);
         }
-    }
-}
-
-impl SearchBudget {
-    fn new(max_entries: usize, duration: Duration) -> Self {
-        Self {
-            deadline: Instant::now() + duration,
-            max_entries: max_entries.max(1),
-            scanned_entries: AtomicUsize::new(0),
-            exhausted: AtomicBool::new(false),
-        }
-    }
-
-    fn consume_entry(&self) -> bool {
-        if self.exhausted.load(AtomicOrdering::Relaxed) {
-            return false;
-        }
-        let scanned = self
-            .scanned_entries
-            .fetch_add(1, AtomicOrdering::Relaxed)
-            .saturating_add(1);
-        if scanned > self.max_entries || Instant::now() >= self.deadline {
-            self.exhausted.store(true, AtomicOrdering::Relaxed);
-            return false;
-        }
-        true
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.exhausted.load(AtomicOrdering::Relaxed)
     }
 }
 
@@ -317,37 +279,13 @@ pub fn search_directory(
     sort: SortSpec,
     cancel: &AtomicBool,
 ) -> Result<Option<SearchSnapshot>, String> {
-    search_directory_inner(
-        root,
-        query,
-        sort,
-        cancel,
-        false,
-        DIRECTORY_SEARCH_THREADS,
-        None,
-    )
+    search_directory_inner(root, query, sort, cancel, false, DIRECTORY_SEARCH_THREADS)
 }
 
 pub fn search_global_names(
     roots: &[PathBuf],
     query: &str,
     cancel: &AtomicBool,
-) -> Result<Option<GlobalNameSearchSnapshot>, String> {
-    search_global_names_with_budget(
-        roots,
-        query,
-        cancel,
-        GLOBAL_NAME_SEARCH_SCAN_LIMIT,
-        GLOBAL_NAME_SEARCH_TIME_BUDGET,
-    )
-}
-
-fn search_global_names_with_budget(
-    roots: &[PathBuf],
-    query: &str,
-    cancel: &AtomicBool,
-    max_entries: usize,
-    time_budget: Duration,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
     let query = query.trim();
     if query.is_empty() {
@@ -358,38 +296,55 @@ fn search_global_names_with_budget(
         return Err("没有可搜索的文件夹".to_string());
     }
 
-    let mut entries = Vec::<FileEntry>::new();
-    let mut truncated = false;
-    let budget = SearchBudget::new(max_entries, time_budget);
-    for root in &roots {
+    let mut snapshots = Vec::new();
+    for roots in roots.chunks(GLOBAL_NAME_SEARCH_ROOT_THREADS) {
         if cancel.load(AtomicOrdering::Relaxed) {
             return Ok(None);
         }
-        let Some(snapshot) = search_directory_inner(
-            root,
-            query,
-            SortSpec::default(),
-            cancel,
-            true,
-            GLOBAL_NAME_SEARCH_THREADS,
-            Some(&budget),
-        )?
-        else {
-            continue;
-        };
-        truncated |= snapshot.truncated || budget.is_exhausted();
+        let chunk = std::thread::scope(|scope| {
+            let handles = roots
+                .iter()
+                .map(|root| {
+                    scope.spawn(move || {
+                        search_directory_inner(
+                            root,
+                            query,
+                            SortSpec::default(),
+                            cancel,
+                            true,
+                            GLOBAL_NAME_SEARCH_THREADS,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .map_err(|_| "搜索任务未正确结束".to_string())?
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })?;
+        snapshots.extend(chunk);
+    }
+
+    let mut entries = Vec::<FileEntry>::new();
+    let mut truncated = false;
+    for snapshot in snapshots.into_iter().flatten() {
+        truncated |= snapshot.truncated;
         entries.extend(snapshot.entries);
-        if budget.is_exhausted() || entries.len() >= SEARCH_RESULT_LIMIT {
-            entries.truncate(SEARCH_RESULT_LIMIT);
-            truncated = true;
-            break;
-        }
     }
 
     sort_global_name_entries(&mut entries, query);
     let mut seen = HashSet::new();
     entries.retain(|entry| seen.insert(path_key(&entry.path)));
+    truncated |= entries.len() > SEARCH_RESULT_LIMIT;
     entries.truncate(SEARCH_RESULT_LIMIT);
+
+    if cancel.load(AtomicOrdering::Relaxed) {
+        return Ok(None);
+    }
 
     Ok(Some(GlobalNameSearchSnapshot {
         roots,
@@ -406,9 +361,7 @@ fn search_directory_inner(
     cancel: &AtomicBool,
     prune_generated: bool,
     threads: usize,
-    budget: Option<&SearchBudget>,
 ) -> Result<Option<SearchSnapshot>, String> {
-    let _priority_guard = budget.map(|_| LowPriorityGuard::new());
     let query = query.trim();
     if query.is_empty() {
         return Ok(None);
@@ -430,71 +383,24 @@ fn search_directory_inner(
         });
     }
 
-    builder.build_parallel().run(|| {
-        let entries = Arc::clone(&entries);
-        let truncated = Arc::clone(&truncated);
-        let query_lower = query_lower.clone();
-        Box::new(move |result| {
-            if cancel.load(AtomicOrdering::Relaxed) || truncated.load(AtomicOrdering::Relaxed) {
-                return WalkState::Quit;
+    if threads <= 1 {
+        let _priority_guard = LowPriorityGuard::new();
+        for result in builder.build() {
+            let state = handle_search_entry(result, &query_lower, &entries, &truncated, cancel);
+            if matches!(state, WalkState::Quit) {
+                break;
             }
-            let Ok(item) = result else {
-                return WalkState::Continue;
-            };
-            if item.depth() == 0 {
-                return WalkState::Continue;
-            }
-            if budget.is_some_and(|budget| !budget.consume_entry()) {
-                return WalkState::Quit;
-            }
-            let name = item.file_name().to_string_lossy().into_owned();
-            if is_hidden_name(&name) {
-                let is_dir = item.file_type().is_some_and(|file_type| file_type.is_dir());
-                return if is_dir {
-                    WalkState::Skip
-                } else {
-                    WalkState::Continue
-                };
-            }
-            if !name.to_lowercase().contains(&query_lower) {
-                return WalkState::Continue;
-            }
-            let is_dir = item.file_type().is_some_and(|file_type| file_type.is_dir());
-            let Ok(metadata) = item.metadata() else {
-                return if is_dir {
-                    WalkState::Skip
-                } else {
-                    WalkState::Continue
-                };
-            };
-            if is_hidden(&metadata, &name) {
-                return if is_dir {
-                    WalkState::Skip
-                } else {
-                    WalkState::Continue
-                };
-            }
-
-            let Ok(mut entries) = entries.lock() else {
-                return WalkState::Quit;
-            };
-            if entries.len() >= SEARCH_RESULT_LIMIT {
-                truncated.store(true, AtomicOrdering::Relaxed);
-                return WalkState::Quit;
-            }
-            entries.push(file_entry_from_metadata(
-                item.path().to_path_buf(),
-                name,
-                &metadata,
-            ));
-            if entries.len() >= SEARCH_RESULT_LIMIT {
-                truncated.store(true, AtomicOrdering::Relaxed);
-                WalkState::Quit
-            } else {
-                WalkState::Continue
-            }
-        })
-    });
+        }
+    } else {
+        builder.build_parallel().run(|| {
+            let entries = Arc::clone(&entries);
+            let truncated = Arc::clone(&truncated);
+            let query_lower = query_lower.clone();
+            Box::new(move |result| {
+                handle_search_entry(result, &query_lower, &entries, &truncated, cancel)
+            })
+        });
+    }
 
     if cancel.load(AtomicOrdering::Relaxed) {
         return Ok(None);
@@ -503,14 +409,74 @@ fn search_directory_inner(
         .map_err(|_| "搜索任务未正确结束".to_string())?
         .into_inner()
         .map_err(|_| "搜索结果锁损坏".to_string())?;
+    let has_more = entries.len() > SEARCH_RESULT_LIMIT;
+    entries.truncate(SEARCH_RESULT_LIMIT);
     sort_entries(&mut entries, sort);
-    let budget_exhausted = budget.is_some_and(SearchBudget::is_exhausted);
     Ok(Some(SearchSnapshot {
         root: root.to_path_buf(),
         query: query.to_string(),
         entries,
-        truncated: truncated.load(AtomicOrdering::Relaxed) || budget_exhausted,
+        truncated: truncated.load(AtomicOrdering::Relaxed) || has_more,
     }))
+}
+
+fn handle_search_entry(
+    result: Result<ignore::DirEntry, ignore::Error>,
+    query_lower: &str,
+    entries: &Mutex<Vec<FileEntry>>,
+    truncated: &AtomicBool,
+    cancel: &AtomicBool,
+) -> WalkState {
+    if cancel.load(AtomicOrdering::Relaxed) || truncated.load(AtomicOrdering::Relaxed) {
+        return WalkState::Quit;
+    }
+    let Ok(item) = result else {
+        return WalkState::Continue;
+    };
+    if item.depth() == 0 {
+        return WalkState::Continue;
+    }
+    let name = item.file_name().to_string_lossy().into_owned();
+    if is_hidden_name(&name) {
+        let is_dir = item.file_type().is_some_and(|file_type| file_type.is_dir());
+        return if is_dir {
+            WalkState::Skip
+        } else {
+            WalkState::Continue
+        };
+    }
+    if !name.to_lowercase().contains(query_lower) {
+        return WalkState::Continue;
+    }
+    let is_dir = item.file_type().is_some_and(|file_type| file_type.is_dir());
+    let Ok(metadata) = item.metadata() else {
+        return if is_dir {
+            WalkState::Skip
+        } else {
+            WalkState::Continue
+        };
+    };
+    if is_hidden(&metadata, &name) {
+        return if is_dir {
+            WalkState::Skip
+        } else {
+            WalkState::Continue
+        };
+    }
+
+    let Ok(mut entries) = entries.lock() else {
+        return WalkState::Quit;
+    };
+    if entries.len() > SEARCH_RESULT_LIMIT {
+        truncated.store(true, AtomicOrdering::Relaxed);
+        return WalkState::Quit;
+    }
+    entries.push(file_entry_from_metadata(
+        item.path().to_path_buf(),
+        name,
+        &metadata,
+    ));
+    WalkState::Continue
 }
 
 fn normalize_search_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
@@ -1082,34 +1048,74 @@ mod tests {
     }
 
     #[test]
-    fn global_name_search_stops_at_the_scan_budget() {
-        let root = std::env::temp_dir().join(format!(
-            "kite-global-name-budget-{}-{}",
+    fn global_name_search_checks_every_root_before_marking_results_incomplete() {
+        let base = std::env::temp_dir().join(format!(
+            "kite-global-name-roots-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
                 .as_nanos()
         ));
-        fs::create_dir_all(&root).expect("create budget fixture");
-        for index in 0..20 {
-            fs::write(root.join(format!("match-{index:02}.txt")), b"fixture")
-                .expect("write budget fixture");
+        let first = base.join("first");
+        let second = base.join("second");
+        fs::create_dir_all(&first).expect("create first root fixture");
+        fs::create_dir_all(&second).expect("create second root fixture");
+        for index in 0..6 {
+            fs::write(first.join(format!("other-{index}.txt")), b"fixture")
+                .expect("write first root fixture");
+        }
+        fs::write(second.join("needle.txt"), b"fixture").expect("write second root fixture");
+
+        let cancel = AtomicBool::new(false);
+        let snapshot = search_global_names(&[first, second], "needle", &cancel)
+            .expect("global name search")
+            .expect("non-empty search");
+
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.name == "needle.txt"),
+            "the later root must be searched"
+        );
+        assert!(
+            !snapshot.truncated,
+            "a complete search must not be truncated"
+        );
+
+        fs::remove_dir_all(base).expect("clean test directory");
+    }
+
+    #[test]
+    fn global_name_search_marks_truncation_only_after_the_limit_is_exceeded() {
+        let root = std::env::temp_dir().join(format!(
+            "kite-global-name-limit-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("create limit fixture");
+        for index in 0..SEARCH_RESULT_LIMIT {
+            fs::write(root.join(format!("match-{index:04}.txt")), b"fixture")
+                .expect("write limit fixture");
         }
 
         let cancel = AtomicBool::new(false);
-        let snapshot = search_global_names_with_budget(
-            std::slice::from_ref(&root),
-            "match",
-            &cancel,
-            3,
-            Duration::from_secs(5),
-        )
-        .expect("global name search")
-        .expect("non-empty search");
+        let exact = search_global_names(std::slice::from_ref(&root), "match", &cancel)
+            .expect("global name search")
+            .expect("non-empty search");
+        assert_eq!(exact.entries.len(), SEARCH_RESULT_LIMIT);
+        assert!(!exact.truncated);
 
-        assert!(snapshot.truncated);
-        assert!(snapshot.entries.len() <= 3);
+        fs::write(root.join("match-over-limit.txt"), b"fixture").expect("write over-limit fixture");
+        let over = search_global_names(std::slice::from_ref(&root), "match", &cancel)
+            .expect("global name search")
+            .expect("non-empty search");
+        assert_eq!(over.entries.len(), SEARCH_RESULT_LIMIT);
+        assert!(over.truncated);
 
         fs::remove_dir_all(root).expect("clean test directory");
     }

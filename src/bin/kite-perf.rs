@@ -1378,7 +1378,7 @@ fn measure_name_searches(
             1,
             vec![
                 "Measures the single-root Core traversal and ranking path.".to_string(),
-                "The Core search has a 5 second and 250000 entry budget.".to_string(),
+                "The Core search traverses the complete selected root.".to_string(),
             ],
             |_| {
                 let cancel = AtomicBool::new(false);
