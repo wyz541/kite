@@ -32,6 +32,16 @@ impl VcsSnapshot {
     pub fn svn_available(&self) -> bool {
         self.svn_available
     }
+
+    #[cfg(feature = "performance")]
+    pub fn git_status_count(&self) -> usize {
+        self.git.len()
+    }
+
+    #[cfg(feature = "performance")]
+    pub fn svn_status_count(&self) -> usize {
+        self.svn.len()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
