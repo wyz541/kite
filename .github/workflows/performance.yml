@@ -1,0 +1,118 @@
+name: Performance Baseline
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/bin/kite-perf.rs"
+      - "src/content_search.rs"
+      - "src/session.rs"
+      - "src/updater.rs"
+      - "src/vcs.rs"
+      - "scripts/performance/**"
+      - "docs/performance/**"
+      - ".github/workflows/performance.yml"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Fixture and sample profile
+        required: true
+        default: ci
+        type: choice
+        options:
+          - smoke
+          - ci
+          - standard
+          - extended
+      samples:
+        description: Optional interactive sample override
+        required: false
+        type: string
+      cold_samples:
+        description: Optional cold/build sample override
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Performance ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: macos-arm64
+            runner: macos-26
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test performance harness
+        run: cargo test --locked --features performance --bin kite-perf
+
+      - name: Run performance benchmark on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $benchmarkProfile = "${{ github.event.inputs.profile }}"
+          if ([string]::IsNullOrWhiteSpace($benchmarkProfile)) { $benchmarkProfile = "ci" }
+          $samples = "${{ github.event.inputs.samples }}"
+          $coldSamples = "${{ github.event.inputs.cold_samples }}"
+          $arguments = @(
+            "run", "--locked", "--release", "--features", "performance",
+            "--bin", "kite-perf", "--",
+            "--profile", $benchmarkProfile,
+            "--output", "target/performance/${{ matrix.platform }}.json",
+            "--markdown", "target/performance/${{ matrix.platform }}.md"
+          )
+          if (-not [string]::IsNullOrWhiteSpace($samples)) {
+            $arguments += @("--samples", $samples)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($coldSamples)) {
+            $arguments += @("--cold-samples", $coldSamples)
+          }
+          cargo @arguments
+
+      - name: Run performance benchmark on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          profile="${{ github.event.inputs.profile }}"
+          profile="${profile:-ci}"
+          args=(
+            run --locked --release --features performance --bin kite-perf --
+            --profile "$profile"
+            --output "target/performance/${{ matrix.platform }}.json"
+            --markdown "target/performance/${{ matrix.platform }}.md"
+          )
+          if [[ -n "${{ github.event.inputs.samples }}" ]]; then
+            args+=(--samples "${{ github.event.inputs.samples }}")
+          fi
+          if [[ -n "${{ github.event.inputs.cold_samples }}" ]]; then
+            args+=(--cold-samples "${{ github.event.inputs.cold_samples }}")
+          fi
+          cargo "${args[@]}"
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: kite-performance-${{ matrix.platform }}
+          path: |
+            target/performance/${{ matrix.platform }}.json
+            target/performance/${{ matrix.platform }}.md
+          if-no-files-found: error

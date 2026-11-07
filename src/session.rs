@@ -32,6 +32,16 @@ pub fn save_session(state: &SessionStateDto) -> Result<(), String> {
     save_session_at(&path, state)
 }
 
+#[cfg(feature = "performance")]
+pub fn load_session_for_performance(path: &Path) -> Option<SessionStateDto> {
+    load_session_at(path)
+}
+
+#[cfg(feature = "performance")]
+pub fn save_session_for_performance(path: &Path, state: &SessionStateDto) -> Result<(), String> {
+    save_session_at(path, state)
+}
+
 fn session_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("KITE_SESSION_PATH") {
         return Some(PathBuf::from(path));
