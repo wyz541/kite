@@ -446,6 +446,11 @@ pub fn download_update(info: &UpdateInfo) -> Result<PathBuf, String> {
     Ok(destination)
 }
 
+#[cfg(feature = "performance")]
+pub fn sha256_file_for_performance(path: &Path) -> Result<String, String> {
+    sha256_file(path)
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| format!("无法读取更新文件：{error}"))?;
     let mut hasher = Sha256::new();

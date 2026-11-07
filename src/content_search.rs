@@ -195,6 +195,11 @@ impl ContentSearchService {
         Self::open_at(default_index_dir())
     }
 
+    #[cfg(feature = "performance")]
+    pub fn open_for_performance(index_dir: PathBuf) -> Result<Self, String> {
+        Self::open_at(index_dir)
+    }
+
     fn open_at(index_dir: PathBuf) -> Result<Self, String> {
         let (index, schema) = open_or_create_index(&index_dir)?;
         let reader = index

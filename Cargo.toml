@@ -20,9 +20,15 @@ name = "kite-explorer"
 path = "src/main.rs"
 required-features = ["windows-ui"]
 
+[[bin]]
+name = "kite-perf"
+path = "src/bin/kite-perf.rs"
+required-features = ["performance"]
+
 [features]
 windows-ui = ["dep:gpui-kit", "dep:raw-window-handle"]
 uniffi-bindgen = ["uniffi/cli"]
+performance = []
 
 [dependencies]
 atomicwrites = "0.4.4"
