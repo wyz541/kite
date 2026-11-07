@@ -1,6 +1,15 @@
 name: Startup Performance
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/performance-startup.yml"
+      - "scripts/performance/startup.py"
+      - "apps/macos/Sources/**"
+      - "src/app.rs"
+      - "src/main.rs"
+      - "src/perf_trace.rs"
+      - "src/tabs.rs"
   workflow_dispatch:
     inputs:
       samples:
@@ -30,6 +39,9 @@ jobs:
             runner: windows-latest
           - platform: macos-arm64
             runner: macos-26
+    env:
+      KITE_PERF_SAMPLES: ${{ github.event.inputs.samples || '3' }}
+      KITE_PERF_ENTRIES: ${{ github.event.inputs.entries || '10000' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -50,8 +62,8 @@ jobs:
         run: |
           python scripts/performance/startup.py `
             --app target/release/kite-explorer.exe `
-            --samples "${{ github.event.inputs.samples }}" `
-            --entries "${{ github.event.inputs.entries }}" `
+            --samples "$env:KITE_PERF_SAMPLES" `
+            --entries "$env:KITE_PERF_ENTRIES" `
             --output target/performance/startup-windows-x64.json `
             --markdown target/performance/startup-windows-x64.md
 
@@ -66,8 +78,8 @@ jobs:
         run: |
           python3 scripts/performance/startup.py \
             --app apps/macos/build/Kite.app \
-            --samples "${{ github.event.inputs.samples }}" \
-            --entries "${{ github.event.inputs.entries }}" \
+            --samples "$KITE_PERF_SAMPLES" \
+            --entries "$KITE_PERF_ENTRIES" \
             --output target/performance/startup-macos-arm64.json \
             --markdown target/performance/startup-macos-arm64.md
 
