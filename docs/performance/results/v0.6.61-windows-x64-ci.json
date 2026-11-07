@@ -1,0 +1,5301 @@
+{
+  "schema_version": 1,
+  "generated_at_unix_ms": 1794025497279,
+  "kite_version": "0.6.61",
+  "git_commit": "a921974e09c09326325577d3395b3bf99d7534d2",
+  "profile": "ci",
+  "build_profile": "release",
+  "host": {
+    "os": "windows",
+    "os_version": "Windows Server 2025 Datacenter",
+    "architecture": "x86_64",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cores": 4,
+    "memory_bytes": 17174360064,
+    "fixture_filesystem": "NTFS",
+    "fixture_disk_kind": "SSD",
+    "fixture_disk_total_bytes": 160939618304,
+    "fixture_disk_available_bytes": 29723181056
+  },
+  "method": {
+    "timer": "std::time::Instant (monotonic)",
+    "percentile": "linear interpolation over sorted samples",
+    "rss": "sysinfo resident memory sampled every 10 ms; peak is max of sampler and post-sample RSS",
+    "cache_control": "fixtures are generated locally; the harness does not purge OS caches",
+    "interactive_samples": 10,
+    "cold_samples": 5
+  },
+  "fixtures": [
+    {
+      "name": "directories/flat-1000",
+      "kind": "flat_directory",
+      "entries": 1000,
+      "bytes": 64000,
+      "description": "Flat directory used for load and sort measurements"
+    },
+    {
+      "name": "directories/flat-10000",
+      "kind": "flat_directory",
+      "entries": 10000,
+      "bytes": 640000,
+      "description": "Flat directory used for load and sort measurements"
+    },
+    {
+      "name": "trees/tree-10000",
+      "kind": "nested_tree",
+      "entries": 10000,
+      "bytes": 640000,
+      "description": "Nested tree used for column and global name search"
+    },
+    {
+      "name": "content",
+      "kind": "text_corpus",
+      "entries": 500,
+      "bytes": 773890,
+      "description": "UTF-8 corpus used for content indexing and incremental updates"
+    },
+    {
+      "name": "copy/copy-source",
+      "kind": "copy_source",
+      "entries": 1000,
+      "bytes": 64000,
+      "description": "Small-file tree used for copy operations"
+    },
+    {
+      "name": "copy/move-sources",
+      "kind": "move_sources",
+      "entries": 500,
+      "bytes": 32000,
+      "description": "Precreated sources used for move measurements"
+    },
+    {
+      "name": "archive/source",
+      "kind": "archive_source",
+      "entries": 500,
+      "bytes": 773890,
+      "description": "Compressible text tree used for archive measurements"
+    },
+    {
+      "name": "large/large-64.bin",
+      "kind": "large_file",
+      "entries": 1,
+      "bytes": 67108864,
+      "description": "Deterministic binary file used for I/O, hash, and copy measurements"
+    },
+    {
+      "name": "text/text-1mib.txt",
+      "kind": "text_file",
+      "entries": 1,
+      "bytes": 1048576,
+      "description": "Deterministic UTF-8 file used for preview and editor measurements"
+    },
+    {
+      "name": "text/text-8mib.txt",
+      "kind": "text_file",
+      "entries": 1,
+      "bytes": 8388608,
+      "description": "Deterministic UTF-8 file used for preview and editor measurements"
+    },
+    {
+      "name": "text/text-100mib.txt",
+      "kind": "text_file",
+      "entries": 1,
+      "bytes": 104857600,
+      "description": "Deterministic UTF-8 file used for preview and editor measurements"
+    },
+    {
+      "name": "vcs/git",
+      "kind": "git_worktree",
+      "entries": 5000,
+      "bytes": 320000,
+      "description": "Git worktree used for clean and dirty VCS status measurements"
+    }
+  ],
+  "coverage": [
+    {
+      "area": "Startup and launch",
+      "status": "not_automated",
+      "automated_scenarios": [],
+      "gaps": [
+        "release EXE cold/warm start, CLI/default-handler launch, and first paint",
+        "release app cold/warm start, Finder/default-handler launch, and first paint"
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "status": "partial",
+      "automated_scenarios": [
+        "load_directory_1000_name_sort",
+        "load_directory_10000_name_sort",
+        "sort_entries_10000_name",
+        "sort_entries_10000_modified",
+        "sort_entries_10000_kind",
+        "sort_entries_10000_size",
+        "sort_entries_10000_vcs"
+      ],
+      "gaps": [
+        "native GPUI next-column, filter, group, and frame-stall measurement",
+        "native SwiftUI column rendering and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "status": "partial",
+      "automated_scenarios": [
+        "load_session_20_tabs",
+        "save_session_20_tabs"
+      ],
+      "gaps": [
+        "native GPUI tab open, switch, close, and restore-render measurement",
+        "native SwiftUI tab open, switch, close, and restore-render measurement"
+      ]
+    },
+    {
+      "area": "Directory watch and refresh",
+      "status": "partial",
+      "automated_scenarios": [
+        "windows_notify_create_latency"
+      ],
+      "gaps": [
+        "GPUI refresh application and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Column search",
+      "status": "partial",
+      "automated_scenarios": [
+        "search_directory_10000"
+      ],
+      "gaps": [
+        "GPUI search-field feedback and frame-stall measurement",
+        "SwiftUI search-field feedback and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Global name search",
+      "status": "measured",
+      "automated_scenarios": [
+        "global_name_search_10000",
+        "global_name_search_multi_root"
+      ],
+      "gaps": []
+    },
+    {
+      "area": "Global content search",
+      "status": "partial",
+      "automated_scenarios": [
+        "cold_content_index_build",
+        "warm_content_query",
+        "incremental_update_to_query"
+      ],
+      "gaps": [
+        "GPUI result-card rendering and frame-stall measurement",
+        "SwiftUI result-card rendering and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "status": "partial",
+      "automated_scenarios": [
+        "text_open_1mib",
+        "text_open_8mib",
+        "text_open_100mib"
+      ],
+      "gaps": [
+        "GPUI image, Markdown, code, and log rendering plus scroll-stall measurement",
+        "Quick Look, SwiftUI preview, NSTextView, and scroll-stall measurement"
+      ]
+    },
+    {
+      "area": "File operations",
+      "status": "partial",
+      "automated_scenarios": [
+        "create_100_files",
+        "rename_file",
+        "copy_small_file_tree",
+        "move_small_file_tree",
+        "copy_large_file"
+      ],
+      "gaps": [
+        "GPUI progress feedback, recycle-bin action, and Explorer clipboard integration",
+        "SwiftUI progress feedback, Finder clipboard integration, and trash action"
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "status": "partial",
+      "automated_scenarios": [
+        "compress_zip",
+        "compress_tar_gz",
+        "extract_zip",
+        "extract_tar_gz",
+        "compress_large_file_zip"
+      ],
+      "gaps": [
+        "GPUI archive progress and frame-stall measurement",
+        "SwiftUI archive progress and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "status": "partial",
+      "automated_scenarios": [
+        "git_clean_status",
+        "git_dirty_status_100_files",
+        "apply_vcs_statuses"
+      ],
+      "gaps": [
+        "Windows native Shell context-menu and third-party extension latency",
+        "AppKit menu latency and SVN fixture when svn is unavailable",
+        "SVN was not available in the benchmark environment"
+      ]
+    },
+    {
+      "area": "Sidebar and devices",
+      "status": "partial",
+      "automated_scenarios": [
+        "volume_enumeration"
+      ],
+      "gaps": [
+        "WPD/MTP first listing, navigation, and copy throughput with a controlled device",
+        "USB volume first listing and copy throughput with a controlled device"
+      ]
+    },
+    {
+      "area": "Update path",
+      "status": "partial",
+      "automated_scenarios": [
+        "sha256_verify_large_file"
+      ],
+      "gaps": [
+        "GitHub Release API, download throughput, installer, and restart with --include-network"
+      ]
+    }
+  ],
+  "summary": {
+    "measured_scenarios": 34,
+    "not_automated_scenarios": 23,
+    "errors": 0,
+    "slowest_scenarios": [
+      {
+        "area": "Archive operations",
+        "scenario": "compress_large_file_zip",
+        "p95_ms": 1816.3770799999998,
+        "sample_count": 5
+      },
+      {
+        "area": "Global content search",
+        "scenario": "cold_content_index_build",
+        "p95_ms": 1076.1131,
+        "sample_count": 5
+      },
+      {
+        "area": "File operations",
+        "scenario": "copy_small_file_tree",
+        "p95_ms": 766.6526799999999,
+        "sample_count": 10
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "extract_tar_gz",
+        "p95_ms": 544.1035999999999,
+        "sample_count": 5
+      },
+      {
+        "area": "File operations",
+        "scenario": "create_100_files",
+        "p95_ms": 305.63193999999993,
+        "sample_count": 10
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "extract_zip",
+        "p95_ms": 288.87876,
+        "sample_count": 5
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "load_directory_10000_name_sort",
+        "p95_ms": 213.35115,
+        "sample_count": 10
+      },
+      {
+        "area": "VCS and context menus",
+        "scenario": "git_clean_status",
+        "p95_ms": 101.72652000000001,
+        "sample_count": 5
+      },
+      {
+        "area": "VCS and context menus",
+        "scenario": "git_dirty_status_100_files",
+        "p95_ms": 101.15111999999999,
+        "sample_count": 5
+      },
+      {
+        "area": "Global content search",
+        "scenario": "incremental_update_to_query",
+        "p95_ms": 79.89232,
+        "sample_count": 5
+      },
+      {
+        "area": "Update path",
+        "scenario": "sha256_verify_large_file",
+        "p95_ms": 50.917,
+        "sample_count": 5
+      },
+      {
+        "area": "Global name search",
+        "scenario": "global_name_search_multi_root",
+        "p95_ms": 41.603635,
+        "sample_count": 10
+      }
+    ],
+    "highest_variance_scenarios": [
+      {
+        "area": "File operations",
+        "scenario": "move_small_file_tree",
+        "p95_to_p50_ratio": 6.450389689776372,
+        "sample_count": 5
+      },
+      {
+        "area": "File operations",
+        "scenario": "create_100_files",
+        "p95_to_p50_ratio": 3.5780385711116445,
+        "sample_count": 10
+      },
+      {
+        "area": "Directory watch and refresh",
+        "scenario": "windows_notify_create_latency",
+        "p95_to_p50_ratio": 3.568331374853113,
+        "sample_count": 5
+      },
+      {
+        "area": "Tabs and session restore",
+        "scenario": "save_session_20_tabs",
+        "p95_to_p50_ratio": 2.9890424417688553,
+        "sample_count": 10
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "extract_tar_gz",
+        "p95_to_p50_ratio": 1.839098688742465,
+        "sample_count": 5
+      },
+      {
+        "area": "VCS and context menus",
+        "scenario": "apply_vcs_statuses",
+        "p95_to_p50_ratio": 1.4628062655447955,
+        "sample_count": 10
+      },
+      {
+        "area": "File operations",
+        "scenario": "copy_small_file_tree",
+        "p95_to_p50_ratio": 1.293090738338484,
+        "sample_count": 10
+      },
+      {
+        "area": "Sidebar and devices",
+        "scenario": "volume_enumeration",
+        "p95_to_p50_ratio": 1.2693907333090113,
+        "sample_count": 10
+      }
+    ],
+    "highest_memory_scenarios": [
+      {
+        "area": "Preview and editor",
+        "scenario": "text_open_8mib",
+        "peak_rss_delta_bytes": 16814080,
+        "sample_count": 5
+      },
+      {
+        "area": "Global name search",
+        "scenario": "global_name_search_multi_root",
+        "peak_rss_delta_bytes": 14188544,
+        "sample_count": 10
+      },
+      {
+        "area": "Global content search",
+        "scenario": "cold_content_index_build",
+        "peak_rss_delta_bytes": 14061568,
+        "sample_count": 5
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "load_directory_10000_name_sort",
+        "peak_rss_delta_bytes": 4599808,
+        "sample_count": 10
+      },
+      {
+        "area": "File operations",
+        "scenario": "create_100_files",
+        "peak_rss_delta_bytes": 4272128,
+        "sample_count": 10
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "sort_entries_10000_modified",
+        "peak_rss_delta_bytes": 2568192,
+        "sample_count": 10
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "sort_entries_10000_kind",
+        "peak_rss_delta_bytes": 2445312,
+        "sample_count": 10
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "sort_entries_10000_name",
+        "peak_rss_delta_bytes": 2433024,
+        "sample_count": 10
+      }
+    ]
+  },
+  "results": [
+    {
+      "area": "Column navigation",
+      "scenario": "load_directory_1000_name_sort",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 19.5852,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 51058.96289034577,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16003072,
+          "peak_rss_bytes": 16322560,
+          "peak_rss_delta_bytes": 319488,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 19.5674,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 51105.410018704584,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16089088,
+          "peak_rss_bytes": 16375808,
+          "peak_rss_delta_bytes": 286720,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 20.1877,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 49535.112964825115,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16068608,
+          "peak_rss_bytes": 16355328,
+          "peak_rss_delta_bytes": 286720,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 20.3648,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 49104.336895034576,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16097280,
+          "peak_rss_bytes": 16388096,
+          "peak_rss_delta_bytes": 290816,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 19.8337,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 50419.235946898465,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16105472,
+          "peak_rss_bytes": 16363520,
+          "peak_rss_delta_bytes": 258048,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 20.0654,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 49837.03290240912,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16101376,
+          "peak_rss_bytes": 16388096,
+          "peak_rss_delta_bytes": 286720,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 20.565199999999997,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 48625.83393305195,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16109568,
+          "peak_rss_bytes": 16384000,
+          "peak_rss_delta_bytes": 274432,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 19.6841,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 50802.4242916872,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16105472,
+          "peak_rss_bytes": 16392192,
+          "peak_rss_delta_bytes": 286720,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 19.5905,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 51045.14943467497,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16109568,
+          "peak_rss_bytes": 16412672,
+          "peak_rss_delta_bytes": 303104,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 19.8458,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 50388.49529875339,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16162816,
+          "peak_rss_bytes": 16437248,
+          "peak_rss_delta_bytes": 274432,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 19.5674,
+        "p50_ms": 19.839750000000002,
+        "p95_ms": 20.47502,
+        "max_ms": 20.565199999999997,
+        "mean_ms": 19.928980000000003,
+        "throughput_p50": 50403.86562282593,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 319488,
+        "cpu_ms_p50": 31
+      },
+      "details": null,
+      "notes": [
+        "Measures directory metadata read, hidden filtering, and name sorting.",
+        "The result excludes native list rendering."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "load_directory_10000_name_sort",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 202.8348,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 49301.20472423864,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16445440,
+          "peak_rss_bytes": 20934656,
+          "peak_rss_delta_bytes": 4489216,
+          "cpu_ms": 235,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 207.758,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 48132.92388259417,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16695296,
+          "peak_rss_bytes": 20287488,
+          "peak_rss_delta_bytes": 3592192,
+          "cpu_ms": 235,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 204.90140000000002,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 48803.961319932416,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16482304,
+          "peak_rss_bytes": 20967424,
+          "peak_rss_delta_bytes": 4485120,
+          "cpu_ms": 265,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 204.461,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 48909.08290578643,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16322560,
+          "peak_rss_bytes": 20631552,
+          "peak_rss_delta_bytes": 4308992,
+          "cpu_ms": 235,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 207.3614,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 48224.98304891846,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16121856,
+          "peak_rss_bytes": 20619264,
+          "peak_rss_delta_bytes": 4497408,
+          "cpu_ms": 234,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 213.2395,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 46895.62674832759,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16334848,
+          "peak_rss_bytes": 20594688,
+          "peak_rss_delta_bytes": 4259840,
+          "cpu_ms": 250,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 213.4425,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 46851.02545181957,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16187392,
+          "peak_rss_bytes": 20725760,
+          "peak_rss_delta_bytes": 4538368,
+          "cpu_ms": 250,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 206.5259,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 48420.077094446744,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16347136,
+          "peak_rss_bytes": 20615168,
+          "peak_rss_delta_bytes": 4268032,
+          "cpu_ms": 218,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 204.1178,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 48991.31775866681,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16195584,
+          "peak_rss_bytes": 20795392,
+          "peak_rss_delta_bytes": 4599808,
+          "cpu_ms": 250,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 210.631,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 47476.39236389705,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 16343040,
+          "peak_rss_bytes": 20619264,
+          "peak_rss_delta_bytes": 4276224,
+          "cpu_ms": 234,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 202.8348,
+        "p50_ms": 206.94365,
+        "p95_ms": 213.35115,
+        "max_ms": 213.4425,
+        "mean_ms": 207.52732999999998,
+        "throughput_p50": 48322.5300716826,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 4599808,
+        "cpu_ms_p50": 235
+      },
+      "details": null,
+      "notes": [
+        "Measures directory metadata read, hidden filtering, and name sorting.",
+        "The result excludes native list rendering."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_10000_name",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 3.7555,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2662761.2834509383,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22499328,
+          "peak_rss_bytes": 24821760,
+          "peak_rss_delta_bytes": 2322432,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 3.7294,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2681396.4712822437,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22446080,
+          "peak_rss_bytes": 24715264,
+          "peak_rss_delta_bytes": 2269184,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 3.4978000000000002,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2858939.905083195,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22556672,
+          "peak_rss_bytes": 24936448,
+          "peak_rss_delta_bytes": 2379776,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 3.6978,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2704310.6712099086,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22548480,
+          "peak_rss_bytes": 24805376,
+          "peak_rss_delta_bytes": 2256896,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 3.7797,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2645712.622694923,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22556672,
+          "peak_rss_bytes": 24616960,
+          "peak_rss_delta_bytes": 2060288,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 3.4773,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2875794.4382135565,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22638592,
+          "peak_rss_bytes": 25071616,
+          "peak_rss_delta_bytes": 2433024,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 3.4868,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2867959.160261558,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22581248,
+          "peak_rss_bytes": 24924160,
+          "peak_rss_delta_bytes": 2342912,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 3.5439,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2821750.049380626,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22626304,
+          "peak_rss_bytes": 24850432,
+          "peak_rss_delta_bytes": 2224128,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 3.4956,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2860739.2150131594,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22630400,
+          "peak_rss_bytes": 25047040,
+          "peak_rss_delta_bytes": 2416640,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 3.8672,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2585850.22755482,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22556672,
+          "peak_rss_bytes": 24580096,
+          "peak_rss_delta_bytes": 2023424,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 3.4773,
+        "p50_ms": 3.62085,
+        "p95_ms": 3.827825,
+        "max_ms": 3.8672,
+        "mean_ms": 3.6331,
+        "throughput_p50": 2763030.3602952673,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 2433024,
+        "cpu_ms_p50": 15
+      },
+      "details": null,
+      "notes": [
+        "Measures the Core sort step on an already loaded directory."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_10000_modified",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 2.6635999999999997,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3754317.4650848475,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22568960,
+          "peak_rss_bytes": 25137152,
+          "peak_rss_delta_bytes": 2568192,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 3.0017,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3331445.5142086153,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22573056,
+          "peak_rss_bytes": 24674304,
+          "peak_rss_delta_bytes": 2101248,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 3.2816,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3047294.0029254025,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22573056,
+          "peak_rss_bytes": 25006080,
+          "peak_rss_delta_bytes": 2433024,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 3.3674,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2969650.17520936,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22691840,
+          "peak_rss_bytes": 25092096,
+          "peak_rss_delta_bytes": 2400256,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 3.3038999999999996,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3026725.9904960804,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22609920,
+          "peak_rss_bytes": 24449024,
+          "peak_rss_delta_bytes": 1839104,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 3.5808,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2792672.028596962,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22712320,
+          "peak_rss_bytes": 24383488,
+          "peak_rss_delta_bytes": 1671168,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 3.7735999999999996,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2649989.4000423998,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22659072,
+          "peak_rss_bytes": 24190976,
+          "peak_rss_delta_bytes": 1531904,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 3.6403,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2747026.343982639,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22679552,
+          "peak_rss_bytes": 24342528,
+          "peak_rss_delta_bytes": 1662976,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 3.2776,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3051012.93629485,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22683648,
+          "peak_rss_bytes": 24567808,
+          "peak_rss_delta_bytes": 1884160,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 3.1789,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3145742.237881028,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22622208,
+          "peak_rss_bytes": 24571904,
+          "peak_rss_delta_bytes": 1949696,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 2.6635999999999997,
+        "p50_ms": 3.29275,
+        "p95_ms": 3.713615,
+        "max_ms": 3.7735999999999996,
+        "mean_ms": 3.30694,
+        "throughput_p50": 3037009.9967107414,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 2568192,
+        "cpu_ms_p50": 15
+      },
+      "details": null,
+      "notes": [
+        "Measures the Core sort step on an already loaded directory."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_10000_kind",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 3.5204,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2840586.2970117033,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22773760,
+          "peak_rss_bytes": 25219072,
+          "peak_rss_delta_bytes": 2445312,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 3.8982,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2565286.542506798,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22728704,
+          "peak_rss_bytes": 24883200,
+          "peak_rss_delta_bytes": 2154496,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 4.0541,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2466638.7114279373,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22814720,
+          "peak_rss_bytes": 24739840,
+          "peak_rss_delta_bytes": 1925120,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 4.466,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2239140.1701746527,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22736896,
+          "peak_rss_bytes": 24543232,
+          "peak_rss_delta_bytes": 1806336,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 4.4140999999999995,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2265467.479214336,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22810624,
+          "peak_rss_bytes": 24477696,
+          "peak_rss_delta_bytes": 1667072,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 4.309,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2320724.0659085633,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22753280,
+          "peak_rss_bytes": 24535040,
+          "peak_rss_delta_bytes": 1781760,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 4.4561,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2244114.808913624,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22818816,
+          "peak_rss_bytes": 24346624,
+          "peak_rss_delta_bytes": 1527808,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 4.0159,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2490101.8451654674,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22732800,
+          "peak_rss_bytes": 24690688,
+          "peak_rss_delta_bytes": 1957888,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 4.013199999999999,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2491777.1354530053,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22802432,
+          "peak_rss_bytes": 24674304,
+          "peak_rss_delta_bytes": 1871872,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 3.8493,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2597874.9383004704,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22818816,
+          "peak_rss_bytes": 24657920,
+          "peak_rss_delta_bytes": 1839104,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 3.5204,
+        "p50_ms": 4.035,
+        "p95_ms": 4.461545,
+        "max_ms": 4.466,
+        "mean_ms": 4.09963,
+        "throughput_p50": 2478370.2782967025,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 2445312,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures the Core sort step on an already loaded directory."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_10000_size",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 2.5167,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3973457.3052012553,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22781952,
+          "peak_rss_bytes": 25186304,
+          "peak_rss_delta_bytes": 2404352,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 2.9282000000000004,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3415067.2768253535,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22728704,
+          "peak_rss_bytes": 24809472,
+          "peak_rss_delta_bytes": 2080768,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 3.0741,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3252984.6133827786,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22740992,
+          "peak_rss_bytes": 24596480,
+          "peak_rss_delta_bytes": 1855488,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 3.0067000000000004,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3325905.4777663215,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22822912,
+          "peak_rss_bytes": 24752128,
+          "peak_rss_delta_bytes": 1929216,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 3.1870000000000003,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3137747.0975839347,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22757376,
+          "peak_rss_bytes": 24551424,
+          "peak_rss_delta_bytes": 1794048,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 3.3453,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2989268.52599169,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22847488,
+          "peak_rss_bytes": 24555520,
+          "peak_rss_delta_bytes": 1708032,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 3.0772,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3249707.526322631,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22867968,
+          "peak_rss_bytes": 24727552,
+          "peak_rss_delta_bytes": 1859584,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 3.1087,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3216778.7177920034,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22802432,
+          "peak_rss_bytes": 24666112,
+          "peak_rss_delta_bytes": 1863680,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 3.1091,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3216364.864430221,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22876160,
+          "peak_rss_bytes": 24735744,
+          "peak_rss_delta_bytes": 1859584,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 3.1195,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3205641.929796442,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22827008,
+          "peak_rss_bytes": 24698880,
+          "peak_rss_delta_bytes": 1871872,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 2.5167,
+        "p50_ms": 3.09295,
+        "p95_ms": 3.2740650000000002,
+        "max_ms": 3.3453,
+        "mean_ms": 3.0472500000000005,
+        "throughput_p50": 3233243.1220573173,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 2404352,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures the Core sort step on an already loaded directory."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_10000_vcs",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 2.5564,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3911750.8997027073,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22712320,
+          "peak_rss_bytes": 25108480,
+          "peak_rss_delta_bytes": 2396160,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 3.1378,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3186946.2680859203,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22786048,
+          "peak_rss_bytes": 24788992,
+          "peak_rss_delta_bytes": 2002944,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 3.0469999999999997,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3281916.6393173616,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22806528,
+          "peak_rss_bytes": 24727552,
+          "peak_rss_delta_bytes": 1921024,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 3.8008,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2631025.047358451,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22745088,
+          "peak_rss_bytes": 24301568,
+          "peak_rss_delta_bytes": 1556480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 3.9110000000000005,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 2556890.820761953,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22814720,
+          "peak_rss_bytes": 24379392,
+          "peak_rss_delta_bytes": 1564672,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 3.2616,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3065979.8871719404,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22761472,
+          "peak_rss_bytes": 24584192,
+          "peak_rss_delta_bytes": 1822720,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 3.1658,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3158759.2393707754,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22835200,
+          "peak_rss_bytes": 24715264,
+          "peak_rss_delta_bytes": 1880064,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 3.2084,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3116818.3518264554,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22765568,
+          "peak_rss_bytes": 24649728,
+          "peak_rss_delta_bytes": 1884160,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 2.9845,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3350644.9991623387,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22847488,
+          "peak_rss_bytes": 24858624,
+          "peak_rss_delta_bytes": 2011136,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 3.1673999999999998,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 3157163.6042179707,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 22790144,
+          "peak_rss_bytes": 24616960,
+          "peak_rss_delta_bytes": 1826816,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 2.5564,
+        "p50_ms": 3.1666,
+        "p95_ms": 3.8614100000000002,
+        "max_ms": 3.9110000000000005,
+        "mean_ms": 3.22407,
+        "throughput_p50": 3157961.421794373,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 2396160,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures the Core sort step on an already loaded directory."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "native GPUI next-column, filter, group, and frame-stall measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "native SwiftUI column rendering and frame-stall measurement",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "scenario": "load_session_20_tabs",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 0.0942,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 212314.22505307855,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17850368,
+          "peak_rss_bytes": 17600512,
+          "peak_rss_delta_bytes": 0,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 0.0969,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 206398.3488132095,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17584128,
+          "peak_rss_bytes": 17600512,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 0.1495,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 133779.26421404682,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17584128,
+          "peak_rss_bytes": 17600512,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 0.1516,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 131926.12137203163,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17584128,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 49152,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 0.14229999999999998,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 140548.13773717498,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17616896,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 15,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 0.11649999999999999,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 171673.8197424893,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17616896,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 0.125,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 160000.0,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17616896,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 0.1266,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 157977.88309636654,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17616896,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 0.1105,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 180995.47511312217,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17616896,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 0.1129,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 177147.91851195748,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17616896,
+          "peak_rss_bytes": 17633280,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 2401,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 0.0942,
+        "p50_ms": 0.12075,
+        "p95_ms": 0.15065499999999998,
+        "max_ms": 0.1516,
+        "mean_ms": 0.1226,
+        "throughput_p50": 165836.90987124463,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 49152,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures Core session parsing and normalization."
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "scenario": "save_session_20_tabs",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 16.616,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 1203.659123736158,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17633280,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 5.8180000000000005,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 3437.607425232038,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 15.5232,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 1288.3941455370027,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 5.4802,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 3649.5018429984307,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 4.8951,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 4085.718371432657,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 4.4237,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 4521.102244727264,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 4.9212,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 4064.0494188409334,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 5.9472,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 3362.927091740651,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 5.0062,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 3995.0461427829496,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 5.3087,
+          "items": 20,
+          "bytes": null,
+          "throughput_per_second": 3767.400681899523,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17637376,
+          "peak_rss_bytes": 17657856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 2401
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 4.4237,
+        "p50_ms": 5.39445,
+        "p95_ms": 16.12424,
+        "max_ms": 16.616,
+        "mean_ms": 7.393949999999999,
+        "throughput_p50": 3708.451262448977,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 24576,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures atomic session serialization and disk sync."
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "scenario": "native GPUI tab open, switch, close, and restore-render measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "scenario": "native SwiftUI tab open, switch, close, and restore-render measurement",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Directory watch and refresh",
+      "scenario": "windows_notify_create_latency",
+      "boundary": "windows_runtime",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 0.3228,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3097.8934324659235,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17780736,
+          "peak_rss_bytes": 17817600,
+          "peak_rss_delta_bytes": 36864,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 7
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 0.33780000000000004,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 2960.3315571343987,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17788928,
+          "peak_rss_bytes": 17825792,
+          "peak_rss_delta_bytes": 36864,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 7
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 1.4255,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 701.5082427218521,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17793024,
+          "peak_rss_bytes": 17821696,
+          "peak_rss_delta_bytes": 28672,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 7
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 0.3713,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 2693.23996768112,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17793024,
+          "peak_rss_bytes": 17829888,
+          "peak_rss_delta_bytes": 36864,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 7
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 0.3404,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 2937.720329024677,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 17788928,
+          "peak_rss_bytes": 17825792,
+          "peak_rss_delta_bytes": 36864,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 7
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 0.3228,
+        "p50_ms": 0.3404,
+        "p95_ms": 1.2146599999999996,
+        "max_ms": 1.4255,
+        "mean_ms": 0.5595600000000001,
+        "throughput_p50": 2937.720329024677,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 36864,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures the Windows ReadDirectoryChangesW-style watcher boundary.",
+        "File creation time is included because it triggers the event."
+      ]
+    },
+    {
+      "area": "Directory watch and refresh",
+      "scenario": "GPUI refresh application and frame-stall measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Column search",
+      "scenario": "search_directory_10000",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 10.1651,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 983758.1528956922,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18571264,
+          "peak_rss_bytes": 18640896,
+          "peak_rss_delta_bytes": 69632,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 10.7037,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 934256.3786354251,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18284544,
+          "peak_rss_bytes": 18694144,
+          "peak_rss_delta_bytes": 409600,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 10.1011,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 989991.1890784173,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18378752,
+          "peak_rss_bytes": 18788352,
+          "peak_rss_delta_bytes": 409600,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 11.0676,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 903538.255809751,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18321408,
+          "peak_rss_bytes": 18718720,
+          "peak_rss_delta_bytes": 397312,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 10.8454,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 922049.9013406605,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18145280,
+          "peak_rss_bytes": 18857984,
+          "peak_rss_delta_bytes": 712704,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 10.609300000000001,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 942569.2552760313,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18542592,
+          "peak_rss_bytes": 18915328,
+          "peak_rss_delta_bytes": 372736,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 10.2857,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 972223.5725327396,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18399232,
+          "peak_rss_bytes": 18898944,
+          "peak_rss_delta_bytes": 499712,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 11.3725,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 879314.1349747197,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18497536,
+          "peak_rss_bytes": 18923520,
+          "peak_rss_delta_bytes": 425984,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 12.8212,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 779958.1942407887,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18575360,
+          "peak_rss_bytes": 18882560,
+          "peak_rss_delta_bytes": 307200,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 12.4804,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 801256.3699881415,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18280448,
+          "peak_rss_bytes": 18735104,
+          "peak_rss_delta_bytes": 454656,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 10.1011,
+        "p50_ms": 10.77455,
+        "p95_ms": 12.667839999999998,
+        "max_ms": 12.8212,
+        "mean_ms": 11.045200000000001,
+        "throughput_p50": 928153.1399880429,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 712704,
+        "cpu_ms_p50": 31
+      },
+      "details": {
+        "matched_entries": 100,
+        "truncated": false
+      },
+      "notes": [
+        "Recursive name search uses the same Core entry point as the column search.",
+        "Throughput uses the fixture entry count and is therefore a lower bound."
+      ]
+    },
+    {
+      "area": "Global name search",
+      "scenario": "global_name_search_10000",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 18.8434,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 530689.7905898086,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18767872,
+          "peak_rss_bytes": 18841600,
+          "peak_rss_delta_bytes": 73728,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 18.9625,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 527356.6249176005,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18518016,
+          "peak_rss_bytes": 18796544,
+          "peak_rss_delta_bytes": 278528,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 19.1996,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 520844.1842538386,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18513920,
+          "peak_rss_bytes": 18788352,
+          "peak_rss_delta_bytes": 274432,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 19.5782,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 510772.1853898724,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18448384,
+          "peak_rss_bytes": 18804736,
+          "peak_rss_delta_bytes": 356352,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 19.0587,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 524694.758824054,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18513920,
+          "peak_rss_bytes": 18829312,
+          "peak_rss_delta_bytes": 315392,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 19.317999999999998,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 517651.9308417021,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18518016,
+          "peak_rss_bytes": 18841600,
+          "peak_rss_delta_bytes": 323584,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 19.3144,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 517748.415689848,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18505728,
+          "peak_rss_bytes": 18829312,
+          "peak_rss_delta_bytes": 323584,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 19.5103,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 512549.7813975182,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18509824,
+          "peak_rss_bytes": 18833408,
+          "peak_rss_delta_bytes": 323584,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 19.6713,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 508354.8113241118,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18448384,
+          "peak_rss_bytes": 18817024,
+          "peak_rss_delta_bytes": 368640,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 19.5208,
+          "items": 10000,
+          "bytes": null,
+          "throughput_per_second": 512274.0871275767,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18513920,
+          "peak_rss_bytes": 18825216,
+          "peak_rss_delta_bytes": 311296,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 18.8434,
+        "p50_ms": 19.3162,
+        "p95_ms": 19.629405,
+        "max_ms": 19.6713,
+        "mean_ms": 19.297720000000005,
+        "throughput_p50": 517700.1732657751,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 368640,
+        "cpu_ms_p50": 31
+      },
+      "details": {
+        "matched_entries": 100,
+        "truncated": false
+      },
+      "notes": [
+        "Measures the single-root Core traversal and ranking path.",
+        "The Core search has a 5 second and 250000 entry budget."
+      ]
+    },
+    {
+      "area": "Global name search",
+      "scenario": "global_name_search_multi_root",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 40.0989,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 498766.79908925184,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18505728,
+          "peak_rss_bytes": 32694272,
+          "peak_rss_delta_bytes": 14188544,
+          "cpu_ms": 46,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 40.3853,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 495229.69991556334,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18227200,
+          "peak_rss_bytes": 30400512,
+          "peak_rss_delta_bytes": 12173312,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 41.4861,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 482089.1816777186,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18214912,
+          "peak_rss_bytes": 30355456,
+          "peak_rss_delta_bytes": 12140544,
+          "cpu_ms": 62,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 41.6998,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 479618.60728348815,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18157568,
+          "peak_rss_bytes": 32026624,
+          "peak_rss_delta_bytes": 13869056,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 41.4654,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 482329.8460885461,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18411520,
+          "peak_rss_bytes": 30416896,
+          "peak_rss_delta_bytes": 12005376,
+          "cpu_ms": 62,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 41.033699999999996,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 487404.255526555,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18468864,
+          "peak_rss_bytes": 29704192,
+          "peak_rss_delta_bytes": 11235328,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 39.702099999999994,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 503751.690716612,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18550784,
+          "peak_rss_bytes": 30859264,
+          "peak_rss_delta_bytes": 12308480,
+          "cpu_ms": 63,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 40.161500000000004,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 497989.36792699475,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18432000,
+          "peak_rss_bytes": 31031296,
+          "peak_rss_delta_bytes": 12599296,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 40.6402,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 492123.56238404335,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18448384,
+          "peak_rss_bytes": 30580736,
+          "peak_rss_delta_bytes": 12132352,
+          "cpu_ms": 63,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 40.9989,
+          "items": 20000,
+          "bytes": null,
+          "throughput_per_second": 487817.9658478642,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18325504,
+          "peak_rss_bytes": 31989760,
+          "peak_rss_delta_bytes": 13664256,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 39.702099999999994,
+        "p50_ms": 40.81955,
+        "p95_ms": 41.603635,
+        "max_ms": 41.6998,
+        "mean_ms": 40.76719,
+        "throughput_p50": 489970.7641159538,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 14188544,
+        "cpu_ms_p50": 47
+      },
+      "details": {
+        "matched_entries": 200,
+        "truncated": false
+      },
+      "notes": [
+        "Measures normalization, traversal, de-duplication, and ranking for two roots."
+      ]
+    },
+    {
+      "area": "Column search",
+      "scenario": "GPUI search-field feedback and frame-stall measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Column search",
+      "scenario": "SwiftUI search-field feedback and frame-stall measurement",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "cold_content_index_build",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 1025.817,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 487.4163715360537,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 18341888,
+          "peak_rss_bytes": 32403456,
+          "peak_rss_delta_bytes": 14061568,
+          "cpu_ms": 390,
+          "read_bytes": 798249,
+          "written_bytes": 131994
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 1024.4572,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 488.0633373458647,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 21098496,
+          "peak_rss_bytes": 32518144,
+          "peak_rss_delta_bytes": 11419648,
+          "cpu_ms": 328,
+          "read_bytes": 798249,
+          "written_bytes": 131994
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 1024.8164,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 487.89227026421514,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 21180416,
+          "peak_rss_bytes": 32571392,
+          "peak_rss_delta_bytes": 11390976,
+          "cpu_ms": 328,
+          "read_bytes": 798249,
+          "written_bytes": 131994
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 1075.5283,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 464.88781373767665,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 21123072,
+          "peak_rss_bytes": 32378880,
+          "peak_rss_delta_bytes": 11255808,
+          "cpu_ms": 328,
+          "read_bytes": 798249,
+          "written_bytes": 131994
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 1076.2593,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 464.5720599115845,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 21217280,
+          "peak_rss_bytes": 32563200,
+          "peak_rss_delta_bytes": 11345920,
+          "cpu_ms": 344,
+          "read_bytes": 798249,
+          "written_bytes": 131994
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 1024.4572,
+        "p50_ms": 1025.817,
+        "p95_ms": 1076.1131,
+        "max_ms": 1076.2593,
+        "mean_ms": 1045.3756399999997,
+        "throughput_p50": 487.4163715360537,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 14061568,
+        "cpu_ms_p50": 328
+      },
+      "details": {
+        "expected_documents": 500,
+        "index_bytes": 102383
+      },
+      "notes": [
+        "Each sample creates a new isolated Tantivy index.",
+        "Build time includes index creation, traversal, tokenization, and writer commit."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "warm_content_query",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 18.728,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2669.799231097821,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26341376,
+          "peak_rss_bytes": 26427392,
+          "peak_rss_delta_bytes": 86016,
+          "cpu_ms": 31,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 18.8727,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2649.3294547150117,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25931776,
+          "peak_rss_bytes": 26980352,
+          "peak_rss_delta_bytes": 1048576,
+          "cpu_ms": 16,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 19.1066,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2616.896779123444,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25964544,
+          "peak_rss_bytes": 26570752,
+          "peak_rss_delta_bytes": 606208,
+          "cpu_ms": 31,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 18.6652,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2678.7819042924802,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26066944,
+          "peak_rss_bytes": 27148288,
+          "peak_rss_delta_bytes": 1081344,
+          "cpu_ms": 47,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 21.869699999999998,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2286.26821584201,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26132480,
+          "peak_rss_bytes": 27086848,
+          "peak_rss_delta_bytes": 954368,
+          "cpu_ms": 31,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 19.0828,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2620.1605634393277,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26222592,
+          "peak_rss_bytes": 26648576,
+          "peak_rss_delta_bytes": 425984,
+          "cpu_ms": 16,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 18.7767,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2662.874733046808,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26079232,
+          "peak_rss_bytes": 27127808,
+          "peak_rss_delta_bytes": 1048576,
+          "cpu_ms": 15,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 18.810299999999998,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2658.1181586683892,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26263552,
+          "peak_rss_bytes": 26636288,
+          "peak_rss_delta_bytes": 372736,
+          "cpu_ms": 32,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 18.9318,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2641.058959000201,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26091520,
+          "peak_rss_bytes": 26787840,
+          "peak_rss_delta_bytes": 696320,
+          "cpu_ms": 31,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 18.8709,
+          "items": 50,
+          "bytes": null,
+          "throughput_per_second": 2649.5821608932274,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26284032,
+          "peak_rss_bytes": 26705920,
+          "peak_rss_delta_bytes": 421888,
+          "cpu_ms": 31,
+          "read_bytes": 77400,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 18.6652,
+        "p50_ms": 18.8718,
+        "p95_ms": 20.626304999999995,
+        "max_ms": 21.869699999999998,
+        "mean_ms": 19.171469999999996,
+        "throughput_p50": 2649.4558078041196,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 1081344,
+        "cpu_ms_p50": 31
+      },
+      "details": {
+        "documents_scanned": 500,
+        "index_bytes": 102383,
+        "partial": false,
+        "total_matches": 50,
+        "truncated": true
+      },
+      "notes": [
+        "Measures indexed candidate lookup plus exact line verification.",
+        "The query returns at most 50 files."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "incremental_update_to_query",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 72.1616,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 13.857785858406686,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26099712,
+          "peak_rss_bytes": 27607040,
+          "peak_rss_delta_bytes": 1507328,
+          "cpu_ms": 156,
+          "read_bytes": 773922,
+          "written_bytes": 32
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 80.8676,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 12.365891902319348,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26927104,
+          "peak_rss_bytes": 27955200,
+          "peak_rss_delta_bytes": 1028096,
+          "cpu_ms": 172,
+          "read_bytes": 773954,
+          "written_bytes": 32
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 73.5903,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 13.588747430028143,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 27377664,
+          "peak_rss_bytes": 27725824,
+          "peak_rss_delta_bytes": 348160,
+          "cpu_ms": 172,
+          "read_bytes": 773986,
+          "written_bytes": 32
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 75.99119999999999,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 13.159418458979461,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26890240,
+          "peak_rss_bytes": 28512256,
+          "peak_rss_delta_bytes": 1622016,
+          "cpu_ms": 141,
+          "read_bytes": 774018,
+          "written_bytes": 32
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 75.3366,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 13.27376069533268,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26951680,
+          "peak_rss_bytes": 27906048,
+          "peak_rss_delta_bytes": 954368,
+          "cpu_ms": 172,
+          "read_bytes": 774050,
+          "written_bytes": 32
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 72.1616,
+        "p50_ms": 75.3366,
+        "p95_ms": 79.89232,
+        "max_ms": 80.8676,
+        "mean_ms": 75.58946,
+        "throughput_p50": 13.27376069533268,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 1622016,
+        "cpu_ms_p50": 172
+      },
+      "details": {
+        "index_bytes": 102383,
+        "query": "zebrafruit0004"
+      },
+      "notes": [
+        "Writes a unique token, waits for watcher/index refresh, then queries the token.",
+        "The result is an end-to-end freshness latency inside the Core boundary."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "GPUI result-card rendering and frame-stall measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "SwiftUI result-card rendering and frame-stall measurement",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "text_open_1mib",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 2.6456,
+          "items": null,
+          "bytes": 1048576,
+          "throughput_per_second": 377.98609011188387,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26734592,
+          "peak_rss_bytes": 28860416,
+          "peak_rss_delta_bytes": 2125824,
+          "cpu_ms": 0,
+          "read_bytes": 1048576,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 2.8695,
+          "items": null,
+          "bytes": 1048576,
+          "throughput_per_second": 348.4927687750479,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26746880,
+          "peak_rss_bytes": 28872704,
+          "peak_rss_delta_bytes": 2125824,
+          "cpu_ms": 0,
+          "read_bytes": 1048576,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 2.8118000000000003,
+          "items": null,
+          "bytes": 1048576,
+          "throughput_per_second": 355.6440714133295,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26759168,
+          "peak_rss_bytes": 28889088,
+          "peak_rss_delta_bytes": 2129920,
+          "cpu_ms": 0,
+          "read_bytes": 1048576,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 2.7098,
+          "items": null,
+          "bytes": 1048576,
+          "throughput_per_second": 369.0309247914975,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26779648,
+          "peak_rss_bytes": 28901376,
+          "peak_rss_delta_bytes": 2121728,
+          "cpu_ms": 0,
+          "read_bytes": 1048576,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 2.8302,
+          "items": null,
+          "bytes": 1048576,
+          "throughput_per_second": 353.3319200056533,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26783744,
+          "peak_rss_bytes": 28909568,
+          "peak_rss_delta_bytes": 2125824,
+          "cpu_ms": 31,
+          "read_bytes": 1048576,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 2.6456,
+        "p50_ms": 2.8118000000000003,
+        "p95_ms": 2.86164,
+        "max_ms": 2.8695,
+        "mean_ms": 2.77338,
+        "throughput_p50": 355.6440714133295,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 2129920,
+        "cpu_ms_p50": 0
+      },
+      "details": {
+        "language": "text",
+        "line_ending": "lf"
+      },
+      "notes": [
+        "Measures Core file read, UTF-8 decoding, language detection, and SHA-256.",
+        "Native preview and editor rendering are excluded."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "text_open_8mib",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 18.7867,
+          "items": null,
+          "bytes": 8388608,
+          "throughput_per_second": 425.8331692101327,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26796032,
+          "peak_rss_bytes": 43606016,
+          "peak_rss_delta_bytes": 16809984,
+          "cpu_ms": 31,
+          "read_bytes": 8388608,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 19.074299999999997,
+          "items": null,
+          "bytes": 8388608,
+          "throughput_per_second": 419.41250792951774,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26804224,
+          "peak_rss_bytes": 43618304,
+          "peak_rss_delta_bytes": 16814080,
+          "cpu_ms": 32,
+          "read_bytes": 8388608,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 18.9972,
+          "items": null,
+          "bytes": 8388608,
+          "throughput_per_second": 421.1146905859811,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26816512,
+          "peak_rss_bytes": 43622400,
+          "peak_rss_delta_bytes": 16805888,
+          "cpu_ms": 47,
+          "read_bytes": 8388608,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 19.1269,
+          "items": null,
+          "bytes": 8388608,
+          "throughput_per_second": 418.25910105662706,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26824704,
+          "peak_rss_bytes": 43634688,
+          "peak_rss_delta_bytes": 16809984,
+          "cpu_ms": 46,
+          "read_bytes": 8388608,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 19.0938,
+          "items": null,
+          "bytes": 8388608,
+          "throughput_per_second": 418.9841728728697,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 26836992,
+          "peak_rss_bytes": 43642880,
+          "peak_rss_delta_bytes": 16805888,
+          "cpu_ms": 32,
+          "read_bytes": 8388608,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 18.7867,
+        "p50_ms": 19.074299999999997,
+        "p95_ms": 19.12028,
+        "max_ms": 19.1269,
+        "mean_ms": 19.01578,
+        "throughput_p50": 419.41250792951774,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 16814080,
+        "cpu_ms_p50": 32
+      },
+      "details": {
+        "language": "text",
+        "line_ending": "lf"
+      },
+      "notes": [
+        "Measures Core file read, UTF-8 decoding, language detection, and SHA-256.",
+        "Native preview and editor rendering are excluded."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "text_open_100mib",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 0.0484,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 20661.15702479339,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26845184,
+          "peak_rss_bytes": 26861568,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 0.06499999999999999,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 15384.615384615387,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26857472,
+          "peak_rss_bytes": 26873856,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 0.0575,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 17391.304347826088,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26865664,
+          "peak_rss_bytes": 26882048,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 0.056799999999999996,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 17605.6338028169,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26873856,
+          "peak_rss_bytes": 26894336,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 0.048600000000000004,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 20576.131687242796,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26882048,
+          "peak_rss_bytes": 26902528,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 0.0484,
+        "p50_ms": 0.056799999999999996,
+        "p95_ms": 0.06349999999999999,
+        "max_ms": 0.06499999999999999,
+        "mean_ms": 0.05526,
+        "throughput_p50": 17605.6338028169,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 20480,
+        "cpu_ms_p50": 0
+      },
+      "details": {
+        "declared_file_bytes": 104857600,
+        "expected_result": "rejected"
+      },
+      "notes": [
+        "Measures Core file read, UTF-8 decoding, language detection, and SHA-256.",
+        "The editor deliberately rejects files larger than 8 MiB."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "GPUI image, Markdown, code, and log rendering plus scroll-stall measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "Quick Look, SwiftUI preview, NSTextView, and scroll-stall measurement",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "create_100_files",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 27.9481,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 3578.060762627871,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26898432,
+          "peak_rss_bytes": 26927104,
+          "peak_rss_delta_bytes": 28672,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 27.8828,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 3586.440386187901,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26914816,
+          "peak_rss_bytes": 26935296,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 28.052,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 3564.8082133181233,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26918912,
+          "peak_rss_bytes": 26943488,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 30.855,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 3240.9658078107277,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26931200,
+          "peak_rss_bytes": 26951680,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 138.98250000000002,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 719.5150468584173,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26939392,
+          "peak_rss_bytes": 29446144,
+          "peak_rss_delta_bytes": 2506752,
+          "cpu_ms": 31,
+          "read_bytes": 32,
+          "written_bytes": 1279
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 254.7103,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 392.60289042099987,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 29433856,
+          "peak_rss_bytes": 33693696,
+          "peak_rss_delta_bytes": 4259840,
+          "cpu_ms": 47,
+          "read_bytes": 0,
+          "written_bytes": 8370
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 165.1358,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 605.5622100113967,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 30461952,
+          "peak_rss_bytes": 30482432,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 78,
+          "read_bytes": 2886,
+          "written_bytes": 4887
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 347.29510000000005,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 287.93956494059375,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 28995584,
+          "peak_rss_bytes": 33267712,
+          "peak_rss_delta_bytes": 4272128,
+          "cpu_ms": 62,
+          "read_bytes": 0,
+          "written_bytes": 10224
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 161.5281,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 619.087329077727,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 29003776,
+          "peak_rss_bytes": 29024256,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 94,
+          "read_bytes": 2873,
+          "written_bytes": 3284
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 31.8552,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 3139.204902182375,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23228416,
+          "peak_rss_bytes": 23252992,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 27.8828,
+        "p50_ms": 85.41885,
+        "p95_ms": 305.63193999999993,
+        "max_ms": 347.29510000000005,
+        "mean_ms": 121.42449000000002,
+        "throughput_p50": 1929.3599745203962,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 4272128,
+        "cpu_ms_p50": 32
+      },
+      "details": null,
+      "notes": [
+        "Measures Core create-file calls, including filesystem metadata updates."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "rename_file",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 0.3319,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3012.9557095510695,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23244800,
+          "peak_rss_bytes": 23265280,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 0.2903,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3444.712366517396,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23257088,
+          "peak_rss_bytes": 23277568,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 0.335,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 2985.0746268656717,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23269376,
+          "peak_rss_bytes": 23289856,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 0.3363,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 2973.5355337496285,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23277568,
+          "peak_rss_bytes": 23298048,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 0.31520000000000004,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3172.5888324873094,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23289856,
+          "peak_rss_bytes": 23310336,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 0.3409,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 2933.411557641537,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23298048,
+          "peak_rss_bytes": 23318528,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 0.32249999999999995,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3100.77519379845,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23310336,
+          "peak_rss_bytes": 23326720,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 0.3147,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3177.6294884016525,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23322624,
+          "peak_rss_bytes": 23343104,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 0.308,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3246.753246753247,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23330816,
+          "peak_rss_bytes": 23351296,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 0.3281,
+          "items": 1,
+          "bytes": null,
+          "throughput_per_second": 3047.851264858275,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23343104,
+          "peak_rss_bytes": 23363584,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 0.2903,
+        "p50_ms": 0.3253,
+        "p95_ms": 0.33882999999999996,
+        "max_ms": 0.3409,
+        "mean_ms": 0.32229,
+        "throughput_p50": 3074.3132293283625,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 20480,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures one Core rename operation."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "copy_small_file_tree",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 575.4502,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1737.7698365557958,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23506944,
+          "peak_rss_bytes": 23531520,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 547,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 582.069,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1718.0093768951792,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23523328,
+          "peak_rss_bytes": 23539712,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 468,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 606.826,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1647.9188432928056,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23523328,
+          "peak_rss_bytes": 23547904,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 438,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 537.6881999999999,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1859.8139218974866,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23535616,
+          "peak_rss_bytes": 23552000,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 390,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 524.4377,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1906.804182841928,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23539712,
+          "peak_rss_bytes": 23564288,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 516,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 616.9359,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1620.9139393573953,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23511040,
+          "peak_rss_bytes": 23531520,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 500,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 526.0567000000001,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1900.935773653296,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23515136,
+          "peak_rss_bytes": 23535616,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 453,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 812.9539,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1230.0820501629921,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23523328,
+          "peak_rss_bytes": 23547904,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 578,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 603.6988,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1656.4551726788259,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23535616,
+          "peak_rss_bytes": 23564288,
+          "peak_rss_delta_bytes": 28672,
+          "cpu_ms": 453,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 710.0623,
+          "items": 1000,
+          "bytes": null,
+          "throughput_per_second": 1408.3271284787263,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23547904,
+          "peak_rss_bytes": 23572480,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 563,
+          "read_bytes": 64000,
+          "written_bytes": 64000
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 524.4377,
+        "p50_ms": 592.8839,
+        "p95_ms": 766.6526799999999,
+        "max_ms": 812.9539,
+        "mean_ms": 609.61787,
+        "throughput_p50": 1687.2322747870026,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 28672,
+        "cpu_ms_p50": 468
+      },
+      "details": null,
+      "notes": [
+        "Copies the full fixture tree through the Core transfer implementation.",
+        "Destination cleanup occurs after measurement."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "move_small_file_tree",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 2.2558000000000002,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 44330.1711144605,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23572480,
+          "peak_rss_bytes": 23592960,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 0.8675999999999999,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 115260.48870447211,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23580672,
+          "peak_rss_bytes": 23597056,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 1.9631,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 50939.84004890224,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23584768,
+          "peak_rss_bytes": 23605248,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 15.2645,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 6551.148088702545,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23588864,
+          "peak_rss_bytes": 23613440,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 0.9511,
+          "items": 100,
+          "bytes": null,
+          "throughput_per_second": 105141.41520344865,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23597056,
+          "peak_rss_bytes": 23617536,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 0.8675999999999999,
+        "p50_ms": 1.9631,
+        "p95_ms": 12.662759999999997,
+        "max_ms": 15.2645,
+        "mean_ms": 4.26042,
+        "throughput_p50": 50939.84004890224,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 24576,
+        "cpu_ms_p50": 15
+      },
+      "details": null,
+      "notes": [
+        "Moves a precreated 100-file tree through the Core transfer implementation."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "copy_large_file",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 21.030900000000003,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 3043.141282588952,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23609344,
+          "peak_rss_bytes": 23633920,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 32,
+          "read_bytes": 67108864,
+          "written_bytes": 67108864
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 22.1039,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 2895.416645931261,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23617536,
+          "peak_rss_bytes": 23642112,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 32,
+          "read_bytes": 67108864,
+          "written_bytes": 67108864
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 22.8042,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 2806.5005569149544,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23629824,
+          "peak_rss_bytes": 23646208,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 31,
+          "read_bytes": 67108864,
+          "written_bytes": 67108864
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 22.165899999999997,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 2887.31790723589,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23633920,
+          "peak_rss_bytes": 23650304,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 32,
+          "read_bytes": 67108864,
+          "written_bytes": 67108864
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 21.3095,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 3003.355311011521,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23633920,
+          "peak_rss_bytes": 23658496,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 32,
+          "read_bytes": 67108864,
+          "written_bytes": 67108864
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 21.030900000000003,
+        "p50_ms": 22.1039,
+        "p95_ms": 22.67654,
+        "max_ms": 22.8042,
+        "mean_ms": 21.88288,
+        "throughput_p50": 2895.416645931261,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 24576,
+        "cpu_ms_p50": 32
+      },
+      "details": null,
+      "notes": [
+        "Measures one large-file copy through the Core transfer implementation."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "GPUI progress feedback, recycle-bin action, and Explorer clipboard integration",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "SwiftUI progress feedback, Finder clipboard integration, and trash action",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "compress_zip",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 35.3264,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 14153.72073010553,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23523328,
+          "peak_rss_bytes": 24084480,
+          "peak_rss_delta_bytes": 561152,
+          "cpu_ms": 47,
+          "read_bytes": 773890,
+          "written_bytes": 116500
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 37.0478,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 13496.078039721655,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23539712,
+          "peak_rss_bytes": 24088576,
+          "peak_rss_delta_bytes": 548864,
+          "cpu_ms": 47,
+          "read_bytes": 773890,
+          "written_bytes": 116500
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 36.3864,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 13741.397884924037,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23552000,
+          "peak_rss_bytes": 24104960,
+          "peak_rss_delta_bytes": 552960,
+          "cpu_ms": 46,
+          "read_bytes": 773890,
+          "written_bytes": 116500
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 39.1861,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 12759.626500213086,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23564288,
+          "peak_rss_bytes": 24113152,
+          "peak_rss_delta_bytes": 548864,
+          "cpu_ms": 63,
+          "read_bytes": 773890,
+          "written_bytes": 116500
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 35.8836,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 13933.941967918492,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23576576,
+          "peak_rss_bytes": 24129536,
+          "peak_rss_delta_bytes": 552960,
+          "cpu_ms": 31,
+          "read_bytes": 773890,
+          "written_bytes": 116500
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 35.3264,
+        "p50_ms": 36.3864,
+        "p95_ms": 38.75844,
+        "max_ms": 39.1861,
+        "mean_ms": 36.76606,
+        "throughput_p50": 13741.397884924037,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 561152,
+        "cpu_ms_p50": 47
+      },
+      "details": null,
+      "notes": [
+        "Compresses the deterministic text tree with the Core archive writer."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "compress_tar_gz",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 20.0035,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 24995.625765491037,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23945216,
+          "peak_rss_bytes": 23965696,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 15,
+          "read_bytes": 773890,
+          "written_bytes": 11537
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 20.520400000000002,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 24365.99676419563,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23531520,
+          "peak_rss_bytes": 23908352,
+          "peak_rss_delta_bytes": 376832,
+          "cpu_ms": 16,
+          "read_bytes": 773890,
+          "written_bytes": 11537
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 21.1051,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 23690.956214374724,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23900160,
+          "peak_rss_bytes": 23924736,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 16,
+          "read_bytes": 773890,
+          "written_bytes": 11537
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 20.5657,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 24312.32586296601,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23531520,
+          "peak_rss_bytes": 23953408,
+          "peak_rss_delta_bytes": 421888,
+          "cpu_ms": 15,
+          "read_bytes": 773890,
+          "written_bytes": 11537
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 19.893,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 25134.469411350725,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23580672,
+          "peak_rss_bytes": 23957504,
+          "peak_rss_delta_bytes": 376832,
+          "cpu_ms": 32,
+          "read_bytes": 773890,
+          "written_bytes": 11537
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 19.893,
+        "p50_ms": 20.520400000000002,
+        "p95_ms": 20.997220000000002,
+        "max_ms": 21.1051,
+        "mean_ms": 20.417540000000002,
+        "throughput_p50": 24365.99676419563,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 421888,
+        "cpu_ms_p50": 16
+      },
+      "details": null,
+      "notes": [
+        "Compresses the deterministic text tree with the Core archive writer."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "extract_zip",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 290.456,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 1721.4311289833918,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23945216,
+          "peak_rss_bytes": 24272896,
+          "peak_rss_delta_bytes": 327680,
+          "cpu_ms": 218,
+          "read_bytes": 100045,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 240.3776,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 2080.0607044916,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23670784,
+          "peak_rss_bytes": 24027136,
+          "peak_rss_delta_bytes": 356352,
+          "cpu_ms": 266,
+          "read_bytes": 100045,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 282.5698,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 1769.4743033402722,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23658496,
+          "peak_rss_bytes": 24035328,
+          "peak_rss_delta_bytes": 376832,
+          "cpu_ms": 234,
+          "read_bytes": 100045,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 216.917,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 2305.029112517691,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 24018944,
+          "peak_rss_delta_bytes": 372736,
+          "cpu_ms": 250,
+          "read_bytes": 100045,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 217.9982,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 2293.596919607593,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23638016,
+          "peak_rss_bytes": 24043520,
+          "peak_rss_delta_bytes": 405504,
+          "cpu_ms": 219,
+          "read_bytes": 100045,
+          "written_bytes": 773890
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 216.917,
+        "p50_ms": 240.3776,
+        "p95_ms": 288.87876,
+        "max_ms": 290.456,
+        "mean_ms": 249.66372,
+        "throughput_p50": 2080.0607044916,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 405504,
+        "cpu_ms_p50": 234
+      },
+      "details": null,
+      "notes": [
+        "Extracts a prepared archive with the Core archive reader."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "extract_tar_gz",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 295.85339999999997,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 1690.0262089264481,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23658496,
+          "peak_rss_bytes": 23777280,
+          "peak_rss_delta_bytes": 118784,
+          "cpu_ms": 250,
+          "read_bytes": 23074,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 478.548,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 1044.8272691558632,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 23736320,
+          "peak_rss_delta_bytes": 90112,
+          "cpu_ms": 281,
+          "read_bytes": 23074,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 255.7874,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 1954.7483574249552,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 23736320,
+          "peak_rss_delta_bytes": 90112,
+          "cpu_ms": 281,
+          "read_bytes": 23074,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 257.90659999999997,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 1938.6863306328726,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23724032,
+          "peak_rss_bytes": 23748608,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 313,
+          "read_bytes": 23074,
+          "written_bytes": 773890
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 560.4925,
+          "items": 500,
+          "bytes": null,
+          "throughput_per_second": 892.0725968679332,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 23736320,
+          "peak_rss_delta_bytes": 90112,
+          "cpu_ms": 265,
+          "read_bytes": 23074,
+          "written_bytes": 773890
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 255.7874,
+        "p50_ms": 295.85339999999997,
+        "p95_ms": 544.1035999999999,
+        "max_ms": 560.4925,
+        "mean_ms": 369.71758,
+        "throughput_p50": 1690.0262089264481,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 118784,
+        "cpu_ms_p50": 281
+      },
+      "details": null,
+      "notes": [
+        "Extracts a prepared archive with the Core archive reader."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "compress_large_file_zip",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 1839.1018,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 34.79959619418566,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23724032,
+          "peak_rss_bytes": 24055808,
+          "peak_rss_delta_bytes": 331776,
+          "cpu_ms": 2047,
+          "read_bytes": 67108864,
+          "written_bytes": 67119568
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 1722.6098,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 37.152929235628406,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 24047616,
+          "peak_rss_bytes": 24076288,
+          "peak_rss_delta_bytes": 28672,
+          "cpu_ms": 1985,
+          "read_bytes": 67108864,
+          "written_bytes": 67119568
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 1724.3654999999999,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 37.115101177795545,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 24002560,
+          "peak_rss_delta_bytes": 356352,
+          "cpu_ms": 2046,
+          "read_bytes": 67108864,
+          "written_bytes": 67119568
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 1725.4782,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 37.09116695881756,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 23998464,
+          "peak_rss_delta_bytes": 352256,
+          "cpu_ms": 2047,
+          "read_bytes": 67108864,
+          "written_bytes": 67119568
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 1721.7666,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 37.17112412332775,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 23646208,
+          "peak_rss_bytes": 23998464,
+          "peak_rss_delta_bytes": 352256,
+          "cpu_ms": 2016,
+          "read_bytes": 67108864,
+          "written_bytes": 67119568
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 1721.7666,
+        "p50_ms": 1724.3654999999999,
+        "p95_ms": 1816.3770799999998,
+        "max_ms": 1839.1018,
+        "mean_ms": 1746.6643800000002,
+        "throughput_p50": 37.115101177795545,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 356352,
+        "cpu_ms_p50": 2046
+      },
+      "details": null,
+      "notes": [
+        "Compresses the large binary fixture with ZIP."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "GPUI archive progress and frame-stall measurement",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "SwiftUI archive progress and frame-stall measurement",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "git_clean_status",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 99.4826,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 50260.045475289146,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24092672,
+          "peak_rss_bytes": 24170496,
+          "peak_rss_delta_bytes": 77824,
+          "cpu_ms": 15,
+          "read_bytes": 73,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 98.29849999999999,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 50865.476075423336,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23752704,
+          "peak_rss_bytes": 23842816,
+          "peak_rss_delta_bytes": 90112,
+          "cpu_ms": 16,
+          "read_bytes": 73,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 97.0071,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 51542.61904541008,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23830528,
+          "peak_rss_bytes": 23863296,
+          "peak_rss_delta_bytes": 32768,
+          "cpu_ms": 31,
+          "read_bytes": 73,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 102.28750000000001,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 48881.828180373945,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23851008,
+          "peak_rss_bytes": 23875584,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 31,
+          "read_bytes": 73,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 96.7145,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 51698.55605932927,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23863296,
+          "peak_rss_bytes": 23891968,
+          "peak_rss_delta_bytes": 28672,
+          "cpu_ms": 0,
+          "read_bytes": 73,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 96.7145,
+        "p50_ms": 98.29849999999999,
+        "p95_ms": 101.72652000000001,
+        "max_ms": 102.28750000000001,
+        "mean_ms": 98.75804,
+        "throughput_p50": 50865.476075423336,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 90112,
+        "cpu_ms_p50": 16
+      },
+      "details": {
+        "git_statuses": 0,
+        "svn_available": false,
+        "svn_statuses": 0
+      },
+      "notes": [
+        "Measures git and SVN discovery plus Git porcelain status."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "git_dirty_status_100_files",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 97.9054,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 51069.70606319978,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23838720,
+          "peak_rss_bytes": 23863296,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 16,
+          "read_bytes": 1973,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 101.5436,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 49239.9324034208,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23851008,
+          "peak_rss_bytes": 23875584,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 15,
+          "read_bytes": 1973,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 99.5812,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 50210.280655384755,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23863296,
+          "peak_rss_bytes": 23887872,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 16,
+          "read_bytes": 1973,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 97.4778,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 51293.73046991212,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23773184,
+          "peak_rss_bytes": 23859200,
+          "peak_rss_delta_bytes": 86016,
+          "cpu_ms": 15,
+          "read_bytes": 1973,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 97.2226,
+          "items": 5000,
+          "bytes": null,
+          "throughput_per_second": 51428.371592613235,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 23773184,
+          "peak_rss_bytes": 23859200,
+          "peak_rss_delta_bytes": 86016,
+          "cpu_ms": 16,
+          "read_bytes": 1973,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 97.2226,
+        "p50_ms": 97.9054,
+        "p95_ms": 101.15111999999999,
+        "max_ms": 101.5436,
+        "mean_ms": 98.74611999999999,
+        "throughput_p50": 51069.70606319978,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 86016,
+        "cpu_ms_p50": 16
+      },
+      "details": {
+        "git_statuses": 100
+      },
+      "notes": [
+        "Measures Git status after 100 tracked files change."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "apply_vcs_statuses",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 2.0425999999999997,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2448350.141975913,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25387008,
+          "peak_rss_bytes": 25436160,
+          "peak_rss_delta_bytes": 49152,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 1.9514999999999998,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2562644.1199077633,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25427968,
+          "peak_rss_bytes": 25485312,
+          "peak_rss_delta_bytes": 57344,
+          "cpu_ms": 32,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 1.7564,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2847301.29810977,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25477120,
+          "peak_rss_bytes": 26443776,
+          "peak_rss_delta_bytes": 966656,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 1.8835,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2655163.2598885056,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26435584,
+          "peak_rss_bytes": 25513984,
+          "peak_rss_delta_bytes": 0,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 2.7887,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 1793308.7101516838,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25505792,
+          "peak_rss_bytes": 26472448,
+          "peak_rss_delta_bytes": 966656,
+          "cpu_ms": 31,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 1.8702,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2674045.5566249597,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25518080,
+          "peak_rss_bytes": 26480640,
+          "peak_rss_delta_bytes": 962560,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 2.7344,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 1828920.4212990052,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25456640,
+          "peak_rss_bytes": 26271744,
+          "peak_rss_delta_bytes": 815104,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 1.8959000000000001,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2637797.352181022,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 26259456,
+          "peak_rss_bytes": 25571328,
+          "peak_rss_delta_bytes": 0,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 1.8747,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2667626.8202912468,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25563136,
+          "peak_rss_bytes": 25600000,
+          "peak_rss_delta_bytes": 36864,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 1.756,
+          "items": 5001,
+          "bytes": null,
+          "throughput_per_second": 2847949.8861047835,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25587712,
+          "peak_rss_bytes": 26443776,
+          "peak_rss_delta_bytes": 856064,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 1.756,
+        "p50_ms": 1.8897,
+        "p95_ms": 2.764265,
+        "max_ms": 2.7887,
+        "mean_ms": 2.05539,
+        "throughput_p50": 2646480.306034764,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 966656,
+        "cpu_ms_p50": 0
+      },
+      "details": null,
+      "notes": [
+        "Measures status indexing and assignment to loaded directory entries."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "Windows native Shell context-menu and third-party extension latency",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "AppKit menu latency and SVN fixture when svn is unavailable",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Sidebar and devices",
+      "scenario": "volume_enumeration",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 0.2675,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 11214.953271028038,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24924160,
+          "peak_rss_bytes": 24948736,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 0.3442,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 8715.862870424171,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24944640,
+          "peak_rss_bytes": 24965120,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 16,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 0.35100000000000003,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 8547.008547008547,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24899584,
+          "peak_rss_bytes": 24952832,
+          "peak_rss_delta_bytes": 53248,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 0.2959,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 10138.56032443393,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24944640,
+          "peak_rss_bytes": 24965120,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 0.27040000000000003,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 11094.674556213016,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24956928,
+          "peak_rss_bytes": 24977408,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 5,
+          "duration_ms": 0.2772,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 10822.510822510822,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24969216,
+          "peak_rss_bytes": 24989696,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 15,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 6,
+          "duration_ms": 0.2664,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 11261.261261261261,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24977408,
+          "peak_rss_bytes": 25001984,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 7,
+          "duration_ms": 0.2943,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 10193.67991845056,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 24997888,
+          "peak_rss_bytes": 25018368,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 8,
+          "duration_ms": 0.27099999999999996,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 11070.110701107013,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25006080,
+          "peak_rss_bytes": 25022464,
+          "peak_rss_delta_bytes": 16384,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 9,
+          "duration_ms": 0.2641,
+          "items": 3,
+          "bytes": null,
+          "throughput_per_second": 11359.333585762968,
+          "throughput_unit": "items/s",
+          "baseline_rss_bytes": 25010176,
+          "peak_rss_bytes": 25030656,
+          "peak_rss_delta_bytes": 20480,
+          "cpu_ms": 0,
+          "read_bytes": 0,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 10,
+        "min_ms": 0.2641,
+        "p50_ms": 0.2741,
+        "p95_ms": 0.34794,
+        "max_ms": 0.35100000000000003,
+        "mean_ms": 0.29019999999999996,
+        "throughput_p50": 10946.310761808916,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 53248,
+        "cpu_ms_p50": 0
+      },
+      "details": {
+        "portable_devices": 1,
+        "volume_kinds": [
+          "Fixed",
+          "Fixed"
+        ],
+        "volumes": 2
+      },
+      "notes": [
+        "Measures Core volume and portable-device enumeration.",
+        "External devices are reported only when present in the environment."
+      ]
+    },
+    {
+      "area": "Sidebar and devices",
+      "scenario": "WPD/MTP first listing, navigation, and copy throughput with a controlled device",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Sidebar and devices",
+      "scenario": "USB volume first listing and copy throughput with a controlled device",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Update path",
+      "scenario": "sha256_verify_large_file",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [
+        {
+          "iteration": 0,
+          "duration_ms": 50.4765,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 1267.9167533406635,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 25038848,
+          "peak_rss_bytes": 25063424,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 47,
+          "read_bytes": 67108864,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 1,
+          "duration_ms": 50.5725,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 1265.509911513174,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 25051136,
+          "peak_rss_bytes": 25075712,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 63,
+          "read_bytes": 67108864,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 2,
+          "duration_ms": 50.5058,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 1267.1811950310657,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 25059328,
+          "peak_rss_bytes": 25083904,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 47,
+          "read_bytes": 67108864,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 3,
+          "duration_ms": 50.9484,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 1256.1729122013646,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 25071616,
+          "peak_rss_bytes": 25096192,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 63,
+          "read_bytes": 67108864,
+          "written_bytes": 0
+        },
+        {
+          "iteration": 4,
+          "duration_ms": 50.7914,
+          "items": null,
+          "bytes": 67108864,
+          "throughput_per_second": 1260.0558362242427,
+          "throughput_unit": "MiB/s",
+          "baseline_rss_bytes": 25079808,
+          "peak_rss_bytes": 25104384,
+          "peak_rss_delta_bytes": 24576,
+          "cpu_ms": 62,
+          "read_bytes": 67108864,
+          "written_bytes": 0
+        }
+      ],
+      "summary": {
+        "sample_count": 5,
+        "min_ms": 50.4765,
+        "p50_ms": 50.5725,
+        "p95_ms": 50.917,
+        "max_ms": 50.9484,
+        "mean_ms": 50.65892,
+        "throughput_p50": 1265.509911513174,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 24576,
+        "cpu_ms_p50": 62
+      },
+      "details": null,
+      "notes": [
+        "Measures the same streaming SHA-256 implementation used by the updater."
+      ]
+    },
+    {
+      "area": "Update path",
+      "scenario": "GitHub Release API, download throughput, installer, and restart with --include-network",
+      "boundary": "external",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Startup and launch",
+      "scenario": "release EXE cold/warm start, CLI/default-handler launch, and first paint",
+      "boundary": "windows_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "Startup and launch",
+      "scenario": "release app cold/warm start, Finder/default-handler launch, and first paint",
+      "boundary": "macos_runtime",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "SVN was not available in the benchmark environment",
+      "boundary": "core",
+      "status": "not_automated",
+      "unit": "none",
+      "samples": [],
+      "summary": null,
+      "details": null,
+      "notes": [
+        "This boundary requires a native UI runner or a controlled external device."
+      ]
+    }
+  ]
+}
