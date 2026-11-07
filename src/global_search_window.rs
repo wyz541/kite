@@ -71,6 +71,7 @@ struct GlobalNameResults {
     groups: Vec<GlobalNameGroup>,
     total_entries: usize,
     truncated: bool,
+    partial: bool,
 }
 
 struct GlobalNameGroup {
@@ -94,6 +95,7 @@ pub(crate) struct GlobalSearchWindow {
     search_cancel: Option<Arc<AtomicBool>>,
     expanded_groups: HashSet<String>,
     _search_task: Task<()>,
+    _indexed_search_task: Task<()>,
     _live_search_task: Task<()>,
     _subscription: Subscription,
 }
@@ -158,6 +160,7 @@ impl GlobalSearchWindow {
             search_cancel: None,
             expanded_groups: HashSet::new(),
             _search_task: Task::ready(()),
+            _indexed_search_task: Task::ready(()),
             _live_search_task: Task::ready(()),
             _subscription: subscription,
         }
@@ -170,6 +173,27 @@ impl GlobalSearchWindow {
             GlobalSearchScope::LocalDisks => self.local_roots.clone(),
             GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
         }
+    }
+
+    // Indexed results are a fast preview. The full traversal remains authoritative.
+    fn indexed_name_search_roots(&self) -> Vec<PathBuf> {
+        let mut roots = match self.scope {
+            GlobalSearchScope::CurrentFolder => Vec::new(),
+            GlobalSearchScope::Favorites => self.favorite_roots.clone(),
+            GlobalSearchScope::LocalDisks => {
+                let mut roots = Vec::new();
+                if let Some(home) = dirs::home_dir() {
+                    roots.push(home);
+                }
+                roots.push(self.current_folder.clone());
+                roots.extend(self.favorite_roots.iter().cloned());
+                roots
+            }
+            GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
+        };
+        roots.sort();
+        roots.dedup();
+        roots
     }
 
     fn scope_has_roots(&self, scope: GlobalSearchScope) -> bool {
@@ -276,6 +300,7 @@ impl GlobalSearchWindow {
 
     fn cancel_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self._indexed_search_task = Task::ready(());
         if let Some(cancel) = self.search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -356,6 +381,33 @@ impl GlobalSearchWindow {
         }
         cx.notify();
 
+        if mode == GlobalSearchMode::Name && self.scope != GlobalSearchScope::CurrentFolder {
+            let indexed_roots = self.indexed_name_search_roots();
+            let indexed_query = query.clone();
+            let indexed_cancel = Arc::clone(&cancel);
+            self._indexed_search_task = cx.spawn_in(window, async move |this, cx| {
+                let result = cx
+                    .background_spawn(async move {
+                        kite_core::indexed_search::search_indexed_names(
+                            &indexed_roots,
+                            &indexed_query,
+                            indexed_cancel.as_ref(),
+                        )
+                    })
+                    .await;
+                let _ = this.update_in(cx, |this, _, cx| {
+                    if this.generation != generation || !this.loading {
+                        return;
+                    }
+                    if let Ok(Some(snapshot)) = result {
+                        this.name_results = Some(global_name_results(snapshot));
+                        this.error = None;
+                        cx.notify();
+                    }
+                });
+            });
+        }
+
         self._search_task = cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -379,6 +431,7 @@ impl GlobalSearchWindow {
                 }
                 this.loading = false;
                 this.search_cancel = None;
+                this._indexed_search_task = Task::ready(());
                 match result {
                     Ok(SearchOutcome::Name(result)) => {
                         this.name_results = result;
@@ -675,6 +728,9 @@ impl GlobalSearchWindow {
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("“{}”的名称结果", results.query))
                     .child(format!("{} 项", results.total_entries))
+                    .when(results.partial, |this| {
+                        this.child("索引结果，正在核对全部文件…")
+                    })
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
             .child(if results.groups.is_empty() {
@@ -1002,13 +1058,18 @@ fn search_name_roots(
     let Some(snapshot) = search_global_names(roots, query, cancel)? else {
         return Ok(None);
     };
+    Ok(Some(global_name_results(snapshot)))
+}
+
+fn global_name_results(snapshot: crate::fs::GlobalNameSearchSnapshot) -> GlobalNameResults {
     let total_entries = snapshot.entries.len();
-    Ok(Some(GlobalNameResults {
+    GlobalNameResults {
         query: snapshot.query,
         groups: group_name_entries(&snapshot.entries),
         total_entries,
         truncated: snapshot.truncated,
-    }))
+        partial: snapshot.partial,
+    }
 }
 
 fn group_name_entries(entries: &[FileEntry]) -> Vec<GlobalNameGroup> {

@@ -188,6 +188,7 @@ pub struct GlobalNameSearchSnapshot {
     pub query: String,
     pub entries: Vec<FileEntry>,
     pub truncated: bool,
+    pub partial: bool,
 }
 
 struct LowPriorityGuard(Option<ThreadPriority>);
@@ -351,6 +352,7 @@ pub fn search_global_names(
         query: query.to_string(),
         entries,
         truncated,
+        partial: false,
     }))
 }
 
@@ -379,7 +381,11 @@ fn search_directory_inner(
         .same_file_system(prune_generated);
     if prune_generated {
         builder.filter_entry(|entry| {
-            entry.depth() == 0 || !is_generated_search_directory(entry.path())
+            entry.depth() == 0
+                || !entry
+                    .file_type()
+                    .is_some_and(|file_type| file_type.is_dir())
+                || !is_generated_search_directory(entry.path())
         });
     }
 
@@ -498,7 +504,7 @@ fn path_key(path: &Path) -> String {
     }
 }
 
-fn is_generated_search_directory(path: &Path) -> bool {
+pub(crate) fn is_generated_search_directory(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -506,40 +512,47 @@ fn is_generated_search_directory(path: &Path) -> bool {
     if cfg!(target_os = "macos")
         && matches!(
             name.as_str(),
-            "system" | "usr" | "bin" | "sbin" | "private" | "cores" | "dev" | "volumes"
+            "system"
+                | "usr"
+                | "bin"
+                | "sbin"
+                | "private"
+                | "cores"
+                | "dev"
+                | "volumes"
+                | "library"
+                | ".spotlight-v100"
+                | ".documentrevisions-v100"
+                | ".fseventsd"
+                | ".trashes"
+        )
+    {
+        return true;
+    }
+    if cfg!(windows)
+        && matches!(
+            name.as_str(),
+            "$recycle.bin"
+                | "$windows.~bt"
+                | "$windows.~ws"
+                | "system volume information"
+                | "recovery"
+                | "perflogs"
+                | "windows"
+                | "program files"
+                | "program files (x86)"
+                | "programdata"
         )
     {
         return true;
     }
     matches!(
         name.as_str(),
-        ".git"
-            | ".svn"
-            | ".hg"
-            | "node_modules"
-            | "target"
-            | "build"
-            | "dist"
-            | ".cache"
-            | ".spotlight-v100"
-            | ".documentrevisions-v100"
-            | ".fseventsd"
-            | ".trashes"
-            | "library"
-            | "$recycle.bin"
-            | "$windows.~bt"
-            | "$windows.~ws"
-            | "system volume information"
-            | "recovery"
-            | "perflogs"
-            | "windows"
-            | "program files"
-            | "program files (x86)"
-            | "programdata"
+        ".git" | ".svn" | ".hg" | "node_modules" | "target" | "build" | "dist" | ".cache"
     )
 }
 
-fn sort_global_name_entries(entries: &mut [FileEntry], query: &str) {
+pub(crate) fn sort_global_name_entries(entries: &mut [FileEntry], query: &str) {
     entries.sort_by(|left, right| {
         name_match_rank(&right.name, query)
             .cmp(&name_match_rank(&left.name, query))
@@ -619,7 +632,11 @@ pub(crate) fn search_path_quality_rank(path: &Path) -> i16 {
     score.clamp(-6, 6)
 }
 
-fn file_entry_from_metadata(path: PathBuf, name: String, metadata: &Metadata) -> FileEntry {
+pub(crate) fn file_entry_from_metadata(
+    path: PathBuf,
+    name: String,
+    metadata: &Metadata,
+) -> FileEntry {
     let kind = if metadata.is_dir() {
         EntryKind::Directory
     } else {
@@ -821,7 +838,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn is_hidden(metadata: &Metadata, _name: &str) -> bool {
+pub(crate) fn is_hidden(metadata: &Metadata, _name: &str) -> bool {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
     const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
@@ -829,7 +846,7 @@ fn is_hidden(metadata: &Metadata, _name: &str) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn is_hidden(_metadata: &Metadata, name: &str) -> bool {
+pub(crate) fn is_hidden(_metadata: &Metadata, name: &str) -> bool {
     is_hidden_name(name)
 }
 

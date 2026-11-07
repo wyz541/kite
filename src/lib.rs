@@ -8,6 +8,7 @@ pub mod ffi;
 #[cfg(windows)]
 pub mod file_watcher;
 pub mod fs;
+pub mod indexed_search;
 pub mod perf_trace;
 pub mod platform;
 #[cfg(windows)]
