@@ -4,6 +4,7 @@
 
 当前实体机基线：[v0.6.61 macOS arm64](baseline-v0.6.61.md)。
 当前跨平台 CI 基线：[v0.6.61 Windows 与 macOS](baseline-v0.6.61-ci.md)。
+当前三次运行聚合基线：[v0.6.61 macOS arm64](aggregate-v0.6.61.md)。
 当前复现检查：[v0.6.61 双次运行](reproducibility-v0.6.61.md)。
 当前 macOS 启动基线：[v0.6.61 启动与首内容](startup-macos-v0.6.61.md)。
 当前跨平台启动 CI 基线：[v0.6.61 Windows 与 macOS](startup-ci-v0.6.61.md)。
@@ -173,40 +174,76 @@ python scripts/performance/startup.py `
 
 工作流文件是 `.github/workflows/performance.yml`。
 
-- Pull Request 使用 `ci` 配置。
-- 手工运行可以选择 `smoke`、`ci`、`standard` 或 `extended`。
-- 两个平台上传 JSON、Markdown 和测试日志。
+- Pull Request 使用 `ci` 配置和 1 次独立运行。
+- 手工运行可以选择 `smoke`、`ci`、`standard` 或 `extended`，默认运行 3 次。
+- 两个平台上传每次原始 JSON、每次 Markdown 和聚合结果。
 - 启动工作流对相关 PR 路径运行 3 次。手工运行可以使用更多样本。
-- 工作流不阻断合并。先积累足够的抖动数据，再设置硬阈值。
+- 工作流不阻断合并。比较时使用聚合结果和场景噪声阈值。
 
-## 9. 版本比较
+## 9. 三次运行聚合
+
+发布比较使用三个独立进程运行。每个运行使用新的临时夹具。
+
+```bash
+python3 scripts/performance/aggregate.py \
+  run-1.json \
+  run-2.json \
+  run-3.json \
+  --output aggregate.json \
+  --markdown aggregate.md
+```
+
+聚合规则：
+
+- 每个场景使用三次运行 p50 的中位数。
+- 每个场景使用三次运行 p95 的中位数。
+- p95 抖动 = `(最大 p95 - 最小 p95) / 中位数 p95`。
+- 抖动不高于 10% 时标记 `low`。
+- 抖动高于 10% 且不高于 25% 时标记 `medium`。
+- 抖动高于 25% 时标记 `high`。
+- 场景比较阈值取 10% 与该场景 p95 抖动中的较大值。
+
+`v0.6.61` 聚合结果：
+
+| 噪声等级 | 场景数 |
+| --- | ---: |
+| `low` | 22 |
+| `medium` | 9 |
+| `high` | 5 |
+
+高噪声场景包括大文件复制、100 文件创建和 Git 状态。发布判断前必须增加运行次数。
+
+## 10. 版本比较
 
 比较两个 JSON 报告：
 
 ```bash
 python3 scripts/performance/compare.py \
-  baseline.json \
-  candidate.json \
-  --threshold 20 \
+  aggregate.json \
+  candidate-aggregate.json \
+  --threshold 10 \
+  --use-baseline-noise \
   --markdown comparison.md
 ```
 
-默认把 p95 变化超过 20% 标记为 `above_threshold`。相同构建重复运行也会出现该标记。脚本不自动证明原因。比较结果只用于定位需要复核的场景。
+`--use-baseline-noise` 使用聚合报告中的场景阈值。稳定场景通常使用 10%。高噪声场景使用实测抖动作为阈值。
+
+脚本把超过阈值的 p95 变化标记为 `above_threshold`。相同构建重复运行也可能出现该标记。脚本不自动证明原因。比较结果只用于定位需要复核的场景。
 
 需要让脚本在发现回归时返回失败时，增加 `--fail-on-regression`。
 
-## 10. 发布候选流程
+## 11. 发布候选流程
 
 1. 构建 release 版本。
-2. 在 Windows x64 和 macOS arm64 运行 `standard` 配置。
-3. 保存原始 JSON 和 Markdown。
-4. 使用上一版报告运行比较脚本。
-5. 检查系统、CPU、文件系统和样本数是否相同。
-6. 对超过阈值的场景重复运行一次。
-7. 将确认的回归拆成独立 Issue。
-8. 将报告路径和比较结论写入性能追踪 Issue。
+2. 在 Windows x64 和 macOS arm64 各运行三次独立 `standard` 配置。
+3. 保存每次原始 JSON，并生成聚合 JSON 和 Markdown。
+4. 检查系统、CPU、文件系统、commit 和样本数是否相同。
+5. 使用聚合报告运行噪声感知比较。
+6. 对超过场景阈值的项目增加运行次数。
+7. 将重复出现的退化拆成独立 Issue。
+8. 将聚合报告、比较结果和结论写入性能追踪 Issue。
 
-## 11. 解释边界
+## 12. 解释边界
 
 - 时间来自单一进程。系统负载会影响结果。
 - 操作系统缓存没有统一清理。读取类结果通常偏热。
