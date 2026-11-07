@@ -1,6 +1,15 @@
 name: Startup Performance
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/performance-startup.yml"
+      - "scripts/performance/startup.py"
+      - "apps/macos/Sources/**"
+      - "src/app.rs"
+      - "src/main.rs"
+      - "src/perf_trace.rs"
+      - "src/tabs.rs"
   workflow_dispatch:
     inputs:
       samples:
