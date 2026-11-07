@@ -6,6 +6,7 @@
 当前跨平台 CI 基线：[v0.6.61 Windows 与 macOS](baseline-v0.6.61-ci.md)。
 当前复现检查：[v0.6.61 双次运行](reproducibility-v0.6.61.md)。
 当前 macOS 启动基线：[v0.6.61 启动与首内容](startup-macos-v0.6.61.md)。
+当前跨平台启动 CI 基线：[v0.6.61 Windows 与 macOS](startup-ci-v0.6.61.md)。
 
 ## 1. 目标
 
@@ -153,7 +154,7 @@ python scripts/performance/startup.py `
   --markdown target/performance/startup-windows.md
 ```
 
-手工工作流 `.github/workflows/performance-startup.yml` 在两个平台构建 release 应用并上传启动结果。GitHub 托管 runner 没有稳定的桌面会话，因此此工作流仅手工运行。
+工作流 `.github/workflows/performance-startup.yml` 在两个平台构建 release 应用并上传启动结果。相关 PR 路径会触发 3 次快速测量。手工运行可以增加样本数和夹具规模。
 
 测量器记录：
 
@@ -175,6 +176,7 @@ python scripts/performance/startup.py `
 - Pull Request 使用 `ci` 配置。
 - 手工运行可以选择 `smoke`、`ci`、`standard` 或 `extended`。
 - 两个平台上传 JSON、Markdown 和测试日志。
+- 启动工作流对相关 PR 路径运行 3 次。手工运行可以使用更多样本。
 - 工作流不阻断合并。先积累足够的抖动数据，再设置硬阈值。
 
 ## 9. 版本比较
