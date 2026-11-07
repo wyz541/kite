@@ -2,16 +2,16 @@
 
 ## 结论
 
-Kite 的即时文件名搜索采用 `ignore` crate。
+Kite 的全局文件名搜索采用持久化 Tantivy 名称索引。
 
-`ignore` 是 ripgrep 使用的并行目录遍历库。
-`ignore` 不建立索引。
-`ignore` 适合首次搜索、目录变化频繁和桌面文件管理器。
-Kite 当前搜索已使用 `ignore::WalkBuilder::build_parallel`。
+Kite 使用 `ignore` 执行首次索引扫描和冷启动回退。
+Kite 使用 `notify` 维护名称索引增量更新。
+Kite 先查询持久化名称索引。
+索引就绪后，名称查询不再遍历磁盘。
+Kite 使用 Everything、Windows Search 或 Spotlight 补齐快速预览。
 
-未来增加文件内容全文检索时，采用 Tantivy。
-Tantivy 是可嵌入 Rust 应用的全文索引库。
-Tantivy 适合重复查询和内容检索。
+内容搜索继续使用 Tantivy 内容索引。
+内容匹配由 `grep-searcher` 精确验证。
 Tantivy 需要索引存储、增量更新和索引生命周期管理。
 
 Meilisearch 和 Quickwit 不作为 Kite 默认引擎。
@@ -23,8 +23,8 @@ Quickwit 是面向云存储和可观测性数据的分布式搜索服务。
 
 | 引擎 | 类型 | 最强场景 | 索引成本 | Kite 适用性 |
 | --- | --- | --- | --- | --- |
-| `ignore` / ripgrep | 并行文件遍历工具库 | 首次递归文件名搜索、代码搜索、内容扫描 | 无索引 | 当前首选 |
-| Tantivy | 嵌入式全文索引库 | 多次全文查询、排序、BM25、分面检索 | 需要建立和维护索引 | 内容检索阶段首选 |
+| `ignore` / ripgrep | 并行文件遍历工具库 | 首次递归文件名搜索、代码搜索、内容扫描 | 无索引 | 冷启动和回退扫描 |
+| Tantivy | 嵌入式全文索引库 | 多次文件名或全文查询、排序、BM25、分面检索 | 需要建立和维护索引 | 名称索引和内容索引首选 |
 | Meilisearch | 独立搜索服务 | 拼写容错、应用搜索、混合检索 | 服务端索引 | 桌面默认方案过重 |
 | Quickwit | 分布式搜索服务 | 云存储日志、链路和可观测性数据 | 分布式索引 | 不适合本地文件管理器 |
 
@@ -37,8 +37,8 @@ ripgrep 官方 Benchmark 显示同一 Linux 内核树查询耗时 0.082 秒。
 测试使用 Intel i9-12900K，结果只代表该测试环境。
 
 ripgrep 的快来自 Rust `regex` 引擎、SIMD、字面量优化和并行目录遍历。
-Kite 只搜索文件名时，不需要文本正则和全文索引。
-因此 Kite 使用 `ignore` 的并行遍历层。
+Kite 构建名称索引时使用 `ignore` 遍历目录。
+Kite 查询名称索引时使用 Tantivy。
 
 来源：
 - https://github.com/BurntSushi/ripgrep
@@ -76,11 +76,15 @@ Quickwit 的架构目标不是本地桌面文件检索。
 
 ## 实施决策
 
-1. 文件名搜索使用 `ignore` 并行遍历。
-2. 搜索结果最多保留 1000 项。
-3. 搜索任务支持取消，旧结果不会覆盖新结果。
-4. 搜索完成后统一排序，保证跨线程结果顺序稳定。
-5. 文件内容全文检索需要单独立项。立项时评估 Tantivy 的索引位置、增量策略和隐私边界。
+1. 文件名搜索使用 Tantivy 名称索引。
+2. 首次索引扫描和冷启动回退使用 `ignore`。
+3. 名称索引使用 `notify` 增量更新。
+4. 名称索引完整覆盖范围时，Kite 直接返回结果。
+5. Windows 使用 Everything 或 Windows Search 补齐索引未完成时的预览。
+6. macOS 使用 Spotlight 补齐索引未完成时的预览。
+7. 名称结果最多保留 1000 项。
+8. 搜索任务支持取消，旧结果不会覆盖新结果。
+9. 索引就绪后，名称查询跳过文件遍历。
 
 ## 限制
 

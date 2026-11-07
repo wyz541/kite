@@ -60,6 +60,7 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 futures-channel = "0.3"
+libloading = "0.8.9"
 gpui-kit = { version = "0.8.0", optional = true, features = ["syntect"] }
 raw-window-handle = { version = "0.6.2", optional = true }
 winreg = "0.56"

@@ -3733,6 +3733,7 @@ dependencies = [
  "grep-regex",
  "grep-searcher",
  "ignore",
+ "libloading",
  "notify",
  "open",
  "raw-window-handle",
