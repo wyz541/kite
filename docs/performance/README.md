@@ -153,7 +153,7 @@ python scripts/performance/startup.py `
   --markdown target/performance/startup-windows.md
 ```
 
-手工工作流 `.github/workflows/performance-startup.yml` 在两个平台构建 release 应用并上传启动结果。此工作流不进入 PR 检查。
+手工工作流 `.github/workflows/performance-startup.yml` 在两个平台构建 release 应用并上传启动结果。GitHub 托管 runner 没有稳定的桌面会话，因此此工作流仅手工运行。
 
 测量器记录：
 
