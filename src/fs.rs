@@ -257,7 +257,7 @@ pub fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, 
             .join(path)
     };
     let reader = fs::read_dir(&path).map_err(|error| folder_error("读取", &error))?;
-    let mut entries = Vec::new();
+    let mut entries = Vec::with_capacity(reader.size_hint().0.max(16));
     let mut skipped = 0usize;
 
     for item in reader {
@@ -265,24 +265,19 @@ pub fn load_directory(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, 
             skipped += 1;
             continue;
         };
-        let entry_path = item.path();
         let name = item.file_name().to_string_lossy().into_owned();
-        let file_type = match item.file_type() {
-            Ok(file_type) => file_type,
+        let link_metadata = match item.metadata() {
+            Ok(metadata) => metadata,
             Err(_) => {
                 skipped += 1;
                 continue;
             }
         };
-        let link_metadata = fs::symlink_metadata(&entry_path);
-        let Ok(link_metadata) = link_metadata else {
-            skipped += 1;
-            continue;
-        };
         if is_hidden(&link_metadata, &name) {
             continue;
         }
-        let metadata = if file_type.is_symlink() {
+        let entry_path = item.path();
+        let metadata = if link_metadata.file_type().is_symlink() {
             fs::metadata(&entry_path)
         } else {
             Ok(link_metadata)
@@ -1005,6 +1000,42 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("clean test folder");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn loads_symlink_target_metadata() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "kite-symlink-metadata-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("target-folder")).expect("create target folder");
+        fs::write(root.join("target.txt"), b"target").expect("write target file");
+        symlink("target.txt", root.join("linked.txt")).expect("create file symlink");
+        symlink("target-folder", root.join("linked-folder")).expect("create folder symlink");
+
+        let snapshot = load_directory(&root, SortSpec::default()).expect("load directory");
+        let linked_file = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.name == "linked.txt")
+            .expect("linked file");
+        assert_eq!(linked_file.kind, EntryKind::File);
+        assert_eq!(linked_file.size, 6);
+        let linked_folder = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.name == "linked-folder")
+            .expect("linked folder");
+        assert_eq!(linked_folder.kind, EntryKind::Directory);
+
+        fs::remove_dir_all(root).expect("clean test directory");
     }
 
     #[test]
