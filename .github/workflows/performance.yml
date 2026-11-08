@@ -5,9 +5,13 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "src/archive.rs"
       - "src/bin/kite-perf.rs"
       - "src/content_search.rs"
+      - "src/devices.rs"
+      - "src/fs.rs"
       - "src/session.rs"
+      - "src/text_editor.rs"
       - "src/updater.rs"
       - "src/vcs.rs"
       - "scripts/performance/**"
