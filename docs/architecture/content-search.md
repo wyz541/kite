@@ -3,7 +3,7 @@
 > 结论：Kite 使用持久化 Tantivy 名称索引执行全局文件名搜索。名称索引完整覆盖范围时，Kite 直接返回结果。索引未就绪时，Kite 先显示 Everything、Windows Search 或 Spotlight 的预览，再使用遍历补齐。Kite 使用 Tantivy 内容索引和 `grep-searcher` 生成内容匹配。后台任务始终让位于前台交互。
 
 状态：已实现
-日期：2026-11-07
+日期：2026-11-08
 关联调研：[Rust 搜索引擎调研](../RUST_SEARCH_ENGINE_RESEARCH.md)
 
 ## 1. 能力
@@ -42,7 +42,8 @@ flowchart LR
     FAST --> MERGE[合并与排序]
     NAMEIDX --> MERGE
     WALK --> MERGE
-    WATCH1[notify<br/>名称索引更新] --> NAMEIDX
+    WATCH1[USN Journal<br/>Windows 卷] --> NAMEIDX
+    WATCH3[notify<br/>回退与补充] --> NAMEIDX
     MERGE --> NAME[名称结果]
     CORE[Rust Core] --> INDEX[Tantivy<br/>内容索引]
     INDEX --> CANDIDATE[候选文件]
@@ -83,6 +84,7 @@ Kite/name-index-v2/
 名称索引使用 Tantivy。
 索引文件位于用户本地数据目录。
 `manifest.json` 记录已完成索引的根目录。
+`manifest.json` 也记录变更 provider、USN Journal ID 和 USN 游标。
 
 ### 3.2 内容索引
 
@@ -166,17 +168,40 @@ Windows 网络范围会加入网络位置的收藏目录。
 查询使用路径前缀过滤。
 因此同一文件不会重复出现。
 
+### 5.1 覆盖状态
+
+Core 为每个名称索引根目录记录 provider 和 coverage。
+
+| provider | 适用范围 | 增量来源 | 重启恢复 |
+| --- | --- | --- | --- |
+| `usn_journal` | Windows 盘符根目录 | USN Journal 和 `notify` | 从持久化 USN 游标继续 |
+| `notify` | 子目录、网络卷和 macOS 根目录 | `notify` | 后台校准 |
+
+coverage 有以下三种值。
+
+- `complete`：索引可用、已校准且状态为 ready。
+- `partial`：索引有部分数据，但当前状态不能证明结果完整。
+- `unavailable`：当前没有可用索引。
+
+整卷覆盖仍遵守默认排除规则。
+系统目录、隐藏目录和生成目录不属于当前默认覆盖范围。
+
 ## 6. 增量更新
 
-`notify` 监听所有索引根目录。
-监听为递归模式。
+Windows 盘符根目录优先使用 USN Journal。
+`notify` 继续监听所有名称索引根目录。
+`notify` 负责非盘符根目录、删除事件和补充事件。
 
 名称索引和内容索引都使用 `notify`。
-监听器递归监听已加入名称索引的根目录。
+名称监听器递归监听已加入名称索引的根目录。
+Windows 盘符根目录同时读取 NTFS/ReFS USN Journal。
+USN reader 使用 `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL` 读取普通用户可读记录。
+USN 记录保存 Journal ID 和下一读取位置。
 路径变化后，Kite 更新对应名称索引文档。
 目录删除时，Kite 删除该路径下的全部名称索引文档。
 应用重启后，Kite 使用 `manifest.json` 恢复索引。
-打开全局搜索窗口或切换范围会触发一次后台校准。
+USN 游标有效时，Kite 从游标位置继续读取。
+USN Journal 已轮转或 ID 变化时，Kite 才执行后台校准。
 
 事件处理如下。
 
@@ -193,6 +218,10 @@ Windows 网络范围会加入网络位置的收藏目录。
 Kite 扫描根目录时只读取变化文件的正文。
 未变化文件只比较元数据。
 扫描完成后删除范围内的过期文档。
+普通用户读取的 USN 记录可能不包含文件名。
+Kite 使用文件 ID 解析当前路径。
+删除和重命名旧路径优先由 `notify` 处理。
+离线删除留下的旧文档会在查询时清理。
 
 ## 7. 默认排除规则
 
@@ -292,6 +321,9 @@ Core 测试覆盖以下场景。
 9. 名称索引持久化和重启加载。
 10. `notify` 事件更新名称索引。
 11. 索引就绪后名称查询跳过遍历。
+12. USN V2 和 V3 记录解析。
+13. USN Journal ID 和游标校验。
+14. 普通用户读取 USN 并解析新建文件路径。
 
 本地验证还运行 Rust 格式检查、全部 Core 测试、Clippy、Windows 构建和 macOS 应用构建。
 
@@ -314,6 +346,10 @@ Core 测试覆盖以下场景。
 - Everything 只作为可选加速器。
 - Everything 未安装或未运行时，Kite 自动回退到其他 provider。
 - Windows Search 只提供快速预览，最终完整性由名称索引保证。
+- USN 原生 provider 只用于 Windows 盘符根目录。
+- 普通用户的 USN 记录可能省略文件名。
+- 普通用户的 USN 删除和旧重命名路径依赖 `notify` 或查询时清理。
+- Windows 常驻索引服务尚未实现。
 - 名称搜索不读取文件内容。
 - 名称搜索不进入隐藏目录和生成目录。
 - 内容搜索结果为每个文件保留 3 条片段。

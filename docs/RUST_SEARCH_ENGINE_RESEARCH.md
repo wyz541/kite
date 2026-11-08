@@ -5,7 +5,8 @@
 Kite 的全局文件名搜索采用持久化 Tantivy 名称索引。
 
 Kite 使用 `ignore` 执行首次索引扫描和冷启动回退。
-Kite 使用 `notify` 维护名称索引增量更新。
+Kite 使用 Windows USN Journal 维护 NTFS/ReFS 盘符增量更新。
+Kite 使用 `notify` 补充其他目录、删除事件和平台回退。
 Kite 先查询持久化名称索引。
 索引就绪后，名称查询不再遍历磁盘。
 Kite 使用 Everything、Windows Search 或 Spotlight 补齐快速预览。
@@ -78,13 +79,14 @@ Quickwit 的架构目标不是本地桌面文件检索。
 
 1. 文件名搜索使用 Tantivy 名称索引。
 2. 首次索引扫描和冷启动回退使用 `ignore`。
-3. 名称索引使用 `notify` 增量更新。
-4. 名称索引完整覆盖范围时，Kite 直接返回结果。
-5. Windows 使用 Everything 或 Windows Search 补齐索引未完成时的预览。
-6. macOS 使用 Spotlight 补齐索引未完成时的预览。
-7. 名称结果最多保留 1000 项。
-8. 搜索任务支持取消，旧结果不会覆盖新结果。
-9. 索引就绪后，名称查询跳过文件遍历。
+3. Windows 盘符名称索引使用 USN Journal 增量更新。
+4. 名称索引使用 `notify` 作为回退和补充。
+5. 名称索引完整覆盖范围时，Kite 直接返回结果。
+6. Windows 使用 Everything 或 Windows Search 补齐索引未完成时的预览。
+7. macOS 使用 Spotlight 补齐索引未完成时的预览。
+8. 名称结果最多保留 1000 项。
+9. 搜索任务支持取消，旧结果不会覆盖新结果。
+10. 索引就绪后，名称查询跳过文件遍历。
 
 ## 限制
 

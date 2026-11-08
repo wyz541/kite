@@ -19,4 +19,6 @@ pub mod session;
 pub mod text_editor;
 pub mod ui_preferences;
 pub mod updater;
+#[cfg(windows)]
+pub mod usn_journal;
 pub mod vcs;
