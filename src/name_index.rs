@@ -23,6 +23,8 @@ use crate::fs::{
     EntryKind, FileEntry, GlobalNameSearchSnapshot, SEARCH_RESULT_LIMIT, has_generated_parent,
     is_generated_search_directory, is_hidden, sort_global_name_entries,
 };
+#[cfg(windows)]
+use crate::usn_journal;
 
 const INDEX_VERSION: u32 = 2;
 const INDEX_WRITER_MEMORY_BYTES: usize = 64 * 1024 * 1024;
@@ -36,6 +38,40 @@ pub enum NameIndexState {
     Indexing,
     Ready,
     Error,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NameIndexProvider {
+    #[default]
+    Notify,
+    UsnJournal,
+}
+
+impl NameIndexProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Notify => "notify",
+            Self::UsnJournal => "usn_journal",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameIndexCoverage {
+    Complete,
+    Partial,
+    Unavailable,
+}
+
+impl NameIndexCoverage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Partial => "partial",
+            Self::Unavailable => "unavailable",
+        }
+    }
 }
 
 impl NameIndexState {
@@ -56,6 +92,40 @@ pub struct NameIndexStatus {
     pub usable: bool,
     pub indexed_entries: u64,
     pub message: Option<String>,
+    pub provider: NameIndexProvider,
+    pub coverage: NameIndexCoverage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JournalCursor {
+    journal_id: u64,
+    next_usn: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JournalPreparation {
+    cursor: JournalCursor,
+    reusable: bool,
+}
+
+#[cfg(windows)]
+impl From<usn_journal::JournalCursor> for JournalCursor {
+    fn from(cursor: usn_journal::JournalCursor) -> Self {
+        Self {
+            journal_id: cursor.journal_id,
+            next_usn: cursor.next_usn,
+        }
+    }
+}
+
+#[cfg(windows)]
+impl From<JournalCursor> for usn_journal::JournalCursor {
+    fn from(cursor: JournalCursor) -> Self {
+        Self {
+            journal_id: cursor.journal_id,
+            next_usn: cursor.next_usn,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +139,29 @@ struct RootStatus {
     reconciled: bool,
     watchable: bool,
     watch_error: Option<String>,
+    provider: NameIndexProvider,
+    journal_id: Option<u64>,
+    journal_next_usn: Option<i64>,
+}
+
+impl RootStatus {
+    fn coverage(&self) -> NameIndexCoverage {
+        if self.usable && self.reconciled && self.state == NameIndexState::Ready {
+            NameIndexCoverage::Complete
+        } else if self.usable || self.indexed_entries > 0 {
+            NameIndexCoverage::Partial
+        } else {
+            NameIndexCoverage::Unavailable
+        }
+    }
+
+    #[cfg(windows)]
+    fn journal_cursor(&self) -> Option<JournalCursor> {
+        Some(JournalCursor {
+            journal_id: self.journal_id?,
+            next_usn: self.journal_next_usn?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,6 +175,12 @@ struct ManifestRoot {
     path: String,
     indexed_entries: u64,
     completed_unix_ms: u64,
+    #[serde(default)]
+    provider: NameIndexProvider,
+    #[serde(default)]
+    journal_id: Option<u64>,
+    #[serde(default)]
+    journal_next_usn: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -94,9 +193,36 @@ struct NameFields {
 
 enum IndexCommand {
     EnsureRoot(PathBuf),
-    PathChanged { path: PathBuf, root: PathBuf },
+    PathChanged {
+        path: PathBuf,
+        root: PathBuf,
+    },
+    JournalAdvanced {
+        root: PathBuf,
+        journal_id: u64,
+        next_usn: i64,
+    },
     RemoveRoot(PathBuf),
     Clear,
+}
+
+#[cfg(windows)]
+struct UsnWatcher {
+    root: PathBuf,
+    cancel: Arc<AtomicBool>,
+    alive: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl Drop for UsnWatcher {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::Relaxed);
+        self.cancel.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 pub struct NameIndexService {
@@ -108,6 +234,8 @@ pub struct NameIndexService {
     pending: Arc<Mutex<HashSet<String>>>,
     watched_roots: Arc<Mutex<BTreeSet<PathBuf>>>,
     watcher: Mutex<Option<RecommendedWatcher>>,
+    #[cfg(windows)]
+    usn_watchers: Mutex<HashMap<String, UsnWatcher>>,
 }
 
 impl NameIndexService {
@@ -160,6 +288,8 @@ impl NameIndexService {
             pending,
             watched_roots: Arc::new(Mutex::new(BTreeSet::new())),
             watcher: Mutex::new(None),
+            #[cfg(windows)]
+            usn_watchers: Mutex::new(HashMap::new()),
         })
     }
 
@@ -169,7 +299,6 @@ impl NameIndexService {
             return;
         }
         for root in roots {
-            let watch_error = self.ensure_watcher(&root).err();
             let root_key = path_key(&root);
             let existing = {
                 let statuses = match self.statuses.lock() {
@@ -182,19 +311,74 @@ impl NameIndexService {
                     .min_by_key(|status| status.root.components().count())
                     .cloned()
             };
+            if let Some(status) = existing.as_ref()
+                && status.provider == NameIndexProvider::UsnJournal
+                && self.has_active_usn_watcher(&status.root)
+            {
+                continue;
+            }
+            #[cfg(windows)]
+            let usn_preparation = usn_journal::prepare(
+                &root,
+                existing
+                    .as_ref()
+                    .and_then(RootStatus::journal_cursor)
+                    .map(Into::into),
+            )
+            .map(|preparation| {
+                preparation.map(|preparation| JournalPreparation {
+                    cursor: preparation.cursor.into(),
+                    reusable: preparation.reusable,
+                })
+            });
+            #[cfg(not(windows))]
+            let usn_preparation: Result<Option<JournalPreparation>, String> = Ok(None);
+            let (provider, journal_cursor, reusable, watch_error) = match usn_preparation {
+                Ok(Some(preparation)) => match self.ensure_usn_watcher(&root, preparation.cursor) {
+                    Ok(()) => {
+                        let _ = self.ensure_watcher(&root);
+                        (
+                            NameIndexProvider::UsnJournal,
+                            Some(preparation.cursor),
+                            preparation.reusable,
+                            None,
+                        )
+                    }
+                    Err(_) => {
+                        let watch_error = self.ensure_watcher(&root).err();
+                        (NameIndexProvider::Notify, None, false, watch_error)
+                    }
+                },
+                Ok(None) | Err(_) => {
+                    let watch_error = self.ensure_watcher(&root).err();
+                    (NameIndexProvider::Notify, None, false, watch_error)
+                }
+            };
             if let Some(status) = existing {
                 if let Some(error) = watch_error.as_deref() {
                     set_watch_failure(&self.statuses, &status.root_key, error);
                     continue;
                 }
-                set_watch_available(&self.statuses, &status.root_key);
-                if !status.reconciled && self.mark_pending(&status.root_key) {
+                let source_changed = status.provider != provider
+                    || (provider == NameIndexProvider::UsnJournal && !reusable);
+                let restore_complete = provider == NameIndexProvider::UsnJournal && reusable;
+                let needs_reconcile = !restore_complete
+                    && (source_changed || !status.reconciled || !status.watchable);
+                set_watch_available(
+                    &self.statuses,
+                    &status.root_key,
+                    provider,
+                    journal_cursor,
+                    restore_complete,
+                );
+                if needs_reconcile && self.mark_pending(&status.root_key) {
                     set_status_indexing(
                         &self.statuses,
                         &status.root_key,
                         "正在校准名称索引",
                         false,
                     );
+                    let _ = save_manifest(&self.index_dir, &self.statuses);
                     let _ = self.command_tx.send(IndexCommand::EnsureRoot(status.root));
                 }
                 continue;
@@ -219,6 +403,9 @@ impl NameIndexService {
                         reconciled: false,
                         watchable: watch_error.is_none(),
                         watch_error,
+                        provider,
+                        journal_id: journal_cursor.map(|cursor| cursor.journal_id),
+                        journal_next_usn: journal_cursor.map(|cursor| cursor.next_usn),
                     },
                 );
             }
@@ -252,6 +439,8 @@ impl NameIndexService {
                         usable: status.usable,
                         indexed_entries: status.indexed_entries,
                         message: status.message.clone(),
+                        provider: status.provider,
+                        coverage: status.coverage(),
                     })
             })
             .collect()
@@ -408,6 +597,76 @@ impl NameIndexService {
             .unwrap_or(false)
     }
 
+    #[cfg(windows)]
+    fn has_active_usn_watcher(&self, root: &Path) -> bool {
+        self.usn_watchers
+            .lock()
+            .map(|watchers| {
+                watchers.values().any(|watcher| {
+                    watcher.alive.load(Ordering::Relaxed) && path_is_within(root, &watcher.root)
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(windows))]
+    fn has_active_usn_watcher(&self, _root: &Path) -> bool {
+        false
+    }
+
+    #[cfg(windows)]
+    fn ensure_usn_watcher(&self, root: &Path, start: JournalCursor) -> Result<(), String> {
+        let root_key = path_key(root);
+        let mut watchers = self
+            .usn_watchers
+            .lock()
+            .map_err(|_| "USN 监听锁不可用".to_string())?;
+        if watchers
+            .get(&root_key)
+            .is_some_and(|watcher| watcher.alive.load(Ordering::Relaxed))
+        {
+            return Ok(());
+        }
+        watchers.remove(&root_key);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let alive = Arc::new(AtomicBool::new(true));
+        let command_tx = self.command_tx.clone();
+        let statuses = Arc::clone(&self.statuses);
+        let pending = Arc::clone(&self.pending);
+        let watcher_root = root.to_path_buf();
+        let thread_cancel = Arc::clone(&cancel);
+        let thread_alive = Arc::clone(&alive);
+        let handle = thread::Builder::new()
+            .name(format!("kite-usn-{}", root.display()))
+            .spawn(move || {
+                usn_watch_loop(
+                    watcher_root,
+                    start,
+                    command_tx,
+                    statuses,
+                    pending,
+                    thread_cancel,
+                    thread_alive,
+                );
+            })
+            .map_err(|error| format!("无法启动 USN 监听线程：{error}"))?;
+        watchers.insert(
+            root_key,
+            UsnWatcher {
+                root: root.to_path_buf(),
+                cancel,
+                alive,
+                handle: Some(handle),
+            },
+        );
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn ensure_usn_watcher(&self, _root: &Path, _start: JournalCursor) -> Result<(), String> {
+        Err("USN Journal 仅支持 Windows".to_string())
+    }
+
     fn ensure_watcher(&self, root: &Path) -> Result<(), String> {
         let mut watcher_guard = self
             .watcher
@@ -479,6 +738,170 @@ impl NameIndexService {
             watched.insert(root.to_path_buf());
         }
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn usn_watch_loop(
+    root: PathBuf,
+    mut cursor: JournalCursor,
+    command_tx: mpsc::Sender<IndexCommand>,
+    statuses: Arc<Mutex<HashMap<String, RootStatus>>>,
+    pending: Arc<Mutex<HashSet<String>>>,
+    cancel: Arc<AtomicBool>,
+    alive: Arc<AtomicBool>,
+) {
+    let root_key = path_key(&root);
+    let mut reader = None;
+    while !cancel.load(Ordering::Relaxed) {
+        if !root_status_is_ready(&statuses, &root_key) {
+            thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+        if reader.is_none() {
+            match usn_journal::JournalReader::open(&root) {
+                Ok(Some(opened)) => {
+                    let current: JournalCursor = opened.cursor().into();
+                    if current.journal_id != cursor.journal_id
+                        || cursor.next_usn < opened.first_usn()
+                        || cursor.next_usn < opened.lowest_valid_usn()
+                        || cursor.next_usn > opened.next_usn()
+                    {
+                        cursor = current;
+                        set_journal_recovery(&statuses, &root_key, cursor);
+                        if mark_pending(&pending, &root_key)
+                            && command_tx
+                                .send(IndexCommand::EnsureRoot(root.clone()))
+                                .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                    reader = Some(opened);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    set_usn_watcher_failure(&statuses, &root_key, &error);
+                    break;
+                }
+            }
+        }
+        let Some(opened) = reader.as_ref() else {
+            continue;
+        };
+        if let Some(persisted) = status_journal_cursor(&statuses, &root_key)
+            && persisted.journal_id == cursor.journal_id
+            && persisted.next_usn < cursor.next_usn
+        {
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        match opened.read_available(cursor.next_usn) {
+            Ok(batch) => {
+                for change in batch.changes {
+                    if command_tx
+                        .send(IndexCommand::PathChanged {
+                            path: change.path,
+                            root: root.clone(),
+                        })
+                        .is_err()
+                    {
+                        alive.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                }
+                if batch.next_usn > cursor.next_usn {
+                    cursor.next_usn = batch.next_usn;
+                    if command_tx
+                        .send(IndexCommand::JournalAdvanced {
+                            root: root.clone(),
+                            journal_id: cursor.journal_id,
+                            next_usn: cursor.next_usn,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+            Err(error) => {
+                set_usn_watcher_failure(&statuses, &root_key, &error);
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    alive.store(false, Ordering::Relaxed);
+}
+
+#[cfg(windows)]
+fn root_status_is_ready(
+    statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
+    root_key: &str,
+) -> bool {
+    statuses
+        .lock()
+        .ok()
+        .and_then(|statuses| {
+            statuses.get(root_key).map(|status| {
+                status.usable && status.reconciled && status.state == NameIndexState::Ready
+            })
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn status_journal_cursor(
+    statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
+    root_key: &str,
+) -> Option<JournalCursor> {
+    statuses.lock().ok()?.get(root_key)?.journal_cursor()
+}
+
+#[cfg(windows)]
+fn mark_pending(pending: &Arc<Mutex<HashSet<String>>>, root_key: &str) -> bool {
+    pending
+        .lock()
+        .map(|mut pending| pending.insert(root_key.to_string()))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn set_journal_recovery(
+    statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
+    root_key: &str,
+    cursor: JournalCursor,
+) {
+    if let Ok(mut statuses) = statuses.lock()
+        && let Some(status) = statuses.get_mut(root_key)
+    {
+        status.state = NameIndexState::Indexing;
+        status.usable = false;
+        status.reconciled = false;
+        status.provider = NameIndexProvider::UsnJournal;
+        status.journal_id = Some(cursor.journal_id);
+        status.journal_next_usn = Some(cursor.next_usn);
+        status.message = Some("USN Journal 已回退，正在重建名称索引".to_string());
+    }
+}
+
+#[cfg(windows)]
+fn set_usn_watcher_failure(
+    statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
+    root_key: &str,
+    error: &str,
+) {
+    if let Ok(mut statuses) = statuses.lock()
+        && let Some(status) = statuses.get_mut(root_key)
+    {
+        status.state = NameIndexState::Error;
+        status.usable = false;
+        status.reconciled = true;
+        status.watchable = false;
+        status.watch_error = Some(error.to_string());
+        status.message = Some(format!("USN Journal 监听失败：{error}"));
     }
 }
 
@@ -569,6 +992,7 @@ fn index_worker(
             IndexCommand::EnsureRoot(root) => {
                 let root_key = path_key(&root);
                 set_status_indexing(&statuses, &root_key, "正在建立名称索引", false);
+                let _ = save_manifest(&index_dir, &statuses);
                 let result = index_root(
                     &mut writer,
                     &schema,
@@ -603,6 +1027,26 @@ fn index_worker(
                     "正在更新名称索引",
                     result,
                 );
+            }
+            IndexCommand::JournalAdvanced {
+                root,
+                journal_id,
+                next_usn,
+            } => {
+                let root_key = path_key(&root);
+                if let Ok(mut statuses) = statuses.lock()
+                    && let Some(status) = statuses.get_mut(&root_key)
+                    && (status.journal_id.is_none()
+                        || (status.journal_id == Some(journal_id)
+                            && status
+                                .journal_next_usn
+                                .is_none_or(|current| next_usn > current)))
+                {
+                    status.provider = NameIndexProvider::UsnJournal;
+                    status.journal_id = Some(journal_id);
+                    status.journal_next_usn = Some(next_usn);
+                }
+                let _ = save_manifest(&index_dir, &statuses);
             }
             IndexCommand::RemoveRoot(root) => {
                 let root_key = path_key(&root);
@@ -947,15 +1391,31 @@ fn set_watch_failure(
     }
 }
 
-fn set_watch_available(statuses: &Arc<Mutex<HashMap<String, RootStatus>>>, root_key: &str) {
+fn set_watch_available(
+    statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
+    root_key: &str,
+    provider: NameIndexProvider,
+    journal_cursor: Option<JournalCursor>,
+    restore_complete: bool,
+) {
     if let Ok(mut statuses) = statuses.lock()
         && let Some(status) = statuses.get_mut(root_key)
     {
-        if !status.watchable {
+        if restore_complete {
+            status.usable = true;
+            status.reconciled = true;
+            status.state = NameIndexState::Ready;
+        } else if !status.watchable || status.provider != provider {
             status.reconciled = false;
         }
         status.watchable = true;
         status.watch_error = None;
+        status.provider = provider;
+        status.journal_id = journal_cursor.map(|cursor| cursor.journal_id);
+        status.journal_next_usn = journal_cursor.map(|cursor| cursor.next_usn);
+        if status.reconciled {
+            status.message = None;
+        }
     }
 }
 
@@ -996,9 +1456,14 @@ fn load_manifest(index_dir: &Path) -> HashMap<String, RootStatus> {
                     usable: true,
                     indexed_entries: root.indexed_entries,
                     message: None,
-                    reconciled: false,
+                    reconciled: root.provider == NameIndexProvider::UsnJournal
+                        && root.journal_id.is_some()
+                        && root.journal_next_usn.is_some(),
                     watchable: true,
                     watch_error: None,
+                    provider: root.provider,
+                    journal_id: root.journal_id,
+                    journal_next_usn: root.journal_next_usn,
                 },
             )
         })
@@ -1017,6 +1482,9 @@ fn save_manifest(
                 path: status.root.to_string_lossy().into_owned(),
                 indexed_entries: status.indexed_entries,
                 completed_unix_ms: now_unix_ms(),
+                provider: status.provider,
+                journal_id: status.journal_id,
+                journal_next_usn: status.journal_next_usn,
             })
             .collect(),
         Err(_) => return Err("名称索引状态锁不可用".to_string()),
@@ -1216,6 +1684,13 @@ mod tests {
         service.ensure_roots(std::slice::from_ref(&root));
         wait_ready(&service, &root);
         let cancel = AtomicBool::new(false);
+        let status = service
+            .status(std::slice::from_ref(&root))
+            .into_iter()
+            .next()
+            .expect("index status");
+        assert_eq!(status.provider, NameIndexProvider::Notify);
+        assert_eq!(status.coverage, NameIndexCoverage::Complete);
         let snapshot = service
             .search(std::slice::from_ref(&root), "wooduan", &cancel)
             .expect("search index")
@@ -1295,6 +1770,46 @@ mod tests {
 
         drop(service);
         fs::remove_dir_all(base).expect("clean generated root fixture");
+        remove_dir_with_retry(&index_dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn restores_usn_cursor_as_complete_manifest_state() {
+        let index_dir = test_root("manifest");
+        fs::create_dir_all(&index_dir).expect("create manifest fixture");
+        let root_path = test_root("manifest-root");
+        let manifest = Manifest {
+            version: INDEX_VERSION,
+            roots: vec![ManifestRoot {
+                path: root_path.to_string_lossy().into_owned(),
+                indexed_entries: 42,
+                completed_unix_ms: 1,
+                provider: NameIndexProvider::UsnJournal,
+                journal_id: Some(7),
+                journal_next_usn: Some(100),
+            }],
+        };
+        fs::write(
+            index_dir.join("manifest.json"),
+            serde_json::to_vec(&manifest).expect("encode manifest"),
+        )
+        .expect("write manifest");
+
+        let statuses = load_manifest(&index_dir);
+        let status = statuses
+            .get(&path_key(&root_path))
+            .expect("restored status");
+        assert_eq!(status.provider, NameIndexProvider::UsnJournal);
+        assert!(status.reconciled);
+        assert!(status.usable);
+        assert_eq!(
+            status.journal_cursor(),
+            Some(JournalCursor {
+                journal_id: 7,
+                next_usn: 100,
+            })
+        );
         remove_dir_with_retry(&index_dir);
     }
 }
