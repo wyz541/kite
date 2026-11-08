@@ -1,0 +1,2362 @@
+{
+  "schema_version": 1,
+  "generated_at_unix_ms": 1794140406742,
+  "kite_version": "0.6.62",
+  "git_commit": "e7c8b47cdc149d997e08f4ef4ee9d44f7dfa5976",
+  "profile": "standard",
+  "build_profile": "release",
+  "host": {
+    "os": "macos",
+    "os_version": "macOS",
+    "architecture": "aarch64",
+    "cpu_model": "Generic Apple Silicon",
+    "logical_cores": 0,
+    "memory_bytes": 0,
+    "fixture_filesystem": "apfs",
+    "fixture_disk_kind": "SSD",
+    "fixture_disk_total_bytes": 0,
+    "fixture_disk_available_bytes": 0
+  },
+  "method": {
+    "timer": "std::time::Instant (monotonic)",
+    "percentile": "linear interpolation over sorted samples",
+    "rss": "sysinfo resident memory sampled every 10 ms; peak is max of sampler and post-sample RSS",
+    "cache_control": "fixtures are generated locally; the harness does not purge OS caches",
+    "interactive_samples": 30,
+    "cold_samples": 10,
+    "aggregation": "median of per-run p50 and p95 values",
+    "noise_spread": "(max run p95 - min run p95) / median run p95",
+    "minimum_runs": 3
+  },
+  "fixtures": [
+    {
+      "name": "directories/flat-1000",
+      "kind": "flat_directory",
+      "entries": 1000,
+      "bytes": 64000,
+      "description": "Flat directory used for load and sort measurements"
+    },
+    {
+      "name": "directories/flat-10000",
+      "kind": "flat_directory",
+      "entries": 10000,
+      "bytes": 640000,
+      "description": "Flat directory used for load and sort measurements"
+    },
+    {
+      "name": "directories/flat-50000",
+      "kind": "flat_directory",
+      "entries": 50000,
+      "bytes": 3200000,
+      "description": "Flat directory used for load and sort measurements"
+    },
+    {
+      "name": "trees/tree-10000",
+      "kind": "nested_tree",
+      "entries": 10000,
+      "bytes": 640000,
+      "description": "Nested tree used for column and global name search"
+    },
+    {
+      "name": "trees/tree-100000",
+      "kind": "nested_tree",
+      "entries": 100000,
+      "bytes": 6400000,
+      "description": "Nested tree used for column and global name search"
+    },
+    {
+      "name": "content",
+      "kind": "text_corpus",
+      "entries": 2000,
+      "bytes": 3096890,
+      "description": "UTF-8 corpus used for content indexing and incremental updates"
+    },
+    {
+      "name": "copy/copy-source",
+      "kind": "copy_source",
+      "entries": 1000,
+      "bytes": 64000,
+      "description": "Small-file tree used for copy operations"
+    },
+    {
+      "name": "copy/move-sources",
+      "kind": "move_sources",
+      "entries": 1000,
+      "bytes": 64000,
+      "description": "Precreated sources used for move measurements"
+    },
+    {
+      "name": "archive/source",
+      "kind": "archive_source",
+      "entries": 2000,
+      "bytes": 3096890,
+      "description": "Compressible text tree used for archive measurements"
+    },
+    {
+      "name": "large/large-256.bin",
+      "kind": "large_file",
+      "entries": 1,
+      "bytes": 268435456,
+      "description": "Deterministic binary file used for I/O, hash, and copy measurements"
+    },
+    {
+      "name": "text/text-1mib.txt",
+      "kind": "text_file",
+      "entries": 1,
+      "bytes": 1048576,
+      "description": "Deterministic UTF-8 file used for preview and editor measurements"
+    },
+    {
+      "name": "text/text-8mib.txt",
+      "kind": "text_file",
+      "entries": 1,
+      "bytes": 8388608,
+      "description": "Deterministic UTF-8 file used for preview and editor measurements"
+    },
+    {
+      "name": "text/text-100mib.txt",
+      "kind": "text_file",
+      "entries": 1,
+      "bytes": 104857600,
+      "description": "Deterministic UTF-8 file used for preview and editor measurements"
+    },
+    {
+      "name": "vcs/git",
+      "kind": "git_worktree",
+      "entries": 10000,
+      "bytes": 640000,
+      "description": "Git worktree used for clean and dirty VCS status measurements"
+    }
+  ],
+  "coverage": [
+    {
+      "area": "Startup and launch",
+      "status": "not_automated",
+      "automated_scenarios": [],
+      "gaps": [
+        "release EXE cold/warm start, CLI/default-handler launch, and first paint",
+        "release app cold/warm start, Finder/default-handler launch, and first paint"
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "status": "partial",
+      "automated_scenarios": [
+        "load_directory_1000_name_sort",
+        "load_directory_10000_name_sort",
+        "load_directory_50000_name_sort",
+        "sort_entries_50000_name",
+        "sort_entries_50000_modified",
+        "sort_entries_50000_kind",
+        "sort_entries_50000_size",
+        "sort_entries_50000_vcs"
+      ],
+      "gaps": [
+        "native GPUI next-column, filter, group, and frame-stall measurement",
+        "native SwiftUI column rendering and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "status": "partial",
+      "automated_scenarios": [
+        "load_session_20_tabs",
+        "save_session_20_tabs"
+      ],
+      "gaps": [
+        "native GPUI tab open, switch, close, and restore-render measurement",
+        "native SwiftUI tab open, switch, close, and restore-render measurement"
+      ]
+    },
+    {
+      "area": "Directory watch and refresh",
+      "status": "not_automated",
+      "automated_scenarios": [],
+      "gaps": [
+        "Swift DispatchSource event-to-refresh and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Column search",
+      "status": "partial",
+      "automated_scenarios": [
+        "search_directory_10000",
+        "search_directory_100000"
+      ],
+      "gaps": [
+        "GPUI search-field feedback and frame-stall measurement",
+        "SwiftUI search-field feedback and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Global name search",
+      "status": "measured",
+      "automated_scenarios": [
+        "global_name_search_10000",
+        "global_name_search_100000",
+        "global_name_search_multi_root"
+      ],
+      "gaps": []
+    },
+    {
+      "area": "Global content search",
+      "status": "partial",
+      "automated_scenarios": [
+        "cold_content_index_build",
+        "warm_content_query",
+        "incremental_update_to_query"
+      ],
+      "gaps": [
+        "GPUI result-card rendering and frame-stall measurement",
+        "SwiftUI result-card rendering and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "status": "partial",
+      "automated_scenarios": [
+        "text_open_1mib",
+        "text_open_8mib",
+        "text_open_100mib"
+      ],
+      "gaps": [
+        "GPUI image, Markdown, code, and log rendering plus scroll-stall measurement",
+        "Quick Look, SwiftUI preview, NSTextView, and scroll-stall measurement"
+      ]
+    },
+    {
+      "area": "File operations",
+      "status": "partial",
+      "automated_scenarios": [
+        "create_100_files",
+        "rename_file",
+        "copy_small_file_tree",
+        "move_small_file_tree",
+        "copy_large_file"
+      ],
+      "gaps": [
+        "GPUI progress feedback, recycle-bin action, and Explorer clipboard integration",
+        "SwiftUI progress feedback, Finder clipboard integration, and trash action"
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "status": "partial",
+      "automated_scenarios": [
+        "compress_zip",
+        "compress_tar_gz",
+        "extract_zip",
+        "extract_tar_gz",
+        "compress_large_file_zip"
+      ],
+      "gaps": [
+        "GPUI archive progress and frame-stall measurement",
+        "SwiftUI archive progress and frame-stall measurement"
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "status": "partial",
+      "automated_scenarios": [
+        "git_clean_status",
+        "git_dirty_status_100_files",
+        "apply_vcs_statuses"
+      ],
+      "gaps": [
+        "Windows native Shell context-menu and third-party extension latency",
+        "AppKit menu latency and SVN fixture when svn is unavailable",
+        "SVN was not available in the benchmark environment"
+      ]
+    },
+    {
+      "area": "Sidebar and devices",
+      "status": "partial",
+      "automated_scenarios": [
+        "volume_enumeration"
+      ],
+      "gaps": [
+        "WPD/MTP first listing, navigation, and copy throughput with a controlled device",
+        "USB volume first listing and copy throughput with a controlled device"
+      ]
+    },
+    {
+      "area": "Update path",
+      "status": "partial",
+      "automated_scenarios": [
+        "sha256_verify_large_file"
+      ],
+      "gaps": [
+        "GitHub Release API, download throughput, installer, and restart with --include-network"
+      ]
+    }
+  ],
+  "summary": {
+    "measured_scenarios": 36,
+    "not_automated_scenarios": 23,
+    "errors": 0,
+    "slowest_scenarios": [
+      {
+        "area": "Archive operations",
+        "scenario": "compress_large_file_zip",
+        "p95_ms": 5132.751758,
+        "sample_count": 5
+      },
+      {
+        "area": "Global content search",
+        "scenario": "cold_content_index_build",
+        "p95_ms": 4164.64722965,
+        "sample_count": 10
+      },
+      {
+        "area": "Update path",
+        "scenario": "sha256_verify_large_file",
+        "p95_ms": 780.5017166,
+        "sample_count": 5
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "extract_tar_gz",
+        "p95_ms": 290.0657103,
+        "sample_count": 10
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "load_directory_50000_name_sort",
+        "p95_ms": 220.4726606,
+        "sample_count": 30
+      },
+      {
+        "area": "Global content search",
+        "scenario": "incremental_update_to_query",
+        "p95_ms": 203.18821845000002,
+        "sample_count": 10
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "extract_zip",
+        "p95_ms": 199.8244042,
+        "sample_count": 10
+      },
+      {
+        "area": "File operations",
+        "scenario": "copy_small_file_tree",
+        "p95_ms": 141.27870395,
+        "sample_count": 30
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "compress_zip",
+        "p95_ms": 108.0954772,
+        "sample_count": 10
+      },
+      {
+        "area": "Global name search",
+        "scenario": "global_name_search_100000",
+        "p95_ms": 102.4239875,
+        "sample_count": 30
+      },
+      {
+        "area": "Column search",
+        "scenario": "search_directory_100000",
+        "p95_ms": 55.322006249999994,
+        "sample_count": 30
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "compress_tar_gz",
+        "p95_ms": 53.9935064,
+        "sample_count": 10
+      }
+    ],
+    "highest_variance_scenarios": [
+      {
+        "area": "File operations",
+        "scenario": "create_100_files",
+        "p95_to_p50_ratio": 5.171583383540671,
+        "sample_count": 30
+      },
+      {
+        "area": "VCS and context menus",
+        "scenario": "git_dirty_status_100_files",
+        "p95_to_p50_ratio": 1.0230558493997286,
+        "sample_count": 10
+      },
+      {
+        "area": "VCS and context menus",
+        "scenario": "git_clean_status",
+        "p95_to_p50_ratio": 1.1301274581255478,
+        "sample_count": 10
+      },
+      {
+        "area": "Tabs and session restore",
+        "scenario": "load_session_20_tabs",
+        "p95_to_p50_ratio": 1.2799762427834256,
+        "sample_count": 30
+      },
+      {
+        "area": "File operations",
+        "scenario": "rename_file",
+        "p95_to_p50_ratio": 3.9672739900696903,
+        "sample_count": 30
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "compress_zip",
+        "p95_to_p50_ratio": 1.1080751495206758,
+        "sample_count": 10
+      },
+      {
+        "area": "Column search",
+        "scenario": "search_directory_100000",
+        "p95_to_p50_ratio": 1.1216970671301008,
+        "sample_count": 30
+      },
+      {
+        "area": "File operations",
+        "scenario": "copy_large_file",
+        "p95_to_p50_ratio": 3.3813747108617433,
+        "sample_count": 10
+      }
+    ],
+    "highest_memory_scenarios": [
+      {
+        "area": "Global content search",
+        "scenario": "cold_content_index_build",
+        "peak_rss_delta_bytes": 21856256,
+        "sample_count": 10
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "load_directory_50000_name_sort",
+        "peak_rss_delta_bytes": 5996544,
+        "sample_count": 30
+      },
+      {
+        "area": "Column navigation",
+        "scenario": "load_directory_10000_name_sort",
+        "peak_rss_delta_bytes": 786432,
+        "sample_count": 30
+      },
+      {
+        "area": "Global content search",
+        "scenario": "incremental_update_to_query",
+        "peak_rss_delta_bytes": 409600,
+        "sample_count": 10
+      },
+      {
+        "area": "Global name search",
+        "scenario": "global_name_search_multi_root",
+        "peak_rss_delta_bytes": 294912,
+        "sample_count": 30
+      },
+      {
+        "area": "Archive operations",
+        "scenario": "extract_zip",
+        "peak_rss_delta_bytes": 229376,
+        "sample_count": 10
+      },
+      {
+        "area": "Column search",
+        "scenario": "search_directory_100000",
+        "peak_rss_delta_bytes": 212992,
+        "sample_count": 30
+      },
+      {
+        "area": "File operations",
+        "scenario": "create_100_files",
+        "peak_rss_delta_bytes": 163840,
+        "sample_count": 30
+      }
+    ]
+  },
+  "aggregation": {
+    "run_count": 3,
+    "minimum_runs": 3,
+    "source_reports": [
+      "control-run-1.json",
+      "control-run-2.json",
+      "control-run-3.json"
+    ],
+    "missing_scenarios": [],
+    "noise_counts": {
+      "low": 21,
+      "medium": 9,
+      "high": 6,
+      "insufficient_runs": 0
+    }
+  },
+  "results": [
+    {
+      "area": "Archive operations",
+      "scenario": "compress_large_file_zip",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 5,
+        "run_count": 3,
+        "min_ms": 5110.393833,
+        "p50_ms": 5119.7040830000005,
+        "p95_ms": 5132.751758,
+        "max_ms": 5137.740583000001,
+        "mean_ms": 5122.0240248,
+        "throughput_p50": 50.00288998148333,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 5131
+      },
+      "details": {
+        "run_p50_ms": [
+          5119.7040830000005,
+          5122.327958,
+          5116.058791
+        ],
+        "run_p95_ms": [
+          5132.751758,
+          5137.568266400001,
+          5129.340891400001
+        ],
+        "run_max_ms": [
+          5134.981458,
+          5137.740583000001,
+          5132.390333
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 0.16029169903214308,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "compress_tar_gz",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 49.21625,
+        "p50_ms": 49.907521,
+        "p95_ms": 53.9935064,
+        "max_ms": 60.136375,
+        "mean_ms": 50.583975,
+        "throughput_p50": 40074.12118128065,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 50
+      },
+      "details": {
+        "run_p50_ms": [
+          56.402521,
+          49.907521,
+          49.602104
+        ],
+        "run_p95_ms": [
+          60.099025,
+          51.977199850000005,
+          53.9935064
+        ],
+        "run_max_ms": [
+          60.136375,
+          52.16425,
+          54.540125
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 15.042225799952849,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 16.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "compress_zip",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 94.369542,
+        "p50_ms": 97.5524785,
+        "p95_ms": 108.0954772,
+        "max_ms": 169.087458,
+        "mean_ms": 104.2554084,
+        "throughput_p50": 20501.78671959571,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 98304,
+        "cpu_ms_p50": 98
+      },
+      "details": {
+        "run_p50_ms": [
+          103.804042,
+          95.6195835,
+          97.5524785
+        ],
+        "run_p95_ms": [
+          108.0954772,
+          102.96201715000001,
+          140.43357659999992
+        ],
+        "run_max_ms": [
+          109.61945800000001,
+          103.28729200000001,
+          169.087458
+        ],
+        "run_peak_rss_delta_bytes": [
+          98304,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 34.66524263607202,
+        "classification": "high",
+        "recommended_comparison_threshold_pct": 35.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "extract_tar_gz",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 271.4845,
+        "p50_ms": 281.7925415,
+        "p95_ms": 290.0657103,
+        "max_ms": 306.43208300000003,
+        "mean_ms": 282.24587089999994,
+        "throughput_p50": 7097.419932491301,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 114688,
+        "cpu_ms_p50": 282
+      },
+      "details": {
+        "run_p50_ms": [
+          278.6058125,
+          281.7925415,
+          283.2640625
+        ],
+        "run_p95_ms": [
+          297.35644565,
+          289.7019019,
+          290.0657103
+        ],
+        "run_max_ms": [
+          306.43208300000003,
+          291.831958,
+          291.723792
+        ],
+        "run_peak_rss_delta_bytes": [
+          65536,
+          114688,
+          98304
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 2.638899903778119,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Archive operations",
+      "scenario": "extract_zip",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 181.331875,
+        "p50_ms": 191.02779199999998,
+        "p95_ms": 199.8244042,
+        "max_ms": 209.247208,
+        "mean_ms": 191.02358349999997,
+        "throughput_p50": 10469.70145795192,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 229376,
+        "cpu_ms_p50": 191
+      },
+      "details": {
+        "run_p50_ms": [
+          192.80683299999998,
+          191.02779199999998,
+          188.302438
+        ],
+        "run_p95_ms": [
+          199.8244042,
+          198.66465449999998,
+          204.1989019
+        ],
+        "run_max_ms": [
+          201.92166699999999,
+          199.625292,
+          209.247208
+        ],
+        "run_peak_rss_delta_bytes": [
+          163840,
+          180224,
+          229376
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 2.769555311402763,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "load_directory_10000_name_sort",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 33.273042000000004,
+        "p50_ms": 33.810666499999996,
+        "p95_ms": 38.1073125,
+        "max_ms": 43.639458,
+        "mean_ms": 34.76257223333334,
+        "throughput_p50": 295765.0203572874,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 786432,
+        "cpu_ms_p50": 34
+      },
+      "details": {
+        "run_p50_ms": [
+          41.750521000000006,
+          33.810666499999996,
+          33.5738755
+        ],
+        "run_p95_ms": [
+          42.74952705,
+          38.1073125,
+          37.29912469999999
+        ],
+        "run_max_ms": [
+          43.639458,
+          41.605208999999995,
+          40.212542
+        ],
+        "run_peak_rss_delta_bytes": [
+          180224,
+          98304,
+          786432
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 14.302772860195809,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 15.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "load_directory_1000_name_sort",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 2.903625,
+        "p50_ms": 4.152125,
+        "p95_ms": 4.616789949999999,
+        "max_ms": 5.618417,
+        "mean_ms": 4.0545694333333335,
+        "throughput_p50": 240840.57832235633,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 81920,
+        "cpu_ms_p50": 4
+      },
+      "details": {
+        "run_p50_ms": [
+          4.164521000000001,
+          4.152125,
+          4.1298955
+        ],
+        "run_p95_ms": [
+          4.5554106,
+          4.64417325,
+          4.616789949999999
+        ],
+        "run_max_ms": [
+          4.597833,
+          5.618417,
+          5.113625
+        ],
+        "run_peak_rss_delta_bytes": [
+          81920,
+          32768,
+          65536
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 1.9226053375029466,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "load_directory_50000_name_sort",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 194.151459,
+        "p50_ms": 200.93933299999998,
+        "p95_ms": 220.4726606,
+        "max_ms": 236.898166,
+        "mean_ms": 204.49621393333337,
+        "throughput_p50": 248838.04519677936,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 5996544,
+        "cpu_ms_p50": 202
+      },
+      "details": {
+        "run_p50_ms": [
+          211.08025,
+          198.64925,
+          200.93933299999998
+        ],
+        "run_p95_ms": [
+          220.4726606,
+          213.7240417,
+          226.13107744999996
+        ],
+        "run_max_ms": [
+          220.965833,
+          220.874875,
+          236.898166
+        ],
+        "run_peak_rss_delta_bytes": [
+          5242880,
+          5259264,
+          5996544
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 5.627471322854792,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_50000_kind",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 6.410292,
+        "p50_ms": 6.809395500000001,
+        "p95_ms": 6.9361834,
+        "max_ms": 7.322875000000001,
+        "mean_ms": 6.759202799999998,
+        "throughput_p50": 7342795.700507213,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 32768,
+        "cpu_ms_p50": 7
+      },
+      "details": {
+        "run_p50_ms": [
+          6.809395500000001,
+          6.829625,
+          6.764604
+        ],
+        "run_p95_ms": [
+          6.9361834,
+          7.25447485,
+          6.80196265
+        ],
+        "run_max_ms": [
+          6.9544999999999995,
+          7.322875000000001,
+          6.811042
+        ],
+        "run_peak_rss_delta_bytes": [
+          32768,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 6.523936492221358,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_50000_modified",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 3.615,
+        "p50_ms": 4.7471045,
+        "p95_ms": 4.9695687500000005,
+        "max_ms": 5.269,
+        "mean_ms": 4.568772166666666,
+        "throughput_p50": 10532737.030341309,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 32768,
+        "cpu_ms_p50": 5
+      },
+      "details": {
+        "run_p50_ms": [
+          4.7484585,
+          4.733167,
+          4.7471045
+        ],
+        "run_p95_ms": [
+          4.91835625,
+          5.17388315,
+          4.9695687500000005
+        ],
+        "run_max_ms": [
+          4.93775,
+          5.269,
+          5.081834000000001
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          32768
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 5.141832477918724,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_50000_name",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 5.922333999999999,
+        "p50_ms": 6.593270500000001,
+        "p95_ms": 6.63217705,
+        "max_ms": 7.320250000000001,
+        "mean_ms": 6.517465266666667,
+        "throughput_p50": 7583494.6336476505,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 7
+      },
+      "details": {
+        "run_p50_ms": [
+          6.5937920000000005,
+          6.5825835,
+          6.593270500000001
+        ],
+        "run_p95_ms": [
+          6.956577049999998,
+          6.63217705,
+          6.616979199999999
+        ],
+        "run_max_ms": [
+          7.320250000000001,
+          6.671875,
+          6.618291999999999
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 5.120458145790887,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_50000_size",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 3.332042,
+        "p50_ms": 4.260146000000001,
+        "p95_ms": 4.652575000000001,
+        "max_ms": 4.87125,
+        "mean_ms": 4.184834766666667,
+        "throughput_p50": 11736687.746812887,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 32768,
+        "cpu_ms_p50": 5
+      },
+      "details": {
+        "run_p50_ms": [
+          3.4313960000000003,
+          4.301375,
+          4.260146000000001
+        ],
+        "run_p95_ms": [
+          4.7797523,
+          4.48154375,
+          4.652575000000001
+        ],
+        "run_max_ms": [
+          4.87125,
+          4.738957999999999,
+          4.72025
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          32768,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 6.409537729107,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column navigation",
+      "scenario": "sort_entries_50000_vcs",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 3.9786250000000005,
+        "p50_ms": 4.4208750000000006,
+        "p95_ms": 4.6839561,
+        "max_ms": 4.846334,
+        "mean_ms": 4.441972166666665,
+        "throughput_p50": 11309994.178432569,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 5
+      },
+      "details": {
+        "run_p50_ms": [
+          4.4208750000000006,
+          4.423479499999999,
+          4.3513335
+        ],
+        "run_p95_ms": [
+          4.57798125,
+          4.6839561,
+          4.829268750000001
+        ],
+        "run_max_ms": [
+          4.678542,
+          4.769333,
+          4.846334
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 5.364856002813541,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column search",
+      "scenario": "search_directory_10000",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 6.776624999999999,
+        "p50_ms": 7.1198745,
+        "p95_ms": 9.346612349999997,
+        "max_ms": 10.729334,
+        "mean_ms": 7.484399966666668,
+        "throughput_p50": 1404525.3382067208,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 65536,
+        "cpu_ms_p50": 11
+      },
+      "details": {
+        "run_p50_ms": [
+          7.1198745,
+          6.9900415,
+          7.5989165
+        ],
+        "run_p95_ms": [
+          9.33153385,
+          9.346612349999997,
+          9.478919049999998
+        ],
+        "run_max_ms": [
+          10.67975,
+          10.729334,
+          10.700709
+        ],
+        "run_peak_rss_delta_bytes": [
+          49152,
+          65536,
+          65536
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 1.5768836288583072,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Column search",
+      "scenario": "search_directory_100000",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 46.443833,
+        "p50_ms": 49.319917,
+        "p95_ms": 55.322006249999994,
+        "max_ms": 66.53162499999999,
+        "mean_ms": 50.05904303333333,
+        "throughput_p50": 2027578.4371634342,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 212992,
+        "cpu_ms_p50": 95
+      },
+      "details": {
+        "run_p50_ms": [
+          52.831937499999995,
+          49.280812999999995,
+          49.319917
+        ],
+        "run_p95_ms": [
+          66.0666042,
+          52.334875,
+          55.322006249999994
+        ],
+        "run_max_ms": [
+          66.53162499999999,
+          53.560541,
+          56.301833
+        ],
+        "run_peak_rss_delta_bytes": [
+          114688,
+          212992,
+          147456
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 24.821459181986924,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 25.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "copy_large_file",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 0.252667,
+        "p50_ms": 0.5276455,
+        "p95_ms": 1.78416715,
+        "max_ms": 2.258792,
+        "mean_ms": 1.0112792000000002,
+        "throughput_p50": 487189.6874794704,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 1
+      },
+      "details": {
+        "run_p50_ms": [
+          0.5276455,
+          0.483667,
+          1.2445415
+        ],
+        "run_p95_ms": [
+          2.1214853,
+          1.7093859,
+          1.78416715
+        ],
+        "run_max_ms": [
+          2.258792,
+          1.725792,
+          1.834042
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 23.09757804923153,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 24.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "copy_small_file_tree",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 121.435958,
+        "p50_ms": 134.10325,
+        "p95_ms": 141.27870395,
+        "max_ms": 145.549708,
+        "mean_ms": 133.14906516666667,
+        "throughput_p50": 7456.949085606991,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 133
+      },
+      "details": {
+        "run_p50_ms": [
+          135.9323965,
+          134.10325,
+          131.804729
+        ],
+        "run_p95_ms": [
+          141.27870395,
+          142.3236628,
+          138.23831234999997
+        ],
+        "run_max_ms": [
+          144.60833300000002,
+          145.549708,
+          141.241375
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 2.8916958719028663,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "create_100_files",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 5.6765,
+        "p50_ms": 6.551167,
+        "p95_ms": 33.87990639999999,
+        "max_ms": 41.421042,
+        "mean_ms": 10.7796777,
+        "throughput_p50": 15264.46467880174,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 163840,
+        "cpu_ms_p50": 7
+      },
+      "details": {
+        "run_p50_ms": [
+          6.551167,
+          6.398375,
+          6.5669165
+        ],
+        "run_p95_ms": [
+          33.87990639999999,
+          35.475191849999995,
+          12.80032484999997
+        ],
+        "run_max_ms": [
+          35.922999999999995,
+          41.421042,
+          31.99925
+        ],
+        "run_peak_rss_delta_bytes": [
+          131072,
+          163840,
+          114688
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 66.92718312822738,
+        "classification": "high",
+        "recommended_comparison_threshold_pct": 67.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "move_small_file_tree",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 0.223833,
+        "p50_ms": 0.3089375,
+        "p95_ms": 0.38077675,
+        "max_ms": 0.458333,
+        "mean_ms": 0.29999590000000004,
+        "throughput_p50": 323758.13405961567,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 0
+      },
+      "details": {
+        "run_p50_ms": [
+          0.3089375,
+          0.28475,
+          0.32122950000000006
+        ],
+        "run_p95_ms": [
+          0.36510014999999996,
+          0.38077675,
+          0.44560204999999997
+        ],
+        "run_max_ms": [
+          0.391125,
+          0.393208,
+          0.458333
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 21.14149564016186,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 22.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "File operations",
+      "scenario": "rename_file",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 0.096084,
+        "p50_ms": 0.37722900000000004,
+        "p95_ms": 1.4965707999999993,
+        "max_ms": 2.0812920000000004,
+        "mean_ms": 0.5732986666666667,
+        "throughput_p50": 3128.5543510541684,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 1
+      },
+      "details": {
+        "run_p50_ms": [
+          0.37722900000000004,
+          0.21202100000000002,
+          0.5089165
+        ],
+        "run_p95_ms": [
+          1.6128313999999992,
+          1.4965707999999993,
+          1.011923099999999
+        ],
+        "run_max_ms": [
+          1.752083,
+          2.0812920000000004,
+          1.841792
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 40.15234695211215,
+        "classification": "high",
+        "recommended_comparison_threshold_pct": 41.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "cold_content_index_build",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 3855.2997910000004,
+        "p50_ms": 4010.2232084999996,
+        "p95_ms": 4164.64722965,
+        "max_ms": 4277.316790999999,
+        "mean_ms": 4015.6828168,
+        "throughput_p50": 498.7261985111749,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 21856256,
+        "cpu_ms_p50": 1161
+      },
+      "details": {
+        "run_p50_ms": [
+          4010.2232084999996,
+          3947.033292,
+          4218.593792
+        ],
+        "run_p95_ms": [
+          4164.64722965,
+          4115.78534185,
+          4262.84106005
+        ],
+        "run_max_ms": [
+          4207.925792,
+          4145.550667,
+          4277.316790999999
+        ],
+        "run_peak_rss_delta_bytes": [
+          21856256,
+          19939328,
+          19775488
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 3.5310486120659714,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "incremental_update_to_query",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 173.99166699999998,
+        "p50_ms": 178.613062,
+        "p95_ms": 203.18821845000002,
+        "max_ms": 205.70766600000002,
+        "mean_ms": 183.67797079999997,
+        "throughput_p50": 5.598700071155301,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 409600,
+        "cpu_ms_p50": 351
+      },
+      "details": {
+        "run_p50_ms": [
+          183.820875,
+          178.3771875,
+          178.613062
+        ],
+        "run_p95_ms": [
+          203.18821845000002,
+          204.26252879999998,
+          184.53311889999998
+        ],
+        "run_max_ms": [
+          203.51962500000002,
+          205.70766600000002,
+          187.12599999999998
+        ],
+        "run_peak_rss_delta_bytes": [
+          409600,
+          360448,
+          409600
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 9.709918247477013,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Global content search",
+      "scenario": "warm_content_query",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 11.230541,
+        "p50_ms": 11.3776665,
+        "p95_ms": 15.344475149999997,
+        "max_ms": 18.070042,
+        "mean_ms": 12.153348599999998,
+        "throughput_p50": 4394.574421543271,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 12
+      },
+      "details": {
+        "run_p50_ms": [
+          11.3776665,
+          11.341166,
+          11.384020499999998
+        ],
+        "run_p95_ms": [
+          14.328885599999996,
+          16.778228949999992,
+          15.344475149999997
+        ],
+        "run_max_ms": [
+          16.862709,
+          17.894917,
+          18.070042
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 15.962379462682346,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 16.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Global name search",
+      "scenario": "global_name_search_10000",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 8.904125,
+        "p50_ms": 9.263333,
+        "p95_ms": 9.8232247,
+        "max_ms": 10.804459000000001,
+        "mean_ms": 9.333511033333336,
+        "throughput_p50": 1079526.9357076017,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 49152,
+        "cpu_ms_p50": 9
+      },
+      "details": {
+        "run_p50_ms": [
+          9.263333,
+          8.9833125,
+          9.4795625
+        ],
+        "run_p95_ms": [
+          9.8232247,
+          9.03485815,
+          10.097839400000002
+        ],
+        "run_max_ms": [
+          10.55425,
+          9.064167,
+          10.804459000000001
+        ],
+        "run_peak_rss_delta_bytes": [
+          32768,
+          49152,
+          49152
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 10.821102870628641,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 11.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Global name search",
+      "scenario": "global_name_search_100000",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 90.23649999999999,
+        "p50_ms": 94.01056249999999,
+        "p95_ms": 102.4239875,
+        "max_ms": 106.528625,
+        "mean_ms": 95.02857500000002,
+        "throughput_p50": 1063729.2408960834,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 65536,
+        "cpu_ms_p50": 94
+      },
+      "details": {
+        "run_p50_ms": [
+          94.5518955,
+          91.46368799999999,
+          94.01056249999999
+        ],
+        "run_p95_ms": [
+          102.4239875,
+          98.45350205,
+          102.75631234999999
+        ],
+        "run_max_ms": [
+          103.429417,
+          100.572959,
+          106.528625
+        ],
+        "run_peak_rss_delta_bytes": [
+          65536,
+          49152,
+          49152
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 4.200979091933899,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Global name search",
+      "scenario": "global_name_search_multi_root",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 44.845375,
+        "p50_ms": 45.9804165,
+        "p95_ms": 49.373629050000005,
+        "max_ms": 51.840708,
+        "mean_ms": 46.25355300000001,
+        "throughput_p50": 1304903.6250105104,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 294912,
+        "cpu_ms_p50": 47
+      },
+      "details": {
+        "run_p50_ms": [
+          46.4703335,
+          45.329187000000005,
+          45.9804165
+        ],
+        "run_p95_ms": [
+          49.373629050000005,
+          50.0361147,
+          48.1896625
+        ],
+        "run_max_ms": [
+          51.259333999999996,
+          51.840708,
+          49.878584
+        ],
+        "run_peak_rss_delta_bytes": [
+          294912,
+          49152,
+          49152
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 3.7397538636062677,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "text_open_100mib",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 0.003208,
+        "p50_ms": 0.003646,
+        "p95_ms": 0.005671199999999997,
+        "max_ms": 0.006834,
+        "mean_ms": 0.0039708,
+        "throughput_p50": 274352.51001695177,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 0
+      },
+      "details": {
+        "run_p50_ms": [
+          0.0036875000000000002,
+          0.0035624999999999997,
+          0.003646
+        ],
+        "run_p95_ms": [
+          0.0053374999999999985,
+          0.005737499999999998,
+          0.005671199999999997
+        ],
+        "run_max_ms": [
+          0.006125,
+          0.00675,
+          0.006834
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 7.053180984624058,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "text_open_1mib",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 3.812084,
+        "p50_ms": 4.547125,
+        "p95_ms": 4.58005815,
+        "max_ms": 4.969875,
+        "mean_ms": 4.3812833,
+        "throughput_p50": 219.92679088024744,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 49152,
+        "cpu_ms_p50": 5
+      },
+      "details": {
+        "run_p50_ms": [
+          4.547125,
+          4.32675,
+          4.57325
+        ],
+        "run_p95_ms": [
+          4.58005815,
+          4.575525000000001,
+          4.9635372
+        ],
+        "run_max_ms": [
+          4.581333,
+          4.57575,
+          4.969875
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          49152
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 8.471774534128992,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Preview and editor",
+      "scenario": "text_open_8mib",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 30.646167,
+        "p50_ms": 30.9398125,
+        "p95_ms": 31.44852705,
+        "max_ms": 32.712458,
+        "mean_ms": 31.009808400000004,
+        "throughput_p50": 258.5665838600682,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 114688,
+        "cpu_ms_p50": 31
+      },
+      "details": {
+        "run_p50_ms": [
+          30.9398125,
+          30.905250000000002,
+          31.59675
+        ],
+        "run_p95_ms": [
+          31.44852705,
+          31.071053500000005,
+          32.50161455
+        ],
+        "run_max_ms": [
+          31.506708,
+          31.149916,
+          32.712458
+        ],
+        "run_peak_rss_delta_bytes": [
+          49152,
+          16384,
+          114688
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 4.548896829811921,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Sidebar and devices",
+      "scenario": "volume_enumeration",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 44.204708000000004,
+        "p50_ms": 45.560625,
+        "p95_ms": 50.00339199999999,
+        "max_ms": 67.64883400000001,
+        "mean_ms": 46.241338999999996,
+        "throughput_p50": 65.84633154157656,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 49152,
+        "cpu_ms_p50": 29
+      },
+      "details": {
+        "run_p50_ms": [
+          44.9999165,
+          45.929333,
+          45.560625
+        ],
+        "run_p95_ms": [
+          50.00339199999999,
+          52.73918155,
+          48.175648249999995
+        ],
+        "run_max_ms": [
+          63.539208,
+          67.64883400000001,
+          50.4725
+        ],
+        "run_peak_rss_delta_bytes": [
+          49152,
+          16384,
+          49152
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 9.126447461804199,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "scenario": "load_session_20_tabs",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 0.034875,
+        "p50_ms": 0.039146,
+        "p95_ms": 0.05010594999999998,
+        "max_ms": 0.098959,
+        "mean_ms": 0.04098196666666667,
+        "throughput_p50": 510908.030338835,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 32768,
+        "cpu_ms_p50": 0
+      },
+      "details": {
+        "run_p50_ms": [
+          0.037104,
+          0.039146,
+          0.0396665
+        ],
+        "run_p95_ms": [
+          0.05010594999999998,
+          0.06773995,
+          0.04652964999999998
+        ],
+        "run_max_ms": [
+          0.061833,
+          0.098959,
+          0.06575
+        ],
+        "run_peak_rss_delta_bytes": [
+          32768,
+          32768,
+          32768
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 42.33090082116001,
+        "classification": "high",
+        "recommended_comparison_threshold_pct": 43.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Tabs and session restore",
+      "scenario": "save_session_20_tabs",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 4.805875,
+        "p50_ms": 6.6835830000000005,
+        "p95_ms": 7.993364399999999,
+        "max_ms": 11.628792,
+        "mean_ms": 6.6785557,
+        "throughput_p50": 2992.407423670891,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 49152,
+        "cpu_ms_p50": 3
+      },
+      "details": {
+        "run_p50_ms": [
+          6.8174795,
+          6.474521,
+          6.6835830000000005
+        ],
+        "run_p95_ms": [
+          7.993364399999999,
+          9.097552199999999,
+          7.808868749999999
+        ],
+        "run_max_ms": [
+          10.267916999999999,
+          11.628792,
+          8.586583
+        ],
+        "run_peak_rss_delta_bytes": [
+          49152,
+          49152,
+          49152
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 16.12191544776815,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 17.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "Update path",
+      "scenario": "sha256_verify_large_file",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 5,
+        "run_count": 3,
+        "min_ms": 767.762584,
+        "p50_ms": 769.6425,
+        "p95_ms": 780.5017166,
+        "max_ms": 785.082791,
+        "mean_ms": 774.0601501999998,
+        "throughput_p50": 332.6219640937188,
+        "throughput_unit": "MiB/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 773
+      },
+      "details": {
+        "run_p50_ms": [
+          769.6425,
+          769.1835,
+          772.6178339999999
+        ],
+        "run_p95_ms": [
+          785.0469994,
+          773.2547752,
+          780.5017166
+        ],
+        "run_max_ms": [
+          785.082791,
+          773.770917,
+          780.578
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 1.5108517956076926,
+        "classification": "low",
+        "recommended_comparison_threshold_pct": 10.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "apply_vcs_statuses",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 30,
+        "run_count": 3,
+        "min_ms": 1.34375,
+        "p50_ms": 3.0640205000000003,
+        "p95_ms": 4.4212564,
+        "max_ms": 8.758291,
+        "mean_ms": 2.8636638999999993,
+        "throughput_p50": 3264300.7524670777,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 3
+      },
+      "details": {
+        "run_p50_ms": [
+          3.0640205000000003,
+          2.8340414999999997,
+          3.259687
+        ],
+        "run_p95_ms": [
+          3.7948848999999996,
+          4.4212564,
+          4.62507035
+        ],
+        "run_max_ms": [
+          3.848375,
+          4.598541,
+          8.758291
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 18.777138778922662,
+        "classification": "medium",
+        "recommended_comparison_threshold_pct": 19.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "git_clean_status",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 38.59775,
+        "p50_ms": 39.984583,
+        "p95_ms": 45.18767514999999,
+        "max_ms": 65.161583,
+        "mean_ms": 40.8380917,
+        "throughput_p50": 250096.39536497113,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 3
+      },
+      "details": {
+        "run_p50_ms": [
+          39.984583,
+          63.0593335,
+          39.9576455
+        ],
+        "run_p95_ms": [
+          40.52344145,
+          64.94008939999999,
+          45.18767514999999
+        ],
+        "run_max_ms": [
+          40.637291,
+          65.161583,
+          49.18675
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 54.033866245495474,
+        "classification": "high",
+        "recommended_comparison_threshold_pct": 55.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    },
+    {
+      "area": "VCS and context menus",
+      "scenario": "git_dirty_status_100_files",
+      "boundary": "core",
+      "status": "measured",
+      "unit": "ms",
+      "samples": [],
+      "summary": {
+        "sample_count": 10,
+        "run_count": 3,
+        "min_ms": 38.743417,
+        "p50_ms": 44.393333,
+        "p95_ms": 45.416859,
+        "max_ms": 72.77675,
+        "mean_ms": 43.5654708,
+        "throughput_p50": 225262.52345916082,
+        "throughput_unit": "items/s",
+        "peak_rss_delta_bytes_max": 16384,
+        "cpu_ms_p50": 3
+      },
+      "details": {
+        "run_p50_ms": [
+          44.393333,
+          64.48793749999999,
+          40.0109375
+        ],
+        "run_p95_ms": [
+          45.416859,
+          70.1201561,
+          40.613972849999996
+        ],
+        "run_max_ms": [
+          45.433959,
+          72.77675,
+          40.735791
+        ],
+        "run_peak_rss_delta_bytes": [
+          16384,
+          16384,
+          16384
+        ]
+      },
+      "noise": {
+        "run_count": 3,
+        "p95_spread_percent": 64.96746780749415,
+        "classification": "high",
+        "recommended_comparison_threshold_pct": 65.0
+      },
+      "notes": [
+        "Aggregated across 3 independent runs."
+      ]
+    }
+  ]
+}
