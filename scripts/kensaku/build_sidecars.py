@@ -102,6 +102,28 @@ def extract_source(archive: Path, destination: Path) -> Path:
     return roots[0]
 
 
+def find_archive_member(archive: Path, preferred_name: str) -> str:
+    if archive.suffix.lower() == ".zip":
+        with zipfile.ZipFile(archive) as source:
+            names = source.namelist()
+    else:
+        with tarfile.open(archive, "r:gz") as source:
+            names = source.getnames()
+    if preferred_name in names:
+        return preferred_name
+    basename = Path(preferred_name).name
+    candidates = [basename]
+    if basename.endswith(".dylib"):
+        candidates.extend(["libonnxruntime.1.31.0.dylib", "libonnxruntime.dylib"])
+    elif basename.endswith(".so"):
+        candidates.extend(["libonnxruntime.so", "libonnxruntime.so.1.31.0"])
+    for candidate in candidates:
+        for name in names:
+            if Path(name).name == candidate:
+                return name
+    raise RuntimeError(f"ONNX Runtime library member not found: {preferred_name}")
+
+
 def extract_archive_member(archive: Path, member_name: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if archive.suffix.lower() == ".zip":
@@ -173,7 +195,8 @@ def stage_onnx_runtime(key: str, work: Path, output: Path) -> Path:
     if actual != expected:
         raise RuntimeError(f"ONNX Runtime SHA-256 mismatch: expected {expected}, actual {actual}")
     runtime = output / output_name
-    extract_archive_member(archive, member, runtime)
+    member_name = find_archive_member(archive, member)
+    extract_archive_member(archive, member_name, runtime)
     if not runtime.is_file() or runtime.stat().st_size == 0:
         raise RuntimeError("ONNX Runtime library was not extracted")
     license_path = work / "onnxruntime-LICENSE"
