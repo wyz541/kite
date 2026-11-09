@@ -540,11 +540,14 @@ fn daemon_path() -> Option<&'static Path> {
     }
     candidates.push(PathBuf::from("kensaku-daemon.exe"));
     candidates.push(PathBuf::from("kensaku-daemon"));
-    let found = candidates
-        .into_iter()
-        .find(|candidate| command_works(candidate))?;
+    // The daemon ignores --help and enters server mode, so discovery must not run it.
+    let found = find_daemon_candidate(candidates)?;
     let _ = DAEMON_PATH.set(found);
     DAEMON_PATH.get().map(|path| path.as_path())
+}
+
+fn find_daemon_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
 fn kensaku_data_dir() -> PathBuf {
@@ -962,6 +965,28 @@ mod tests {
     #[test]
     fn name_query_escapes_quotes_and_backslashes() {
         assert_eq!(name_query(r#"a"b\c"#), r#"name:"a\"b\\c""#);
+    }
+
+    #[test]
+    fn daemon_candidate_discovery_does_not_execute_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-daemon-discovery-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create daemon discovery test directory");
+        let candidate = directory.join(if cfg!(windows) {
+            "kensaku-daemon.exe"
+        } else {
+            "kensaku-daemon"
+        });
+        fs::write(&candidate, b"fixture").expect("write daemon discovery fixture");
+        let found = find_daemon_candidate(vec![candidate.clone()]);
+        assert_eq!(found, Some(candidate));
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]
