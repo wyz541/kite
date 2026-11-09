@@ -1,0 +1,159 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Windows package and Kensaku sidecars
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist/Kite.exe
+            dist/Kite-v*-windows-x64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  build-macos:
+    name: Build macOS release
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build macOS app and Kensaku sidecars
+        shell: bash
+        run: bash apps/macos/build.sh
+
+      - name: Package macOS app
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          archive="dist/Kite-${TAG}-macOS-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent apps/macos/build/Kite.app "$archive"
+          shasum -a 256 "$archive" > dist/SHA256SUMS-macos.txt
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            dist/Kite-v*-macOS-arm64.zip
+            dist/SHA256SUMS-macos.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check release parity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          bash .github/scripts/check-feature-matrix.sh
+          bash .github/scripts/check-release-parity.sh "$TAG"
+
+      - name: Download Windows assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets
+
+      - name: Download macOS assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos
+          path: release-assets
+
+      - name: Prepare checksums and notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat release-assets/SHA256SUMS.txt release-assets/SHA256SUMS-macos.txt > release-assets/combined-SHA256SUMS.txt
+          notes="docs/RELEASE_NOTES_${TAG}.md"
+          test -f "$notes"
+          echo "RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          assets=(
+            release-assets/Kite.exe
+            release-assets/Kite-*-windows-x64.zip
+            release-assets/Kite-*-macOS-arm64.zip
+            release-assets/combined-SHA256SUMS.txt
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            gh release edit "$TAG" --title "Kite $TAG" --notes-file "$RELEASE_NOTES" --latest
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --title "Kite $TAG" \
+              --notes-file "$RELEASE_NOTES" \
+              --latest
+          fi
