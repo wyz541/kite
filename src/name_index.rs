@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
+use std::ops::Bound;
 use std::path::{Path, PathBuf};
 #[cfg(not(test))]
 use std::sync::OnceLock;
@@ -14,8 +15,10 @@ use ignore::WalkBuilder;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tantivy::collector::{DocSetCollector, TopDocs};
-use tantivy::query::{BooleanQuery, Occur, Query, RegexQuery};
-use tantivy::schema::{Field, STORED, STRING, Schema, TantivyDocument, Value};
+use tantivy::query::{BooleanQuery, Occur, Query, RangeQuery, RegexQuery, TermQuery};
+use tantivy::schema::{
+    Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
+};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 use thread_priority::{ThreadBuilderExt, ThreadPriority};
 
@@ -23,10 +26,13 @@ use crate::fs::{
     EntryKind, FileEntry, GlobalNameSearchSnapshot, SEARCH_RESULT_LIMIT, has_generated_parent,
     is_generated_search_directory, is_hidden, sort_global_name_entries,
 };
+#[cfg(test)]
+use crate::search_filters::SearchTimeFilter;
+use crate::search_filters::{SearchFilters, SearchKindFilter};
 #[cfg(windows)]
 use crate::usn_journal;
 
-const INDEX_VERSION: u32 = 2;
+const INDEX_VERSION: u32 = 3;
 const INDEX_WRITER_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 const COMMIT_DOCUMENT_INTERVAL: usize = 25_000;
 const COMMIT_TIME_INTERVAL: Duration = Duration::from_secs(5);
@@ -189,6 +195,9 @@ struct NameFields {
     path: Field,
     root_key: Field,
     name_key: Field,
+    is_dir: Field,
+    modified_ms: Field,
+    extension_key: Field,
 }
 
 enum IndexCommand {
@@ -452,6 +461,16 @@ impl NameIndexService {
         query: &str,
         cancel: &AtomicBool,
     ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
+        self.search_with_filters(roots, query, SearchFilters::default(), cancel)
+    }
+
+    pub fn search_with_filters(
+        &self,
+        roots: &[PathBuf],
+        query: &str,
+        filters: SearchFilters,
+        cancel: &AtomicBool,
+    ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
         let query_text = query.trim();
         if query_text.is_empty() {
             return Ok(None);
@@ -488,10 +507,12 @@ impl NameIndexService {
                 .map(|query| (Occur::Should, query))
                 .collect(),
         );
-        let index_query = BooleanQuery::new(vec![
+        let mut clauses = vec![
             (Occur::Must, Box::new(name_query) as Box<dyn Query>),
             (Occur::Must, Box::new(scope_query) as Box<dyn Query>),
-        ]);
+        ];
+        Self::add_filter_queries(&self.schema, filters, &mut clauses)?;
+        let index_query = BooleanQuery::new(clauses);
         let top_docs = searcher
             .search(
                 &index_query,
@@ -532,6 +553,9 @@ impl NameIndexService {
                     path: path.clone(),
                     root: root.clone(),
                 });
+                continue;
+            }
+            if !filters.matches(&path, metadata.is_dir(), metadata.modified().ok()) {
                 continue;
             }
             let kind = if metadata.is_dir() {
@@ -588,6 +612,58 @@ impl NameIndexService {
             }
         }
         (covered_any, all_usable)
+    }
+
+    fn add_filter_queries(
+        schema: &NameFields,
+        filters: SearchFilters,
+        clauses: &mut Vec<(Occur, Box<dyn Query>)>,
+    ) -> Result<(), String> {
+        match filters.kind {
+            SearchKindFilter::All => {}
+            SearchKindFilter::Folders => clauses.push((
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_u64(schema.is_dir, 1),
+                    IndexRecordOption::Basic,
+                )),
+            )),
+            _ => {
+                clauses.push((
+                    Occur::Must,
+                    Box::new(TermQuery::new(
+                        Term::from_field_u64(schema.is_dir, 0),
+                        IndexRecordOption::Basic,
+                    )),
+                ));
+                let extensions = filters.kind_extensions().unwrap_or_default();
+                let extension_queries = extensions
+                    .iter()
+                    .map(|extension| {
+                        (
+                            Occur::Should,
+                            Box::new(TermQuery::new(
+                                Term::from_field_text(schema.extension_key, extension),
+                                IndexRecordOption::Basic,
+                            )) as Box<dyn Query>,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if !extension_queries.is_empty() {
+                    clauses.push((Occur::Must, Box::new(BooleanQuery::new(extension_queries))));
+                }
+            }
+        }
+        if let Some(modified_after) = filters.modified_after_unix_ms() {
+            clauses.push((
+                Occur::Must,
+                Box::new(RangeQuery::new(
+                    Bound::Included(Term::from_field_i64(schema.modified_ms, modified_after)),
+                    Bound::Unbounded,
+                )),
+            ));
+        }
+        Ok(())
     }
 
     fn mark_pending(&self, root_key: &str) -> bool {
@@ -927,7 +1003,7 @@ fn default_index_dir() -> PathBuf {
         .or_else(dirs::data_dir)
         .unwrap_or_else(std::env::temp_dir)
         .join("Kite")
-        .join("name-index-v2")
+        .join("name-index-v3")
 }
 
 fn open_or_create_index(index_dir: &Path) -> Result<(Index, NameFields), String> {
@@ -950,6 +1026,9 @@ fn name_schema() -> Schema {
     builder.add_text_field("path_key", STRING);
     builder.add_text_field("root_key", STRING);
     builder.add_text_field("name_key", STRING);
+    builder.add_u64_field("is_dir", INDEXED);
+    builder.add_i64_field("modified_ms", INDEXED);
+    builder.add_text_field("extension_key", STRING);
     builder.add_text_field("path", STORED);
     builder.build()
 }
@@ -961,6 +1040,9 @@ impl NameFields {
             path: required_field(schema, "path")?,
             root_key: required_field(schema, "root_key")?,
             name_key: required_field(schema, "name_key")?,
+            is_dir: required_field(schema, "is_dir")?,
+            modified_ms: required_field(schema, "modified_ms")?,
+            extension_key: required_field(schema, "extension_key")?,
         })
     }
 }
@@ -1167,7 +1249,7 @@ fn index_root(
         if name.starts_with('.') {
             continue;
         }
-        if index_entry(writer, schema, path, root_key, Some(file_type))? {
+        if index_entry(writer, schema, path, root_key)? {
             dirty += 1;
             indexed_entries += 1;
         }
@@ -1194,15 +1276,12 @@ fn index_entry(
     schema: &NameFields,
     path: &Path,
     root_key: &str,
-    file_type: Option<fs::FileType>,
 ) -> Result<bool, String> {
-    let file_type = match file_type {
-        Some(file_type) => file_type,
-        None => match fs::symlink_metadata(path) {
-            Ok(metadata) => metadata.file_type(),
-            Err(_) => return Ok(false),
-        },
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(false),
     };
+    let file_type = metadata.file_type();
     if file_type.is_symlink() {
         return Ok(false);
     }
@@ -1212,11 +1291,24 @@ fn index_entry(
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| path_text.clone());
     let key = path_key(path);
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let modified_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_millis() as i64)
+        .unwrap_or_default();
     let mut document = TantivyDocument::default();
     document.add_text(schema.path_key, &key);
     document.add_text(schema.path, &path_text);
     document.add_text(schema.root_key, root_key);
     document.add_text(schema.name_key, name.to_lowercase());
+    document.add_u64(schema.is_dir, u64::from(file_type.is_dir()));
+    document.add_i64(schema.modified_ms, modified_ms);
+    document.add_text(schema.extension_key, extension);
     writer
         .add_document(document)
         .map_err(|error| format!("无法写入名称索引：{error}"))?;
@@ -1268,7 +1360,7 @@ fn update_path(
     }
     if path.is_dir() {
         delete_path_prefix(writer, reader, schema, path)?;
-        index_entry(writer, schema, path, &root_key, None)?;
+        index_entry(writer, schema, path, &root_key)?;
         let mut builder = WalkBuilder::new(path);
         builder
             .standard_filters(false)
@@ -1287,12 +1379,12 @@ fn update_path(
                 && entry.depth() > 0
                 && !entry.file_name().to_string_lossy().starts_with('.')
             {
-                let _ = index_entry(writer, schema, entry.path(), &root_key, entry.file_type())?;
+                let _ = index_entry(writer, schema, entry.path(), &root_key)?;
             }
         }
     } else if path.is_file() {
         writer.delete_term(Term::from_field_text(schema.path_key, &path_key(path)));
-        index_entry(writer, schema, path, &root_key, None)?;
+        index_entry(writer, schema, path, &root_key)?;
     }
     writer
         .commit()
@@ -1719,7 +1811,7 @@ mod tests {
     fn does_not_index_its_own_index_directory() {
         let root = test_root("self");
         fs::create_dir_all(&root).expect("create self-index fixture");
-        let index_dir = root.join("name-index-v2");
+        let index_dir = root.join("name-index-v3");
         let service =
             NameIndexService::open_for_testing(index_dir.clone()).expect("open self index");
         service.ensure_roots(std::slice::from_ref(&root));
@@ -1810,6 +1902,50 @@ mod tests {
                 next_usn: 100,
             })
         );
+        remove_dir_with_retry(&index_dir);
+    }
+
+    #[test]
+    fn applies_name_filters_before_result_limit() {
+        let root = test_root("filters");
+        fs::create_dir_all(&root).expect("create filter root");
+        for index in 0..1002 {
+            fs::write(root.join(format!("kitefilter-{index:04}.txt")), b"fixture")
+                .expect("write txt fixture");
+        }
+        fs::write(root.join("kitefilter-main.rs"), b"fixture").expect("write rs fixture");
+        let old_path = root.join("kitefilter-old.rs");
+        fs::write(&old_path, b"fixture").expect("write old fixture");
+        let old_time = SystemTime::now() - Duration::from_secs(40 * 24 * 60 * 60);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&old_path)
+            .expect("open old fixture");
+        file.set_times(fs::FileTimes::new().set_modified(old_time))
+            .expect("set old modified time");
+        let index_dir = test_root("filters-index");
+        let service =
+            NameIndexService::open_for_testing(index_dir.clone()).expect("open filter index");
+        service.ensure_roots(std::slice::from_ref(&root));
+        wait_ready(&service, &root);
+        let cancel = AtomicBool::new(false);
+        let snapshot = service
+            .search_with_filters(
+                std::slice::from_ref(&root),
+                "kitefilter",
+                SearchFilters {
+                    kind: SearchKindFilter::SourceCode,
+                    modified: SearchTimeFilter::Last7Days,
+                },
+                &cancel,
+            )
+            .expect("filtered search")
+            .expect("covered filter root");
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].name, "kitefilter-main.rs");
+        assert!(!snapshot.truncated);
+        drop(service);
+        fs::remove_dir_all(root).expect("clean filter root");
         remove_dir_with_retry(&index_dir);
     }
 }

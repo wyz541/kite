@@ -13,6 +13,8 @@ use ignore::{WalkBuilder, WalkState};
 use serde::{Deserialize, Serialize};
 use thread_priority::{ThreadPriority, get_current_thread_priority, set_current_thread_priority};
 
+use crate::search_filters::SearchFilters;
+
 pub const SEARCH_RESULT_LIMIT: usize = 1_000;
 
 const DIRECTORY_SEARCH_THREADS: usize = 2;
@@ -286,12 +288,29 @@ pub fn search_directory(
     sort: SortSpec,
     cancel: &AtomicBool,
 ) -> Result<Option<SearchSnapshot>, String> {
-    search_directory_inner(root, query, sort, cancel, false, DIRECTORY_SEARCH_THREADS)
+    search_directory_inner(
+        root,
+        query,
+        sort,
+        SearchFilters::default(),
+        cancel,
+        false,
+        DIRECTORY_SEARCH_THREADS,
+    )
 }
 
 pub fn search_global_names(
     roots: &[PathBuf],
     query: &str,
+    cancel: &AtomicBool,
+) -> Result<Option<GlobalNameSearchSnapshot>, String> {
+    search_global_names_with_filters(roots, query, SearchFilters::default(), cancel)
+}
+
+pub fn search_global_names_with_filters(
+    roots: &[PathBuf],
+    query: &str,
+    filters: SearchFilters,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
     #[cfg(test)]
@@ -319,6 +338,7 @@ pub fn search_global_names(
                             root,
                             query,
                             SortSpec::default(),
+                            filters,
                             cancel,
                             true,
                             GLOBAL_NAME_SEARCH_THREADS,
@@ -368,6 +388,7 @@ fn search_directory_inner(
     root: &Path,
     query: &str,
     sort: SortSpec,
+    filters: SearchFilters,
     cancel: &AtomicBool,
     prune_generated: bool,
     threads: usize,
@@ -400,7 +421,8 @@ fn search_directory_inner(
     if threads <= 1 {
         let _priority_guard = LowPriorityGuard::new();
         for result in builder.build() {
-            let state = handle_search_entry(result, &query_lower, &entries, &truncated, cancel);
+            let state =
+                handle_search_entry(result, &query_lower, filters, &entries, &truncated, cancel);
             if matches!(state, WalkState::Quit) {
                 break;
             }
@@ -411,7 +433,7 @@ fn search_directory_inner(
             let truncated = Arc::clone(&truncated);
             let query_lower = query_lower.clone();
             Box::new(move |result| {
-                handle_search_entry(result, &query_lower, &entries, &truncated, cancel)
+                handle_search_entry(result, &query_lower, filters, &entries, &truncated, cancel)
             })
         });
     }
@@ -437,6 +459,7 @@ fn search_directory_inner(
 fn handle_search_entry(
     result: Result<ignore::DirEntry, ignore::Error>,
     query_lower: &str,
+    filters: SearchFilters,
     entries: &Mutex<Vec<FileEntry>>,
     truncated: &AtomicBool,
     cancel: &AtomicBool,
@@ -476,6 +499,9 @@ fn handle_search_entry(
         } else {
             WalkState::Continue
         };
+    }
+    if !filters.matches(item.path(), is_dir, metadata.modified().ok()) {
+        return WalkState::Continue;
     }
 
     let Ok(mut entries) = entries.lock() else {
@@ -565,7 +591,9 @@ pub(crate) fn is_generated_search_directory(path: &Path) -> bool {
             | "dist"
             | ".cache"
             | "name-index-v2"
+            | "name-index-v3"
             | "search-index-v1"
+            | "search-index-v2"
     )
 }
 
