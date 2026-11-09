@@ -37,6 +37,22 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $resolvedStaging -Force
     Copy-Item -LiteralPath (Join-Path $root 'assets\kite-icon-master.png') -Destination (Join-Path $resolvedStaging 'icons') -Force
 
+    $kensakuCli = $env:KENSAKU_CLI_PATH
+    if ([string]::IsNullOrWhiteSpace($kensakuCli)) {
+        $vendorKensakuCli = Join-Path $root 'vendor\kensaku\kensaku-cli.exe'
+        if (Test-Path -LiteralPath $vendorKensakuCli) {
+            $kensakuCli = $vendorKensakuCli
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($kensakuCli)) {
+        if (-not (Test-Path -LiteralPath $kensakuCli)) {
+            throw "Kensaku CLI not found: $kensakuCli"
+        }
+        Copy-Item -LiteralPath $kensakuCli -Destination (Join-Path $resolvedStaging 'kensaku-cli.exe') -Force
+        Copy-Item -LiteralPath (Join-Path $root 'docs\search\kensaku-backend.md') -Destination $resolvedStaging -Force
+        Copy-Item -LiteralPath (Join-Path $root 'docs\search\KENSAKU_LICENSE') -Destination $resolvedStaging -Force
+    }
+
     if (Test-Path -LiteralPath $archive) {
         [IO.File]::Delete($archive)
     }
