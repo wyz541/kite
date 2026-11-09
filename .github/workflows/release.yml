@@ -83,7 +83,7 @@ jobs:
           mkdir -p dist
           archive="dist/Kite-${TAG}-macOS-arm64.zip"
           ditto -c -k --sequesterRsrc --keepParent apps/macos/build/Kite.app "$archive"
-          shasum -a 256 "$archive" > dist/SHA256SUMS-macos.txt
+          (cd dist && shasum -a 256 "$(basename "$archive")") > dist/SHA256SUMS-macos.txt
 
       - name: Upload macOS release assets
         uses: actions/upload-artifact@v4
@@ -134,6 +134,7 @@ jobs:
         run: |
           cat release-assets/SHA256SUMS.txt release-assets/SHA256SUMS-macos.txt > release-assets/combined-SHA256SUMS.txt
           mv release-assets/combined-SHA256SUMS.txt release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum -c SHA256SUMS.txt)
           notes="docs/RELEASE_NOTES_${TAG}.md"
           test -f "$notes"
           echo "RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
