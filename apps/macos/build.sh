@@ -64,6 +64,14 @@ xcrun swiftc \
 cp "$ROOT/apps/macos/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/assets/kite.icns" "$CONTENTS/Resources/AppIcon.icns"
 cp "$TARGET_DIR/libkite_core.dylib" "$CONTENTS/Frameworks/"
+
+KENSAKU_CLI="${KENSAKU_CLI_PATH:-$ROOT/vendor/kensaku/kensaku-cli}"
+if [[ -f "$KENSAKU_CLI" ]]; then
+    cp "$KENSAKU_CLI" "$CONTENTS/MacOS/kensaku-cli"
+    chmod +x "$CONTENTS/MacOS/kensaku-cli"
+    cp "$ROOT/docs/search/kensaku-backend.md" "$CONTENTS/Resources/Kensaku-backend.md"
+    cp "$ROOT/docs/search/KENSAKU_LICENSE" "$CONTENTS/Resources/KENSAKU_LICENSE"
+fi
 install_name_tool -id @rpath/libkite_core.dylib "$CONTENTS/Frameworks/libkite_core.dylib"
 
 CORE_LINK="$(otool -L "$CONTENTS/MacOS/Kite" | awk '/libkite_core\.dylib/ { print $1; exit }')"

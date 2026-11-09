@@ -9,6 +9,7 @@ on:
       - "src/content_search.rs"
       - "src/fs.rs"
       - "src/global_name_search.rs"
+      - "src/kensaku_search.rs"
       - "src/name_index.rs"
       - "src/search_filters.rs"
       - "src/session.rs"

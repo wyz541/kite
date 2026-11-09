@@ -4,9 +4,12 @@ use std::sync::atomic::AtomicBool;
 
 use crate::fs::{GlobalNameSearchSnapshot, SEARCH_RESULT_LIMIT, sort_global_name_entries};
 use crate::search_filters::SearchFilters;
-use crate::{fs, indexed_search, name_index};
+use crate::{fs, indexed_search, kensaku_search, name_index};
 
 pub fn ensure_roots(roots: &[PathBuf]) {
+    if kensaku_search::prepare_names(roots) {
+        return;
+    }
     if let Ok(service) = name_index::shared_service() {
         service.ensure_roots(roots);
     }
@@ -42,6 +45,15 @@ fn search_names_with_service(
     if query.is_empty() {
         return Ok(None);
     }
+    let kensaku = kensaku_search::search_names(roots, query, filters, cancel)
+        .ok()
+        .flatten();
+    if let Some(snapshot) = kensaku.as_ref()
+        && !snapshot.partial
+    {
+        return Ok(Some(snapshot.clone()));
+    }
+
     let indexed = service.and_then(|service| {
         service
             .search_with_filters(roots, query, filters, cancel)
@@ -62,11 +74,15 @@ fn search_names_with_service(
         return Ok(None);
     };
     let mut truncated = walked.truncated
+        || kensaku.as_ref().is_some_and(|snapshot| snapshot.truncated)
         || indexed.as_ref().is_some_and(|snapshot| snapshot.truncated)
         || accelerated
             .as_ref()
             .is_some_and(|snapshot| snapshot.truncated);
     let mut entries = Vec::new();
+    if let Some(snapshot) = kensaku {
+        entries.extend(snapshot.entries);
+    }
     if let Some(snapshot) = indexed {
         entries.extend(snapshot.entries);
     }

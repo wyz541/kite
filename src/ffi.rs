@@ -10,6 +10,7 @@ use crate::content_search::{self, ContentFileMatch, ContentLineMatch, ContentSea
 use crate::devices::{self, PortableDevice, StorageVolume, VolumeKind};
 use crate::favorites::{self as favorites_store, FavoriteEntryDto};
 use crate::fs::{EntryKind, FileEntry, SortSpec, VcsStatus, load_directory, transfer_entry};
+use crate::kensaku_search;
 use crate::platform::{HostPlatform, default_root_path, host_platform};
 use crate::session::{self as session_store, SessionStateDto};
 use crate::text_editor::{self, TextDocument, TextLineEnding};
@@ -372,8 +373,11 @@ impl KiteCore {
     }
 
     pub fn prepare_content_search(&self, roots: Vec<String>) -> Result<(), KiteError> {
-        let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        if kensaku_search::prepare_content(&roots) {
+            return Ok(());
+        }
+        let service = content_search::shared_service().map_err(KiteError::operation)?;
         service
             .ensure_roots(&roots)
             .map(|_| ())
@@ -381,6 +385,13 @@ impl KiteCore {
     }
 
     pub fn content_search_status(&self) -> ContentIndexStatusDto {
+        if let Some(status) = kensaku_search::content_status() {
+            return ContentIndexStatusDto {
+                state: status.state.as_str().to_string(),
+                indexed_files: status.indexed_files,
+                message: None,
+            };
+        }
         match content_search::shared_service() {
             Ok(service) => {
                 let status = service.status();
@@ -399,19 +410,27 @@ impl KiteCore {
     }
 
     pub fn note_content_search_interaction(&self) {
+        if kensaku_search::content_status().is_some() {
+            return;
+        }
         if let Ok(service) = content_search::shared_service() {
             service.note_interaction();
         }
     }
 
     pub fn set_content_search_paused(&self, paused: bool) {
+        if kensaku_search::content_status().is_some() {
+            return;
+        }
         if let Ok(service) = content_search::shared_service() {
             service.set_indexing_paused(paused);
         }
     }
 
     pub fn cancel_content_search(&self) {
-        if let Ok(service) = content_search::shared_service() {
+        let kensaku_active = kensaku_search::content_status().is_some();
+        kensaku_search::cancel_content_search();
+        if !kensaku_active && let Ok(service) = content_search::shared_service() {
             service.cancel_search();
         }
     }
@@ -431,10 +450,22 @@ impl KiteCore {
         max_files: u32,
         filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<ContentSearchResultDto>, KiteError> {
-        let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        let max_files = max_files.max(1) as usize;
+        if let Some(snapshot) =
+            kensaku_search::search_content(&roots, &query, regex, max_files, filters)
+                .ok()
+                .flatten()
+        {
+            return Ok(Some(content_search_result_dto(snapshot)));
+        }
+        if kensaku_search::content_search_cancelled() {
+            return Ok(None);
+        }
+        let service = content_search::shared_service().map_err(KiteError::operation)?;
+        service.ensure_roots(&roots).map_err(KiteError::operation)?;
         service
-            .search_with_filters(&roots, &query, regex, max_files.max(1) as usize, filters)
+            .search_with_filters(&roots, &query, regex, max_files, filters)
             .map(|snapshot| snapshot.map(content_search_result_dto))
             .map_err(KiteError::operation)
     }
