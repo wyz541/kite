@@ -8,6 +8,7 @@
 当前复现检查：[v0.6.61 双次运行](reproducibility-v0.6.61.md)。
 当前 macOS 启动基线：[v0.6.61 启动与首内容](startup-macos-v0.6.61.md)。
 当前跨平台启动 CI 基线：[v0.6.61 Windows 与 macOS](startup-ci-v0.6.61.md)。
+首个已验证优化：[目录读取，p95 下降 16.2% 到 19.2%](improvement-directory-loading-v0.6.62.md)。
 
 ## 1. 目标
 
