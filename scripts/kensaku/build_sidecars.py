@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build pinned Kensaku CLI and daemon sidecars for Kite."""
+"""Build pinned Kensaku CLI, daemon, and ONNX Runtime sidecars for Kite."""
 
 from __future__ import annotations
 
@@ -12,11 +12,22 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 COMMIT = "919775155b24794f88171a3e29fa44e029d00536"
 RELEASE = "v1.0.16"
 SOURCE_URL = f"https://codeload.github.com/yjid/kensaku/tar.gz/{COMMIT}"
+ONNX_VERSION = "1.31.0"
+ONNX_DOWNLOAD_PREFIX = (
+    f"https://github.com/microsoft/onnxruntime/releases/download/v{ONNX_VERSION}/"
+)
+ONNX_LICENSE_URL = (
+    f"https://raw.githubusercontent.com/microsoft/onnxruntime/v{ONNX_VERSION}/LICENSE"
+)
+ONNX_NOTICES_URL = (
+    f"https://raw.githubusercontent.com/microsoft/onnxruntime/v{ONNX_VERSION}/ThirdPartyNotices.txt"
+)
 CLI_ASSETS = {
     "windows-x86_64": (
         "kensaku-cli-windows-x86_64.exe",
@@ -29,6 +40,26 @@ CLI_ASSETS = {
     "macos-aarch64": (
         "kensaku-cli-macos-aarch64",
         "3cf5c248dbe8268d32995cc755dd123292442ed738e95fdbc83e41744bc4738b",
+    ),
+}
+ONNX_ASSETS = {
+    "windows-x86_64": (
+        "onnxruntime-win-x64-1.31.0.zip",
+        "3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
+        "onnxruntime-win-x64-1.31.0/lib/onnxruntime.dll",
+        "onnxruntime.dll",
+    ),
+    "linux-x86_64": (
+        "onnxruntime-linux-x64-1.31.0.tgz",
+        "cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57",
+        "onnxruntime-linux-x64-1.31.0/lib/libonnxruntime.so.1.31.0",
+        "libonnxruntime.so",
+    ),
+    "macos-aarch64": (
+        "onnxruntime-osx-arm64-1.31.0.tgz",
+        "1031b36dd3bdaa8d976a6130d9cf2a05e9be320b93ae804f8427b91dc3432afc",
+        "onnxruntime-osx-arm64-1.31.0/lib/libonnxruntime.1.31.0.dylib",
+        "libonnxruntime.dylib",
     ),
 }
 
@@ -44,7 +75,7 @@ def sha256(path: Path) -> str:
 def download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(url, headers={"User-Agent": "Kite-Kensaku-Builder"})
-    with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as output:
+    with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as output:
         shutil.copyfileobj(response, output)
 
 
@@ -71,6 +102,22 @@ def extract_source(archive: Path, destination: Path) -> Path:
     return roots[0]
 
 
+def extract_archive_member(archive: Path, member_name: str, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if archive.suffix.lower() == ".zip":
+        with zipfile.ZipFile(archive) as source, source.open(member_name) as input_stream:
+            with destination.open("wb") as output:
+                shutil.copyfileobj(input_stream, output)
+        return
+    with tarfile.open(archive, "r:gz") as source:
+        member = source.getmember(member_name)
+        input_stream = source.extractfile(member)
+        if input_stream is None:
+            raise RuntimeError(f"archive member is not a file: {member_name}")
+        with destination.open("wb") as output:
+            shutil.copyfileobj(input_stream, output)
+
+
 def target_key() -> str:
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -81,6 +128,68 @@ def target_key() -> str:
     if system == "linux" and machine in {"amd64", "x86_64"}:
         return "linux-x86_64"
     raise RuntimeError(f"unsupported sidecar platform: {system}/{machine}")
+
+
+def find_mt() -> Path:
+    executable = shutil.which("mt.exe")
+    if executable:
+        return Path(executable)
+    for variable in ("ProgramFiles(x86)", "ProgramFiles"):
+        root = os.environ.get(variable)
+        if not root:
+            continue
+        bin_root = Path(root) / "Windows Kits" / "10" / "bin"
+        if bin_root.is_dir():
+            candidates = sorted(bin_root.glob("*/x64/mt.exe"), reverse=True)
+            if candidates:
+                return candidates[0]
+    raise RuntimeError("Windows SDK mt.exe was not found")
+
+
+def embed_windows_manifest(daemon: Path) -> None:
+    manifest = Path(__file__).with_name("kensaku-daemon.manifest").resolve()
+    if not manifest.is_file():
+        raise RuntimeError(f"Windows daemon manifest is missing: {manifest}")
+    subprocess.run(
+        [
+            str(find_mt()),
+            "-nologo",
+            "-manifest",
+            str(manifest),
+            f"-outputresource:{daemon};#1",
+        ],
+        check=True,
+    )
+
+
+def stage_onnx_runtime(key: str, work: Path, output: Path) -> Path:
+    archive_name, expected, member, output_name = ONNX_ASSETS[key]
+    archive = work / archive_name
+    if not archive.is_file() or sha256(archive) != expected:
+        url = f"{ONNX_DOWNLOAD_PREFIX}{archive_name}"
+        print(f"download {url}", flush=True)
+        download(url, archive)
+    actual = sha256(archive)
+    if actual != expected:
+        raise RuntimeError(f"ONNX Runtime SHA-256 mismatch: expected {expected}, actual {actual}")
+    runtime = output / output_name
+    extract_archive_member(archive, member, runtime)
+    if not runtime.is_file() or runtime.stat().st_size == 0:
+        raise RuntimeError("ONNX Runtime library was not extracted")
+    license_path = work / "onnxruntime-LICENSE"
+    notices_path = work / "onnxruntime-ThirdPartyNotices.txt"
+    if not license_path.is_file():
+        download(ONNX_LICENSE_URL, license_path)
+    if not notices_path.is_file():
+        download(ONNX_NOTICES_URL, notices_path)
+    combined = (
+        "===== ONNX Runtime LICENSE =====\n"
+        + license_path.read_text(encoding="utf-8")
+        + "\n\n===== ONNX Runtime ThirdPartyNotices.txt =====\n"
+        + notices_path.read_text(encoding="utf-8")
+    )
+    (output / "ONNXRUNTIME_LICENSE").write_text(combined, encoding="utf-8")
+    return runtime
 
 
 def main() -> int:
@@ -134,11 +243,15 @@ def main() -> int:
         raise RuntimeError(f"Kensaku daemon was not built: {built}")
     destination = output / daemon_name
     shutil.copy2(built, destination)
+    if key == "windows-x86_64":
+        embed_windows_manifest(destination)
     if os.name != "nt":
         destination.chmod(0o755)
+    runtime = stage_onnx_runtime(key, work, output)
     shutil.copy2(source / "LICENSE", output / "KENSAKU_LICENSE")
     print(f"CLI: {cli_path}", flush=True)
     print(f"daemon: {destination}", flush=True)
+    print(f"onnxruntime: {runtime}", flush=True)
     return 0
 
 

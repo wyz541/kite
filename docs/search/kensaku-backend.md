@@ -57,7 +57,7 @@ Daemon：
 3. `PATH`
 
 Windows `v0.6.65` 及更高版本发现 sidecar 缺失时，Kite 自动下载当前稳定 Release ZIP。
-Kite 校验 ZIP 的 SHA-256 后安装 `kensaku-cli.exe` 和 `kensaku-daemon.exe`。
+Kite 校验 ZIP 的 SHA-256 后安装 `kensaku-cli.exe`、`kensaku-daemon.exe` 和 `onnxruntime.dll`。
 
 ## 4. 构建 Sidecar
 
@@ -73,7 +73,9 @@ python scripts/kensaku/build_sidecars.py
 2. 校验 CLI SHA-256。
 3. 下载固定提交 `9197751` 的 Kensaku 源码。
 4. 构建 `kensaku-daemon`。
-5. 把 sidecar 写入 `vendor/kensaku`。
+5. 在 Windows daemon 中嵌入 Common Controls v6 manifest。
+6. 下载并校验 ONNX Runtime 1.31.0。
+7. 把 sidecar 和运行时写入 `vendor/kensaku`。
 
 Windows 发布构建默认执行该脚本。使用 `-SkipKensaku` 可跳过 sidecar 构建。
 
