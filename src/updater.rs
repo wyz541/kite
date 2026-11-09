@@ -528,7 +528,8 @@ pub fn repair_windows_sidecars() -> Result<(), String> {
 fn install_sidecars_from_zip(package: &Path, target_directory: &Path) -> Result<(), String> {
     use zip::ZipArchive;
 
-    const REQUIRED_SIDECARS: [&str; 2] = ["kensaku-cli.exe", "kensaku-daemon.exe"];
+    const REQUIRED_SIDECARS: [&str; 3] =
+        ["kensaku-cli.exe", "kensaku-daemon.exe", "onnxruntime.dll"];
     let suffix = format!(
         "{}-{}",
         std::process::id(),
@@ -757,7 +758,9 @@ $oldTarget = "$Target.old"
 $sidecarNames = @(
     'kensaku-cli.exe',
     'kensaku-daemon.exe',
+    'onnxruntime.dll',
     'KENSAKU_LICENSE',
+    'ONNXRUNTIME_LICENSE',
     'kensaku-backend.md'
 )
 $managedNames = @((@($targetName) + $sidecarNames) | Select-Object -Unique)
@@ -848,7 +851,7 @@ try {
     }
     New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
     Expand-Archive -LiteralPath $Source -DestinationPath $stagingDirectory -Force
-    foreach ($name in @('Kite.exe', 'kensaku-cli.exe', 'kensaku-daemon.exe')) {
+    foreach ($name in @('Kite.exe', 'kensaku-cli.exe', 'kensaku-daemon.exe', 'onnxruntime.dll')) {
         $sourcePath = Join-Path $stagingDirectory $name
         if (-not (Test-Path -LiteralPath $sourcePath)) {
             throw "更新包缺少文件：$name"
@@ -1041,12 +1044,13 @@ mod tests {
         assert!(helper.contains("Expand-Archive"));
         assert!(helper.contains("kensaku-cli.exe"));
         assert!(helper.contains("kensaku-daemon.exe"));
+        assert!(helper.contains("onnxruntime.dll"));
         assert!(helper.contains("Join-Path $targetDirectory $name"));
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_sidecar_package_installs_both_sidecars() {
+    fn windows_sidecar_package_installs_required_files() {
         use std::io::Write as _;
         use zip::write::SimpleFileOptions;
 
@@ -1075,6 +1079,12 @@ mod tests {
         writer
             .write_all(b"new-daemon")
             .expect("write daemon sidecar entry");
+        writer
+            .start_file("onnxruntime.dll", options)
+            .expect("start ONNX Runtime entry");
+        writer
+            .write_all(b"new-onnx")
+            .expect("write ONNX Runtime entry");
         writer.finish().expect("finish sidecar test zip");
         fs::write(directory.join("kensaku-cli.exe"), b"old-cli").expect("write old CLI sidecar");
 
@@ -1083,8 +1093,11 @@ mod tests {
         let cli = fs::read(directory.join("kensaku-cli.exe")).expect("read installed CLI sidecar");
         let daemon =
             fs::read(directory.join("kensaku-daemon.exe")).expect("read installed daemon sidecar");
+        let onnx =
+            fs::read(directory.join("onnxruntime.dll")).expect("read installed ONNX Runtime");
         assert_eq!(cli, b"new-cli");
         assert_eq!(daemon, b"new-daemon");
+        assert_eq!(onnx, b"new-onnx");
         let _ = fs::remove_dir_all(&directory);
     }
 

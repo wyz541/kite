@@ -85,7 +85,7 @@ Release 标签允许带 `v` 前缀。
 ### Windows x64
 
 Windows 使用 `Kite-vX.Y.Z-windows-x64.zip`。
-ZIP 包含 `Kite.exe`、`kensaku-cli.exe` 和 `kensaku-daemon.exe`。
+ZIP 包含 `Kite.exe`、`kensaku-cli.exe`、`kensaku-daemon.exe` 和 `onnxruntime.dll`。
 Windows 更新目标为当前运行 EXE 所在目录。
 独立 `Kite.exe` 只用于旧版更新器兼容迁移。
 
@@ -121,19 +121,19 @@ Windows Core 在下载前检查当前 EXE 文件及所在目录是否可写。
 助手结束同目录的 Kensaku 进程。
 助手校验更新 ZIP 的 SHA-256。
 助手把 ZIP 解压到独立临时目录。
-助手确认 ZIP 包含 Kite EXE 和两个 Kensaku sidecar。
+助手确认 ZIP 包含 Kite EXE、两个 Kensaku sidecar 和 ONNX Runtime。
 助手备份当前受管文件。
 助手把当前 EXE 移动为 `Kite.exe.old`。
 移动失败时，助手重试。
 此操作兼容 Windows 加载器的共享删除权限。
-助手安装新 EXE、`kensaku-cli.exe` 和 `kensaku-daemon.exe`。
+助手安装新 EXE、`kensaku-cli.exe`、`kensaku-daemon.exe` 和 `onnxruntime.dll`。
 助手启动新 EXE。
 启动成功后，助手删除备份。
 任一阶段失败时，助手恢复受管文件并启动旧 EXE。
 日志位于 `%LOCALAPPDATA%\Kite\updates\update.log`。
 
 Windows 首次发现 sidecar 缺失时，Core 自动下载当前稳定 Release ZIP。
-Core 校验 ZIP SHA-256 后只解压两个 sidecar。
+Core 校验 ZIP SHA-256 后解压两个 sidecar 和 ONNX Runtime。
 Core 用临时文件替换目标 sidecar。
 
 ## macOS 安装

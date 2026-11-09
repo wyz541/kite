@@ -62,13 +62,21 @@ try {
         } else {
             Join-Path $root 'vendor\kensaku\kensaku-daemon.exe'
         }
-        foreach ($path in @($kensakuCli, $kensakuDaemon)) {
+        $kensakuRuntime = if ($env:KENSAKU_ONNXRUNTIME_PATH) {
+            $env:KENSAKU_ONNXRUNTIME_PATH
+        } else {
+            Join-Path $root 'vendor\kensaku\onnxruntime.dll'
+        }
+        $kensakuRuntimeLicense = Join-Path $root 'vendor\kensaku\ONNXRUNTIME_LICENSE'
+        foreach ($path in @($kensakuCli, $kensakuDaemon, $kensakuRuntime, $kensakuRuntimeLicense)) {
             if (-not (Test-Path -LiteralPath $path)) {
                 throw "Kensaku sidecar not found: $path"
             }
         }
         Copy-Item -LiteralPath $kensakuCli -Destination (Join-Path $resolvedStaging 'kensaku-cli.exe') -Force
         Copy-Item -LiteralPath $kensakuDaemon -Destination (Join-Path $resolvedStaging 'kensaku-daemon.exe') -Force
+        Copy-Item -LiteralPath $kensakuRuntime -Destination (Join-Path $resolvedStaging 'onnxruntime.dll') -Force
+        Copy-Item -LiteralPath $kensakuRuntimeLicense -Destination (Join-Path $resolvedStaging 'ONNXRUNTIME_LICENSE') -Force
         Copy-Item -LiteralPath (Join-Path $root 'docs\search\kensaku-backend.md') -Destination $resolvedStaging -Force
         Copy-Item -LiteralPath (Join-Path $root 'docs\search\KENSAKU_LICENSE') -Destination $resolvedStaging -Force
     }
@@ -86,7 +94,7 @@ try {
     finally {
         $zipArchive.Dispose()
     }
-    foreach ($requiredEntry in @('Kite.exe', 'kensaku-cli.exe', 'kensaku-daemon.exe')) {
+    foreach ($requiredEntry in @('Kite.exe', 'kensaku-cli.exe', 'kensaku-daemon.exe', 'onnxruntime.dll', 'KENSAKU_LICENSE', 'ONNXRUNTIME_LICENSE')) {
         if ($zipEntries -notcontains $requiredEntry) {
             throw "Release ZIP is missing $requiredEntry"
         }
