@@ -85,8 +85,8 @@ cargo run --locked --release --features performance --bin kite-perf -- \
 | 页签与会话 | 20 页签保存和恢复 | 页签打开、切换、关闭和渲染 |
 | 目录监听 | Windows 监听创建延迟 | macOS 监听、刷新应用、丢帧 |
 | 分栏搜索 | 递归名称搜索 | 搜索框反馈和丢帧 |
-| 全局名称搜索 | 单根遍历、多根遍历、排序、持久化索引冷建、热查询、增量更新 | 原生结果窗口渲染 |
-| 全局内容搜索 | 冷索引、热查询、增量更新 | 原生结果卡片渲染 |
+| 全局名称搜索 | Kensaku sidecar 查询转换与过滤 | sidecar 打包后需增加冷建、热查询和增量更新基准 |
+| 全局内容搜索 | Kensaku sidecar 查询转换 | sidecar 打包后需增加内容索引和 OCR 基准 |
 | 预览和编辑 | 1 MiB、8 MiB 文本读取；100 MiB 拒绝 | 图片、Markdown、代码、滚动和大日志 |
 | 文件操作 | 创建、重命名、复制、移动、大文件复制 | 回收站、剪贴板、进度和丢帧 |
 | 压缩 | ZIP 和 TAR.GZ 压缩、解压 | 原生进度和丢帧 |
@@ -95,8 +95,6 @@ cargo run --locked --release --features performance --bin kite-perf -- \
 | 更新 | SHA-256 校验 | GitHub API、下载、安装和重启 |
 
 缺口会写入 JSON 的 `coverage` 和 `results`。缺口不等于通过。
-
-索引场景使用固定合成树。冷建样本创建独立 Tantivy 索引。热查询不遍历根目录。增量更新样本写入唯一文件名，并等待监听器刷新索引。
 
 
 ## 6. 原生 UI 手工流程

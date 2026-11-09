@@ -1,5 +1,7 @@
 # Rust 搜索引擎调研
 
+> 历史说明：本文件记录引入 Kensaku 前的调研。当前全局名称和内容搜索完全使用 Kensaku daemon。当前架构见 [全局名称与内容搜索](architecture/content-search.md)。
+
 ## 结论
 
 Kite 的全局文件名搜索采用持久化 Tantivy 名称索引。

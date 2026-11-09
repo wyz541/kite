@@ -1,15 +1,18 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use atomicwrites::{AllowOverwrite, AtomicFile};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::content_search::{
     ContentFileMatch, ContentIndexState, ContentLineMatch, ContentSearchSnapshot,
@@ -28,10 +31,14 @@ const NAME_CANDIDATE_LIMIT: usize = 5_000;
 const CONTENT_CANDIDATE_MULTIPLIER: usize = 8;
 const CONTENT_CANDIDATE_LIMIT: usize = 400;
 const SNIPPET_SCAN_BYTES: u64 = 8 * 1024 * 1024;
+const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(3);
 
 static CLI_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+static DAEMON_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static STATE_CACHE: OnceLock<Mutex<Option<CachedState>>> = OnceLock::new();
 static CONTENT_CANCEL: OnceLock<AtomicBool> = OnceLock::new();
+static DAEMON_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static DAEMON_CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 
 #[derive(Clone, Debug, Deserialize)]
 struct KensakuIndexState {
@@ -79,18 +86,19 @@ struct KensakuSearchItem {
     modified: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KensakuContentStatus {
     pub state: ContentIndexState,
     pub indexed_files: u64,
+    pub message: Option<String>,
 }
 
-pub fn prepare_names(roots: &[PathBuf]) -> bool {
-    roots_are_covered(roots)
+pub fn prepare_names(roots: &[PathBuf]) -> Result<(), String> {
+    ensure_daemon(roots)
 }
 
-pub fn prepare_content(roots: &[PathBuf]) -> bool {
-    roots_are_covered(roots)
+pub fn prepare_content(roots: &[PathBuf]) -> Result<(), String> {
+    ensure_daemon(roots)
 }
 
 pub fn content_status() -> Option<KensakuContentStatus> {
@@ -106,6 +114,16 @@ pub fn content_status() -> Option<KensakuContentStatus> {
     Some(KensakuContentStatus {
         state,
         indexed_files: state_indexed_files(&index_state),
+        message: if index_state.is_indexing {
+            Some(format!(
+                "Kensaku 正在建立索引：{} 项",
+                state_indexed_files(&index_state)
+            ))
+        } else if index_state.phase == "error" {
+            Some("Kensaku 索引处于错误状态".to_string())
+        } else {
+            None
+        },
     })
 }
 
@@ -309,18 +327,232 @@ fn content_cancel() -> &'static AtomicBool {
     CONTENT_CANCEL.get_or_init(|| AtomicBool::new(false))
 }
 
-fn roots_are_covered(roots: &[PathBuf]) -> bool {
+fn ensure_daemon(roots: &[PathBuf]) -> Result<(), String> {
     let roots = normalize_roots(roots);
     if roots.is_empty() {
-        return false;
+        return Err("没有可用的 Kensaku 搜索根目录".to_string());
     }
-    let Some(cli) = cli_path() else {
+    let _cli = cli_path().ok_or_else(|| "找不到 kensaku-cli".to_string())?;
+    let daemon = daemon_path()
+        .ok_or_else(|| "找不到 kensaku-daemon；请运行 Kensaku sidecar 构建脚本".to_string())?;
+    let data_dir = kensaku_data_dir();
+    fs::create_dir_all(&data_dir).map_err(|error| format!("无法创建 Kensaku 数据目录：{error}"))?;
+    let guard = DAEMON_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = guard
+        .lock()
+        .map_err(|_| "Kensaku daemon 锁不可用".to_string())?;
+    let config_path = data_dir.join("config.json");
+    let configured = config_roots(&config_path);
+    let mut merged = configured.clone();
+    for root in &roots {
+        if !merged.iter().any(|existing| path_is_within(root, existing)) {
+            merged.push(root.clone());
+        }
+    }
+    let running = daemon_pid(&data_dir)
+        .filter(|pid| daemon_process_is_running(*pid))
+        .is_some()
+        || daemon_child_is_running();
+    if running && roots_are_covered_by(&roots, &configured) {
+        return Ok(());
+    }
+    if running {
+        stop_daemon(&data_dir)?;
+    }
+    write_kensaku_config(&data_dir, &merged)?;
+    spawn_daemon(daemon, &data_dir)
+}
+
+fn config_roots(config_path: &Path) -> Vec<PathBuf> {
+    let Ok(bytes) = fs::read(config_path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+        return Vec::new();
+    };
+    value
+        .get("watched_dirs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn write_kensaku_config(data_dir: &Path, roots: &[PathBuf]) -> Result<(), String> {
+    fs::create_dir_all(data_dir).map_err(|error| format!("无法创建 Kensaku 数据目录：{error}"))?;
+    let path = data_dir.join("config.json");
+    let mut value = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Kensaku 配置不是对象".to_string())?;
+    object.insert(
+        "watched_dirs".to_string(),
+        Value::Array(
+            roots
+                .iter()
+                .map(|root| Value::String(root.to_string_lossy().into_owned()))
+                .collect(),
+        ),
+    );
+    object.insert("is_setup_complete".to_string(), Value::Bool(true));
+    object.insert("auto_update".to_string(), Value::Bool(false));
+    let bytes = serde_json::to_vec_pretty(&value)
+        .map_err(|error| format!("无法编码 Kensaku 配置：{error}"))?;
+    AtomicFile::new(&path, AllowOverwrite)
+        .write(|file| file.write_all(&bytes))
+        .map_err(|error| format!("无法写入 Kensaku 配置：{error}"))
+}
+
+fn daemon_child_is_running() -> bool {
+    let Some(slot) = DAEMON_CHILD.get() else {
         return false;
     };
-    let Ok(Some(state)) = load_state(cli, None) else {
+    let Ok(mut slot) = slot.lock() else {
         return false;
     };
-    roots_are_covered_by(&roots, &state_roots(&state))
+    let Some(child) = slot.as_mut() else {
+        return false;
+    };
+    match child.try_wait() {
+        Ok(None) => true,
+        Ok(Some(_)) | Err(_) => {
+            *slot = None;
+            false
+        }
+    }
+}
+
+fn daemon_pid(data_dir: &Path) -> Option<u32> {
+    fs::read_to_string(data_dir.join("daemon.pid"))
+        .ok()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+fn daemon_process_is_running(pid: u32) -> bool {
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_some_and(|process| {
+        let name = process.name().to_string_lossy().to_lowercase();
+        name.contains("kensaku-daemon")
+            || process
+                .exe()
+                .and_then(Path::file_name)
+                .map(|name| {
+                    name.to_string_lossy()
+                        .to_lowercase()
+                        .contains("kensaku-daemon")
+                })
+                .unwrap_or(false)
+    })
+}
+
+fn stop_daemon(data_dir: &Path) -> Result<(), String> {
+    let pid = daemon_pid(data_dir);
+    if let Some(child_slot) = DAEMON_CHILD.get()
+        && let Ok(mut child) = child_slot.lock()
+        && let Some(mut child) = child.take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    if let Some(pid) = pid
+        && daemon_process_is_running(pid)
+    {
+        let process_id = Pid::from_u32(pid);
+        let mut system = System::new();
+        system.refresh_processes(ProcessesToUpdate::Some(&[process_id]), true);
+        if let Some(process) = system.process(process_id) {
+            let _ = process.kill();
+        }
+    }
+    let deadline = Instant::now() + DAEMON_START_TIMEOUT;
+    while Instant::now() < deadline {
+        if pid.is_none_or(|pid| !daemon_process_is_running(pid)) {
+            let _ = fs::remove_file(data_dir.join("daemon.pid"));
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Err("无法停止旧的 Kensaku daemon".to_string())
+}
+
+fn spawn_daemon(daemon: &Path, data_dir: &Path) -> Result<(), String> {
+    let stdout_path = data_dir.join("daemon.stdout.log");
+    let stderr_path = data_dir.join("daemon.stderr.log");
+    let stdout = fs::File::create(&stdout_path)
+        .map_err(|error| format!("无法创建 Kensaku daemon 日志：{error}"))?;
+    let stderr = fs::File::create(&stderr_path)
+        .map_err(|error| format!("无法创建 Kensaku daemon 日志：{error}"))?;
+    let mut command = make_base_command(daemon);
+    command
+        .env("KENSAKU_DATA_DIR", data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("无法启动 Kensaku daemon：{error}"))?;
+    thread::sleep(Duration::from_millis(200));
+    match child.try_wait() {
+        Ok(Some(status)) if !status.success() => {
+            let error = fs::read_to_string(&stderr_path).unwrap_or_default();
+            Err(format!("Kensaku daemon 启动失败：{}", error.trim()))
+        }
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => {
+            if let Ok(mut slot) = DAEMON_CHILD.get_or_init(|| Mutex::new(None)).lock() {
+                *slot = Some(child);
+            }
+            Ok(())
+        }
+        Err(error) => Err(format!("无法检查 Kensaku daemon：{error}")),
+    }
+}
+
+fn daemon_path() -> Option<&'static Path> {
+    DAEMON_PATH
+        .get_or_init(|| {
+            let mut candidates = Vec::new();
+            if let Some(path) = std::env::var_os("KITE_KENSAKU_DAEMON") {
+                candidates.push(PathBuf::from(path));
+            }
+            if let Ok(executable) = std::env::current_exe()
+                && let Some(parent) = executable.parent()
+            {
+                for name in ["kensaku-daemon.exe", "kensaku-daemon"] {
+                    candidates.push(parent.join(name));
+                }
+            }
+            candidates.push(PathBuf::from("kensaku-daemon.exe"));
+            candidates.push(PathBuf::from("kensaku-daemon"));
+            candidates
+                .into_iter()
+                .find(|candidate| command_works(candidate))
+        })
+        .as_deref()
+}
+
+fn kensaku_data_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("KITE_KENSAKU_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("KENSAKU_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+    dirs::data_local_dir()
+        .or_else(dirs::data_dir)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Kite")
+        .join("kensaku")
 }
 
 fn roots_are_covered_by(roots: &[PathBuf], indexed_roots: &[PathBuf]) -> bool {
@@ -581,7 +813,7 @@ fn cli_path() -> Option<&'static Path> {
 }
 
 fn command_works(path: &Path) -> bool {
-    make_command(path)
+    make_base_command(path)
         .arg("--help")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -589,7 +821,7 @@ fn command_works(path: &Path) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-fn make_command(path: &Path) -> Command {
+fn make_base_command(path: &Path) -> Command {
     let mut command = Command::new(path);
     command.stdin(Stdio::null());
     #[cfg(windows)]
@@ -597,6 +829,12 @@ fn make_command(path: &Path) -> Command {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);
     }
+    command
+}
+
+fn make_cli_command(path: &Path) -> Command {
+    let mut command = make_base_command(path);
+    command.env("KENSAKU_DATA_DIR", kensaku_data_dir());
     command
 }
 
@@ -630,7 +868,7 @@ fn run_json<T: DeserializeOwned>(
     cancel: Option<&AtomicBool>,
     timeout: Duration,
 ) -> Result<Option<T>, String> {
-    let mut child = make_command(cli)
+    let mut child = make_cli_command(cli)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -734,11 +972,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires KITE_KENSAKU_CLI and KITE_KENSAKU_SMOKE_ROOT"]
+    #[ignore = "requires KITE_KENSAKU_CLI, KITE_KENSAKU_DAEMON, KITE_KENSAKU_DATA_DIR, and KITE_KENSAKU_SMOKE_ROOT"]
     fn exercises_external_cli_contract() {
         let root = PathBuf::from(
             std::env::var("KITE_KENSAKU_SMOKE_ROOT").expect("smoke root environment"),
         );
+        prepare_names(std::slice::from_ref(&root)).expect("start fake daemon");
+        let config = kensaku_data_dir().join("config.json");
+        let value: Value =
+            serde_json::from_slice(&fs::read(config).expect("read config")).expect("parse config");
+        assert_eq!(value["is_setup_complete"], true);
         let cancel = AtomicBool::new(false);
         let names = search_names(
             std::slice::from_ref(&root),
@@ -762,6 +1005,7 @@ mod tests {
         .expect("content snapshot");
         assert_eq!(content.files.len(), 1);
         assert_eq!(content.files[0].matches[0].line_number, 2);
+        stop_daemon(&kensaku_data_dir()).expect("stop fake daemon");
     }
 
     #[test]

@@ -1,93 +1,135 @@
-# Kensaku 搜索后端
+# Kensaku 全局搜索后端
 
-结论：Kite 检测到 Kensaku CLI 和可用的 Kensaku 索引后，名称搜索和内容搜索优先使用 Kensaku。
+结论：Kite 的全局名称搜索和全局内容搜索完全由 Kensaku 提供。Kite 不再建立自己的全局名称索引或内容索引。
 
-## 1. 适用范围
+## 1. 进程模型
 
-- 全局名称搜索
-- 全局内容搜索
-- 当前文件夹、收藏夹和本地磁盘范围
+Kite 启动 `kensaku-daemon`。该进程负责：
 
-分栏内的小目录搜索继续使用 Kite Core。小目录搜索不建立跨进程索引。
+1. 首次扫描。
+2. 文件监听。
+3. 增量更新。
+4. 内容提取。
+5. 索引持久化。
 
-## 2. 后端发现顺序
+`kensaku-cli` 只执行只读查询和状态读取。Kite 不直接写入 Kensaku 索引。
 
-Kite 按以下顺序寻找 `kensaku-cli`：
+## 2. 数据目录
 
-1. 环境变量 `KITE_KENSAKU_CLI` 指定的路径。
-2. Kite 可执行文件旁边的 `kensaku-cli.exe` 或 `kensaku-cli`。
-3. `PATH` 中的 `kensaku-cli`。
+Kite 使用独立数据目录：
 
-Kensaku 固定测试版本：`v1.0.16`。上游固定提交：`9197751`。
+```text
+<Kite local data>/kensaku
+```
 
-## 3. 调用协议
+Windows 默认位置示例：
 
-Kite 使用 Kensaku CLI 的一次性只读命令。
+```text
+%LOCALAPPDATA%\Kite\kensaku
+```
 
-名称搜索：
+可用 `KITE_KENSAKU_DATA_DIR` 覆盖。
+
+Kite 在数据目录写入 `config.json`。Kite 设置以下字段：
+
+```json
+{
+  "watched_dirs": ["C:\\Users\\name"],
+  "is_setup_complete": true,
+  "auto_update": false
+}
+```
+
+其他 Kensaku 配置使用上游默认值。
+
+## 3. Sidecar 发现顺序
+
+CLI：
+
+1. `KITE_KENSAKU_CLI`
+2. Kite 可执行文件旁的 `kensaku-cli.exe` 或 `kensaku-cli`
+3. `PATH`
+
+Daemon：
+
+1. `KITE_KENSAKU_DAEMON`
+2. Kite 可执行文件旁的 `kensaku-daemon.exe` 或 `kensaku-daemon`
+3. `PATH`
+
+## 4. 构建 Sidecar
+
+运行：
+
+```powershell
+python scripts/kensaku/build_sidecars.py
+```
+
+脚本执行以下动作：
+
+1. 下载固定版本 `v1.0.16` 的 Kensaku CLI。
+2. 校验 CLI SHA-256。
+3. 下载固定提交 `9197751` 的 Kensaku 源码。
+4. 构建 `kensaku-daemon`。
+5. 把 sidecar 写入 `vendor/kensaku`。
+
+Windows 发布构建默认执行该脚本。使用 `-SkipKensaku` 可跳过 sidecar 构建。
+
+macOS 发布构建默认执行该脚本。设置 `KITE_SKIP_KENSAKU=1` 可跳过 sidecar 构建。
+
+## 5. 根目录更新
+
+Kite 把新的搜索根目录加入 `watched_dirs`。
+
+已有 daemon 的配置不覆盖新根目录时，Kite 执行以下步骤：
+
+1. 停止 Kite 管理的旧 daemon。
+2. 写入合并后的根目录。
+3. 重启 daemon。
+
+Kite 只增加根目录。Kite 不删除旧根目录，以免意外删除用户索引。
+
+## 6. 查询
+
+名称搜索调用：
 
 ```text
 kensaku-cli search "name:\"<query>\"" --json --limit 5000 --path <root>
 ```
 
-内容搜索：
+内容搜索调用：
 
 ```text
 kensaku-cli search "<query 或 re:\"<pattern>\">" --json --limit <n> --path <root>
 ```
 
-Kite 对每个根目录单独执行命令。Kite 合并结果并执行最终去重。
+Kite 对每个根目录执行查询，然后合并、过滤和去重。
 
-## 4. 覆盖判断
+## 7. 状态
 
-Kite 先执行：
+Kite 通过以下命令读取状态：
 
 ```text
 kensaku-cli state --json
 ```
 
-只有 Kensaku 索引根目录覆盖全部请求根目录时，Kensaku 快照才标记为完整。
+状态用于显示索引文件和内容文档数量。状态缓存 2 秒。
 
-未覆盖时，Kite 保留本地名称索引、Spotlight、Everything 和遍历回退。
+## 8. 错误处理
 
-## 5. 数据映射
+- CLI 超时：20 秒。
+- 状态命令超时：5 秒。
+- 输出上限：16 MiB。
+- Windows 隐藏控制台窗口。
+- Daemon 标准输出和错误写入数据目录日志。
+- Kite 不静默回退到本地全盘遍历。
 
-名称结果映射到 `FileEntry`。
+## 9. 兼容范围
 
-内容结果映射到 `ContentFileMatch`。Kensaku 的搜索结果提供片段，不提供完整行位置。Kite 在文件中查找该片段，并尝试恢复行号。
+- 全局名称搜索：Kensaku。
+- 全局内容搜索：Kensaku。
+- 分栏内小目录搜索：Kite。
+- 文件管理、预览和列导航：Kite。
 
-该映射是兼容层。后续应通过 Kensaku MCP `read_snippet` 获取权威行号和上下文。
+## 10. 许可证
 
-## 6. 回退顺序
-
-名称搜索回退顺序：
-
-1. Kensaku
-2. Kite 名称索引
-3. Spotlight 或 Everything
-4. 文件系统遍历
-
-内容搜索回退顺序：
-
-1. Kensaku
-2. Kite 内容索引
-3. 受控实时读取
-
-## 7. 限制
-
-- Kensaku CLI 只读取已有 Kensaku 索引。
-- Windows 没有 Kensaku daemon 时，Kensaku CLI 不自建索引。
-- 用户需要先运行 Kensaku，或由发布包启动 Kensaku 索引服务。
-- Kensaku 索引停止监听后，结果可能落后于磁盘。
-- Kite 不修改 Kensaku 索引。
-- 内容行号是兼容映射结果，不保证等同 Kensaku 原生上下文。
-
-## 8. 安全边界
-
-Kite 不通过 shell 拼接命令。Kite 使用参数数组调用 CLI。
-
-Kite 为命令设置 20 秒上限。Kite 为输出设置 16 MiB 上限。Kite 在 Windows 隐藏控制台窗口。
-
-## 9. 许可证
-
-Kensaku 使用 MIT 许可证。发布包附带 Kensaku CLI 时需要保留上游许可证和版本信息。
+Kensaku 使用 MIT 许可证。发布包保留上游许可证。

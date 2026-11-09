@@ -1,5 +1,6 @@
 param(
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$SkipKensaku
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,6 +11,19 @@ $version = '0.6.62'
 $releaseName = "Kite-v$version-windows-x64"
 $staging = Join-Path $dist $releaseName
 $archive = Join-Path $dist "$releaseName.zip"
+
+Push-Location $root
+try {
+    if (-not $SkipKensaku -and ([string]::IsNullOrWhiteSpace($env:KENSAKU_CLI_PATH) -or [string]::IsNullOrWhiteSpace($env:KENSAKU_DAEMON_PATH))) {
+        python scripts\kensaku\build_sidecars.py
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Kensaku sidecar build failed'
+        }
+    }
+}
+finally {
+    Pop-Location
+}
 
 Push-Location $root
 try {
@@ -37,18 +51,24 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $resolvedStaging -Force
     Copy-Item -LiteralPath (Join-Path $root 'assets\kite-icon-master.png') -Destination (Join-Path $resolvedStaging 'icons') -Force
 
-    $kensakuCli = $env:KENSAKU_CLI_PATH
-    if ([string]::IsNullOrWhiteSpace($kensakuCli)) {
-        $vendorKensakuCli = Join-Path $root 'vendor\kensaku\kensaku-cli.exe'
-        if (Test-Path -LiteralPath $vendorKensakuCli) {
-            $kensakuCli = $vendorKensakuCli
+    if (-not $SkipKensaku) {
+        $kensakuCli = if ($env:KENSAKU_CLI_PATH) {
+            $env:KENSAKU_CLI_PATH
+        } else {
+            Join-Path $root 'vendor\kensaku\kensaku-cli.exe'
         }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($kensakuCli)) {
-        if (-not (Test-Path -LiteralPath $kensakuCli)) {
-            throw "Kensaku CLI not found: $kensakuCli"
+        $kensakuDaemon = if ($env:KENSAKU_DAEMON_PATH) {
+            $env:KENSAKU_DAEMON_PATH
+        } else {
+            Join-Path $root 'vendor\kensaku\kensaku-daemon.exe'
+        }
+        foreach ($path in @($kensakuCli, $kensakuDaemon)) {
+            if (-not (Test-Path -LiteralPath $path)) {
+                throw "Kensaku sidecar not found: $path"
+            }
         }
         Copy-Item -LiteralPath $kensakuCli -Destination (Join-Path $resolvedStaging 'kensaku-cli.exe') -Force
+        Copy-Item -LiteralPath $kensakuDaemon -Destination (Join-Path $resolvedStaging 'kensaku-daemon.exe') -Force
         Copy-Item -LiteralPath (Join-Path $root 'docs\search\kensaku-backend.md') -Destination $resolvedStaging -Force
         Copy-Item -LiteralPath (Join-Path $root 'docs\search\KENSAKU_LICENSE') -Destination $resolvedStaging -Force
     }

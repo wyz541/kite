@@ -8,3 +8,6 @@ cargo-check.log
 !assets/kite-icon-master.png
 !assets/kite-icon-preview.png
 /docs/screenshots/
+
+/vendor/kensaku/
+__pycache__/
