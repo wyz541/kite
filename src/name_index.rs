@@ -207,7 +207,7 @@ enum IndexCommand {
         root: PathBuf,
     },
     JournalAdvanced {
-        root: PathBuf,
+        roots: Vec<PathBuf>,
         journal_id: u64,
         next_usn: i64,
     },
@@ -216,11 +216,49 @@ enum IndexCommand {
 }
 
 #[cfg(windows)]
-struct UsnWatcher {
+#[derive(Clone, Debug)]
+struct UsnSubscription {
     root: PathBuf,
+    cursor: JournalCursor,
+}
+
+#[cfg(windows)]
+struct UsnWatcher {
+    subscriptions: Arc<Mutex<HashMap<String, UsnSubscription>>>,
     cancel: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl UsnWatcher {
+    fn subscribe(&self, root: &Path, start: JournalCursor) -> Result<(), String> {
+        let root_key = path_key(root);
+        let mut subscriptions = self
+            .subscriptions
+            .lock()
+            .map_err(|_| "USN 订阅锁不可用".to_string())?;
+        subscriptions.retain(|key, subscription| {
+            key == &root_key || !path_is_within(&subscription.root, root)
+        });
+        if let Some(subscription) = subscriptions.get_mut(&root_key) {
+            subscription.root = root.to_path_buf();
+            if subscription.cursor.journal_id != start.journal_id
+                || start.next_usn > subscription.cursor.next_usn
+            {
+                subscription.cursor = start;
+            }
+        } else {
+            subscriptions.insert(
+                root_key,
+                UsnSubscription {
+                    root: root.to_path_buf(),
+                    cursor: start,
+                },
+            );
+        }
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
@@ -238,6 +276,8 @@ pub struct NameIndexService {
     index_dir: PathBuf,
     schema: NameFields,
     reader: IndexReader,
+    #[cfg(windows)]
+    usn_enabled: bool,
     command_tx: mpsc::Sender<IndexCommand>,
     statuses: Arc<Mutex<HashMap<String, RootStatus>>>,
     pending: Arc<Mutex<HashSet<String>>>,
@@ -249,15 +289,22 @@ pub struct NameIndexService {
 
 impl NameIndexService {
     pub fn new() -> Result<Self, String> {
-        Self::open_at(default_index_dir())
+        Self::open_at(default_index_dir(), true)
     }
 
     #[cfg(test)]
     pub(crate) fn open_for_testing(index_dir: PathBuf) -> Result<Self, String> {
-        Self::open_at(index_dir)
+        Self::open_at(index_dir, false)
     }
 
-    fn open_at(index_dir: PathBuf) -> Result<Self, String> {
+    #[cfg(all(test, windows))]
+    pub(crate) fn open_for_testing_with_usn(index_dir: PathBuf) -> Result<Self, String> {
+        Self::open_at(index_dir, true)
+    }
+
+    fn open_at(index_dir: PathBuf, usn_enabled: bool) -> Result<Self, String> {
+        #[cfg(not(windows))]
+        let _ = usn_enabled;
         let (index, schema) = open_or_create_index(&index_dir)?;
         let reader = index
             .reader_builder()
@@ -292,6 +339,8 @@ impl NameIndexService {
             index_dir,
             schema,
             reader,
+            #[cfg(windows)]
+            usn_enabled,
             command_tx,
             statuses,
             pending,
@@ -326,40 +375,50 @@ impl NameIndexService {
             {
                 continue;
             }
+            let watched_root = existing
+                .as_ref()
+                .map(|status| status.root.clone())
+                .unwrap_or_else(|| root.clone());
             #[cfg(windows)]
-            let usn_preparation = usn_journal::prepare(
-                &root,
-                existing
-                    .as_ref()
-                    .and_then(RootStatus::journal_cursor)
-                    .map(Into::into),
-            )
-            .map(|preparation| {
-                preparation.map(|preparation| JournalPreparation {
-                    cursor: preparation.cursor.into(),
-                    reusable: preparation.reusable,
+            let usn_preparation = if self.usn_enabled {
+                usn_journal::prepare(
+                    &watched_root,
+                    existing
+                        .as_ref()
+                        .and_then(RootStatus::journal_cursor)
+                        .map(Into::into),
+                )
+                .map(|preparation| {
+                    preparation.map(|preparation| JournalPreparation {
+                        cursor: preparation.cursor.into(),
+                        reusable: preparation.reusable,
+                    })
                 })
-            });
+            } else {
+                Ok(None)
+            };
             #[cfg(not(windows))]
             let usn_preparation: Result<Option<JournalPreparation>, String> = Ok(None);
             let (provider, journal_cursor, reusable, watch_error) = match usn_preparation {
-                Ok(Some(preparation)) => match self.ensure_usn_watcher(&root, preparation.cursor) {
-                    Ok(()) => {
-                        let _ = self.ensure_watcher(&root);
-                        (
-                            NameIndexProvider::UsnJournal,
-                            Some(preparation.cursor),
-                            preparation.reusable,
-                            None,
-                        )
+                Ok(Some(preparation)) => {
+                    match self.ensure_usn_watcher(&watched_root, preparation.cursor) {
+                        Ok(()) => {
+                            let _ = self.ensure_watcher(&watched_root);
+                            (
+                                NameIndexProvider::UsnJournal,
+                                Some(preparation.cursor),
+                                preparation.reusable,
+                                None,
+                            )
+                        }
+                        Err(_) => {
+                            let watch_error = self.ensure_watcher(&watched_root).err();
+                            (NameIndexProvider::Notify, None, false, watch_error)
+                        }
                     }
-                    Err(_) => {
-                        let watch_error = self.ensure_watcher(&root).err();
-                        (NameIndexProvider::Notify, None, false, watch_error)
-                    }
-                },
+                }
                 Ok(None) | Err(_) => {
-                    let watch_error = self.ensure_watcher(&root).err();
+                    let watch_error = self.ensure_watcher(&watched_root).err();
                     (NameIndexProvider::Notify, None, false, watch_error)
                 }
             };
@@ -423,10 +482,12 @@ impl NameIndexService {
     }
 
     pub fn remove_root(&self, root: PathBuf) {
+        self.remove_usn_subscription(&root);
         let _ = self.command_tx.send(IndexCommand::RemoveRoot(root));
     }
 
     pub fn clear(&self) {
+        self.stop_usn_watchers();
         let _ = self.command_tx.send(IndexCommand::Clear);
     }
 
@@ -675,11 +736,21 @@ impl NameIndexService {
 
     #[cfg(windows)]
     fn has_active_usn_watcher(&self, root: &Path) -> bool {
+        let Some(volume_root) = usn_journal::volume_root(root) else {
+            return false;
+        };
+        let volume_key = path_key(&volume_root);
+        let root_key = path_key(root);
         self.usn_watchers
             .lock()
-            .map(|watchers| {
-                watchers.values().any(|watcher| {
-                    watcher.alive.load(Ordering::Relaxed) && path_is_within(root, &watcher.root)
+            .ok()
+            .and_then(|watchers| {
+                watchers.get(&volume_key).map(|watcher| {
+                    watcher.alive.load(Ordering::Relaxed)
+                        && watcher
+                            .subscriptions
+                            .lock()
+                            .is_ok_and(|subscriptions| subscriptions.contains_key(&root_key))
                 })
             })
             .unwrap_or(false)
@@ -692,32 +763,66 @@ impl NameIndexService {
 
     #[cfg(windows)]
     fn ensure_usn_watcher(&self, root: &Path, start: JournalCursor) -> Result<(), String> {
-        let root_key = path_key(root);
+        let volume_root = usn_journal::volume_root(root)
+            .ok_or_else(|| "USN Journal 仅支持带盘符的本地路径".to_string())?;
+        let volume_key = path_key(&volume_root);
         let mut watchers = self
             .usn_watchers
             .lock()
             .map_err(|_| "USN 监听锁不可用".to_string())?;
-        if watchers
-            .get(&root_key)
-            .is_some_and(|watcher| watcher.alive.load(Ordering::Relaxed))
-        {
-            return Ok(());
+        if let Some(watcher) = watchers.get_mut(&volume_key) {
+            if watcher.alive.load(Ordering::Relaxed) {
+                return watcher.subscribe(root, start);
+            }
+            watchers.remove(&volume_key);
         }
-        watchers.remove(&root_key);
+
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        if let Ok(statuses) = self.statuses.lock()
+            && let Ok(mut subscriptions_guard) = subscriptions.lock()
+        {
+            for status in statuses
+                .values()
+                .filter(|status| status.provider == NameIndexProvider::UsnJournal)
+                .filter(|status| {
+                    usn_journal::volume_root(&status.root).as_deref() == Some(volume_root.as_path())
+                })
+                .filter(|status| !path_is_within(&status.root, root))
+            {
+                if let Some(cursor) = status.journal_cursor() {
+                    subscriptions_guard.insert(
+                        path_key(&status.root),
+                        UsnSubscription {
+                            root: status.root.clone(),
+                            cursor,
+                        },
+                    );
+                }
+            }
+            subscriptions_guard.insert(
+                path_key(root),
+                UsnSubscription {
+                    root: root.to_path_buf(),
+                    cursor: start,
+                },
+            );
+        }
+
         let cancel = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(true));
         let command_tx = self.command_tx.clone();
         let statuses = Arc::clone(&self.statuses);
         let pending = Arc::clone(&self.pending);
-        let watcher_root = root.to_path_buf();
+        let watcher_volume_root = volume_root.clone();
+        let watcher_subscriptions = Arc::clone(&subscriptions);
         let thread_cancel = Arc::clone(&cancel);
         let thread_alive = Arc::clone(&alive);
         let handle = thread::Builder::new()
-            .name(format!("kite-usn-{}", root.display()))
+            .name(format!("kite-usn-{}", volume_root.display()))
             .spawn(move || {
                 usn_watch_loop(
-                    watcher_root,
-                    start,
+                    watcher_volume_root,
+                    watcher_subscriptions,
                     command_tx,
                     statuses,
                     pending,
@@ -727,9 +832,9 @@ impl NameIndexService {
             })
             .map_err(|error| format!("无法启动 USN 监听线程：{error}"))?;
         watchers.insert(
-            root_key,
+            volume_key,
             UsnWatcher {
-                root: root.to_path_buf(),
+                subscriptions,
                 cancel,
                 alive,
                 handle: Some(handle),
@@ -742,6 +847,44 @@ impl NameIndexService {
     fn ensure_usn_watcher(&self, _root: &Path, _start: JournalCursor) -> Result<(), String> {
         Err("USN Journal 仅支持 Windows".to_string())
     }
+
+    #[cfg(windows)]
+    fn remove_usn_subscription(&self, root: &Path) {
+        let Some(volume_root) = usn_journal::volume_root(root) else {
+            return;
+        };
+        let volume_key = path_key(&volume_root);
+        let root_key = path_key(root);
+        let Ok(mut watchers) = self.usn_watchers.lock() else {
+            return;
+        };
+        let remove_volume = watchers.get(&volume_key).is_some_and(|watcher| {
+            watcher
+                .subscriptions
+                .lock()
+                .map(|mut subscriptions| {
+                    subscriptions.remove(&root_key);
+                    subscriptions.is_empty()
+                })
+                .unwrap_or(false)
+        });
+        if remove_volume {
+            watchers.remove(&volume_key);
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn remove_usn_subscription(&self, _root: &Path) {}
+
+    #[cfg(windows)]
+    fn stop_usn_watchers(&self) {
+        if let Ok(mut watchers) = self.usn_watchers.lock() {
+            watchers.clear();
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn stop_usn_watchers(&self) {}
 
     fn ensure_watcher(&self, root: &Path) -> Result<(), String> {
         let mut watcher_guard = self
@@ -820,46 +963,35 @@ impl NameIndexService {
 #[cfg(windows)]
 #[allow(clippy::too_many_arguments)]
 fn usn_watch_loop(
-    root: PathBuf,
-    mut cursor: JournalCursor,
+    volume_root: PathBuf,
+    subscriptions: Arc<Mutex<HashMap<String, UsnSubscription>>>,
     command_tx: mpsc::Sender<IndexCommand>,
     statuses: Arc<Mutex<HashMap<String, RootStatus>>>,
     pending: Arc<Mutex<HashSet<String>>>,
     cancel: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
 ) {
-    let root_key = path_key(&root);
     let mut reader = None;
-    while !cancel.load(Ordering::Relaxed) {
-        if !root_status_is_ready(&statuses, &root_key) {
+    'watch: while !cancel.load(Ordering::Relaxed) {
+        let snapshot = usn_subscription_snapshot(&subscriptions);
+        if snapshot.is_empty() {
+            thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+        let ready = snapshot
+            .into_iter()
+            .filter(|subscription| root_status_is_ready(&statuses, &path_key(&subscription.root)))
+            .collect::<Vec<_>>();
+        if ready.is_empty() {
             thread::sleep(Duration::from_millis(100));
             continue;
         }
         if reader.is_none() {
-            match usn_journal::JournalReader::open(&root) {
-                Ok(Some(opened)) => {
-                    let current: JournalCursor = opened.cursor().into();
-                    if current.journal_id != cursor.journal_id
-                        || cursor.next_usn < opened.first_usn()
-                        || cursor.next_usn < opened.lowest_valid_usn()
-                        || cursor.next_usn > opened.next_usn()
-                    {
-                        cursor = current;
-                        set_journal_recovery(&statuses, &root_key, cursor);
-                        if mark_pending(&pending, &root_key)
-                            && command_tx
-                                .send(IndexCommand::EnsureRoot(root.clone()))
-                                .is_err()
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-                    reader = Some(opened);
-                }
+            match usn_journal::JournalReader::open(&volume_root) {
+                Ok(Some(opened)) => reader = Some(opened),
                 Ok(None) => break,
                 Err(error) => {
-                    set_usn_watcher_failure(&statuses, &root_key, &error);
+                    set_usn_watcher_failure(&statuses, &ready, &error);
                     break;
                 }
             }
@@ -867,49 +999,157 @@ fn usn_watch_loop(
         let Some(opened) = reader.as_ref() else {
             continue;
         };
-        if let Some(persisted) = status_journal_cursor(&statuses, &root_key)
-            && persisted.journal_id == cursor.journal_id
-            && persisted.next_usn < cursor.next_usn
-        {
+        let current = opened.cursor();
+        let mut active = Vec::new();
+        for subscription in ready {
+            if !usn_cursor_is_valid(opened, subscription.cursor) {
+                let cursor: JournalCursor = current.into();
+                set_usn_subscription_cursor(&subscriptions, &subscription.root, cursor);
+                set_journal_recovery(&statuses, &path_key(&subscription.root), cursor);
+                if mark_pending(&pending, &path_key(&subscription.root))
+                    && command_tx
+                        .send(IndexCommand::EnsureRoot(subscription.root))
+                        .is_err()
+                {
+                    break 'watch;
+                }
+            } else {
+                active.push(subscription);
+            }
+        }
+        if active.is_empty() {
+            thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+        if !usn_cursors_persisted(&statuses, &active) {
             thread::sleep(Duration::from_millis(50));
             continue;
         }
-        match opened.read_available(cursor.next_usn) {
+        let start_usn = active
+            .iter()
+            .map(|subscription| subscription.cursor.next_usn)
+            .min()
+            .unwrap_or(current.next_usn);
+        match opened.read_available(start_usn) {
             Ok(batch) => {
                 for change in batch.changes {
-                    if command_tx
-                        .send(IndexCommand::PathChanged {
-                            path: change.path,
-                            root: root.clone(),
-                        })
-                        .is_err()
+                    if let Some(root) = route_usn_change(&change, &active)
+                        && command_tx
+                            .send(IndexCommand::PathChanged {
+                                path: change.path,
+                                root,
+                            })
+                            .is_err()
                     {
-                        alive.store(false, Ordering::Relaxed);
-                        return;
+                        break 'watch;
                     }
                 }
-                if batch.next_usn > cursor.next_usn {
-                    cursor.next_usn = batch.next_usn;
-                    if command_tx
+                let advanced_roots =
+                    advance_usn_subscriptions(&subscriptions, &active, batch.next_usn);
+                if !advanced_roots.is_empty()
+                    && command_tx
                         .send(IndexCommand::JournalAdvanced {
-                            root: root.clone(),
-                            journal_id: cursor.journal_id,
-                            next_usn: cursor.next_usn,
+                            roots: advanced_roots,
+                            journal_id: current.journal_id,
+                            next_usn: batch.next_usn,
                         })
                         .is_err()
-                    {
-                        break;
-                    }
+                {
+                    break;
                 }
             }
             Err(error) => {
-                set_usn_watcher_failure(&statuses, &root_key, &error);
+                set_usn_watcher_failure(&statuses, &active, &error);
                 break;
             }
         }
         thread::sleep(Duration::from_millis(200));
     }
     alive.store(false, Ordering::Relaxed);
+}
+
+#[cfg(windows)]
+fn usn_subscription_snapshot(
+    subscriptions: &Arc<Mutex<HashMap<String, UsnSubscription>>>,
+) -> Vec<UsnSubscription> {
+    subscriptions
+        .lock()
+        .map(|subscriptions| subscriptions.values().cloned().collect())
+        .unwrap_or_default()
+}
+
+#[cfg(windows)]
+fn usn_cursor_is_valid(reader: &usn_journal::JournalReader, cursor: JournalCursor) -> bool {
+    let current: JournalCursor = reader.cursor().into();
+    current.journal_id == cursor.journal_id
+        && cursor.next_usn >= reader.first_usn()
+        && cursor.next_usn >= reader.lowest_valid_usn()
+        && cursor.next_usn <= reader.next_usn()
+}
+
+#[cfg(windows)]
+fn set_usn_subscription_cursor(
+    subscriptions: &Arc<Mutex<HashMap<String, UsnSubscription>>>,
+    root: &Path,
+    cursor: JournalCursor,
+) {
+    if let Ok(mut subscriptions) = subscriptions.lock()
+        && let Some(subscription) = subscriptions.get_mut(&path_key(root))
+    {
+        subscription.cursor = cursor;
+    }
+}
+
+#[cfg(windows)]
+fn advance_usn_subscriptions(
+    subscriptions: &Arc<Mutex<HashMap<String, UsnSubscription>>>,
+    active: &[UsnSubscription],
+    next_usn: i64,
+) -> Vec<PathBuf> {
+    let Ok(mut subscriptions) = subscriptions.lock() else {
+        return Vec::new();
+    };
+    let mut advanced = Vec::new();
+    for active_subscription in active {
+        let Some(subscription) = subscriptions.get_mut(&path_key(&active_subscription.root)) else {
+            continue;
+        };
+        if subscription.root != active_subscription.root
+            || subscription.cursor.journal_id != active_subscription.cursor.journal_id
+            || subscription.cursor.next_usn >= next_usn
+        {
+            continue;
+        }
+        subscription.cursor.next_usn = next_usn;
+        advanced.push(subscription.root.clone());
+    }
+    advanced
+}
+
+#[cfg(windows)]
+fn route_usn_change(
+    change: &usn_journal::UsnChange,
+    active: &[UsnSubscription],
+) -> Option<PathBuf> {
+    active
+        .iter()
+        .filter(|subscription| subscription.cursor.next_usn <= change.usn)
+        .filter(|subscription| path_is_within(&change.path, &subscription.root))
+        .max_by_key(|subscription| subscription.root.components().count())
+        .map(|subscription| subscription.root.clone())
+}
+
+#[cfg(windows)]
+fn usn_cursors_persisted(
+    statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
+    subscriptions: &[UsnSubscription],
+) -> bool {
+    subscriptions.iter().all(|subscription| {
+        status_journal_cursor(statuses, &path_key(&subscription.root)).is_some_and(|persisted| {
+            persisted.journal_id == subscription.cursor.journal_id
+                && persisted.next_usn >= subscription.cursor.next_usn
+        })
+    })
 }
 
 #[cfg(windows)]
@@ -966,18 +1206,20 @@ fn set_journal_recovery(
 #[cfg(windows)]
 fn set_usn_watcher_failure(
     statuses: &Arc<Mutex<HashMap<String, RootStatus>>>,
-    root_key: &str,
+    subscriptions: &[UsnSubscription],
     error: &str,
 ) {
-    if let Ok(mut statuses) = statuses.lock()
-        && let Some(status) = statuses.get_mut(root_key)
-    {
-        status.state = NameIndexState::Error;
-        status.usable = false;
-        status.reconciled = true;
-        status.watchable = false;
-        status.watch_error = Some(error.to_string());
-        status.message = Some(format!("USN Journal 监听失败：{error}"));
+    if let Ok(mut statuses) = statuses.lock() {
+        for subscription in subscriptions {
+            if let Some(status) = statuses.get_mut(&path_key(&subscription.root)) {
+                status.state = NameIndexState::Error;
+                status.usable = false;
+                status.reconciled = true;
+                status.watchable = false;
+                status.watch_error = Some(error.to_string());
+                status.message = Some(format!("USN Journal 监听失败：{error}"));
+            }
+        }
     }
 }
 
@@ -1111,24 +1353,32 @@ fn index_worker(
                 );
             }
             IndexCommand::JournalAdvanced {
-                root,
+                roots,
                 journal_id,
                 next_usn,
             } => {
-                let root_key = path_key(&root);
-                if let Ok(mut statuses) = statuses.lock()
-                    && let Some(status) = statuses.get_mut(&root_key)
-                    && (status.journal_id.is_none()
-                        || (status.journal_id == Some(journal_id)
-                            && status
-                                .journal_next_usn
-                                .is_none_or(|current| next_usn > current)))
-                {
-                    status.provider = NameIndexProvider::UsnJournal;
-                    status.journal_id = Some(journal_id);
-                    status.journal_next_usn = Some(next_usn);
+                let mut changed = false;
+                if let Ok(mut statuses) = statuses.lock() {
+                    for root in roots {
+                        let Some(status) = statuses.get_mut(&path_key(&root)) else {
+                            continue;
+                        };
+                        if status.journal_id.is_none()
+                            || (status.journal_id == Some(journal_id)
+                                && status
+                                    .journal_next_usn
+                                    .is_none_or(|current| next_usn > current))
+                        {
+                            status.provider = NameIndexProvider::UsnJournal;
+                            status.journal_id = Some(journal_id);
+                            status.journal_next_usn = Some(next_usn);
+                            changed = true;
+                        }
+                    }
                 }
-                let _ = save_manifest(&index_dir, &statuses);
+                if changed {
+                    let _ = save_manifest(&index_dir, &statuses);
+                }
             }
             IndexCommand::RemoveRoot(root) => {
                 let root_key = path_key(&root);
@@ -1323,6 +1573,9 @@ fn update_path(
     root: &Path,
     index_dir: &Path,
 ) -> Result<u64, String> {
+    if !path_is_within(path, root) {
+        return Ok(0);
+    }
     let root_key = path_key(root);
     if path_is_within(path, index_dir) {
         return Ok(0);
@@ -1702,6 +1955,23 @@ mod tests {
         panic!("name index did not become ready");
     }
 
+    fn wait_for_name(service: &NameIndexService, root: &Path, query: &str, path: &Path) {
+        let root = root.to_path_buf();
+        let cancel = AtomicBool::new(false);
+        for _ in 0..150 {
+            let found = service
+                .search(std::slice::from_ref(&root), query, &cancel)
+                .ok()
+                .flatten()
+                .is_some_and(|snapshot| snapshot.entries.iter().any(|entry| entry.path == path));
+            if found {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("name index did not add {}", path.display());
+    }
+
     #[test]
     fn scopes_filesystem_root_children() {
         let root = if cfg!(windows) {
@@ -1832,7 +2102,7 @@ mod tests {
         );
 
         drop(service);
-        fs::remove_dir_all(root).expect("clean self-index fixture");
+        remove_dir_with_retry(&root);
     }
 
     #[test]
@@ -1902,6 +2172,142 @@ mod tests {
                 next_usn: 100,
             })
         );
+        remove_dir_with_retry(&index_dir);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn parent_usn_subscription_replaces_nested_roots() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let watcher = UsnWatcher {
+            subscriptions: Arc::clone(&subscriptions),
+            cancel: Arc::new(AtomicBool::new(false)),
+            alive: Arc::new(AtomicBool::new(true)),
+            handle: None,
+        };
+        watcher
+            .subscribe(
+                Path::new(r"C:\Users\Kite"),
+                JournalCursor {
+                    journal_id: 7,
+                    next_usn: 100,
+                },
+            )
+            .expect("subscribe nested root");
+        watcher
+            .subscribe(
+                Path::new(r"C:\Users"),
+                JournalCursor {
+                    journal_id: 7,
+                    next_usn: 110,
+                },
+            )
+            .expect("subscribe parent root");
+        let subscriptions = subscriptions.lock().expect("lock subscriptions");
+        assert_eq!(subscriptions.len(), 1);
+        assert!(subscriptions.contains_key(&path_key(Path::new(r"C:\Users"))));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn routes_usn_change_to_one_active_root() {
+        let users = PathBuf::from(r"C:\Users");
+        let projects = PathBuf::from(r"C:\Projects");
+        let active = vec![
+            UsnSubscription {
+                root: users.clone(),
+                cursor: JournalCursor {
+                    journal_id: 7,
+                    next_usn: 100,
+                },
+            },
+            UsnSubscription {
+                root: projects.clone(),
+                cursor: JournalCursor {
+                    journal_id: 7,
+                    next_usn: 200,
+                },
+            },
+        ];
+        let user_change = usn_journal::UsnChange {
+            path: users.join("wooduan.txt"),
+            kind: usn_journal::UsnChangeKind::Upsert,
+            usn: 110,
+        };
+        assert_eq!(route_usn_change(&user_change, &active), Some(users));
+        let project_change = usn_journal::UsnChange {
+            path: projects.join("kite.txt"),
+            kind: usn_journal::UsnChangeKind::Upsert,
+            usn: 210,
+        };
+        assert_eq!(route_usn_change(&project_change, &active), Some(projects));
+        let stale_change = usn_journal::UsnChange {
+            path: user_change.path,
+            kind: usn_journal::UsnChangeKind::Upsert,
+            usn: 99,
+        };
+        assert_eq!(route_usn_change(&stale_change, &active), None);
+    }
+
+    #[test]
+    #[ignore = "requires a local NTFS or ReFS volume"]
+    #[cfg(windows)]
+    fn shares_one_usn_watcher_for_roots_on_same_volume() {
+        let base = test_root("shared-usn");
+        let first = base.join("first");
+        let second = base.join("second");
+        fs::create_dir_all(&first).expect("create first shared root");
+        fs::create_dir_all(&second).expect("create second shared root");
+        fs::write(first.join("first.txt"), b"fixture").expect("write first fixture");
+        fs::write(second.join("second.txt"), b"fixture").expect("write second fixture");
+        let index_dir = test_root("shared-usn-index");
+        let service = NameIndexService::open_for_testing_with_usn(index_dir.clone())
+            .expect("open shared USN index");
+        service.ensure_roots(&[first.clone(), second.clone()]);
+        wait_ready(&service, &first);
+        wait_ready(&service, &second);
+
+        let (watcher_count, subscription_count) = {
+            let watchers = service.usn_watchers.lock().expect("lock USN watchers");
+            let subscriptions = watchers
+                .values()
+                .next()
+                .expect("shared USN watcher")
+                .subscriptions
+                .lock()
+                .expect("lock USN subscriptions");
+            (watchers.len(), subscriptions.len())
+        };
+        assert_eq!(watcher_count, 1);
+        assert_eq!(subscription_count, 2);
+
+        let first_new = first.join("first-new.txt");
+        let second_new = second.join("second-new.txt");
+        fs::write(&first_new, b"fixture").expect("write first live fixture");
+        fs::write(&second_new, b"fixture").expect("write second live fixture");
+        wait_for_name(&service, &first, "first-new", &first_new);
+        wait_for_name(&service, &second, "second-new", &second_new);
+
+        service.remove_root(first);
+        assert_eq!(
+            service
+                .usn_watchers
+                .lock()
+                .expect("lock USN watchers after first removal")
+                .len(),
+            1
+        );
+        service.remove_root(second);
+        assert!(
+            service
+                .usn_watchers
+                .lock()
+                .expect("lock USN watchers after second removal")
+                .is_empty()
+        );
+
+        drop(service);
+        remove_dir_with_retry(&base);
         remove_dir_with_retry(&index_dir);
     }
 

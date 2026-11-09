@@ -104,9 +104,14 @@ struct JournalVolume {
 
 impl JournalVolume {
     fn open(root: &Path) -> Result<Option<Self>, String> {
-        let Some(drive) = drive_root_letter(root) else {
+        let Some(volume_root) = volume_root(root) else {
             return Ok(None);
         };
+        let drive = volume_root
+            .to_string_lossy()
+            .chars()
+            .next()
+            .ok_or_else(|| "USN 卷路径没有盘符".to_string())?;
         let volume_path = HSTRING::from(format!(r"\\.\{drive}:"));
         let handle = unsafe {
             CreateFileW(
@@ -121,7 +126,7 @@ impl JournalVolume {
         }
         .map_err(|error| format!("无法打开 USN 卷 {drive}:：{error}"))?;
         Ok(Some(Self {
-            root: root.to_path_buf(),
+            root: volume_root,
             handle: OwnedHandle(handle),
         }))
     }
@@ -418,16 +423,16 @@ impl ParsedRecord {
     }
 }
 
-fn drive_root_letter(root: &Path) -> Option<char> {
-    if root.parent().is_some() {
-        return None;
-    }
+pub fn volume_root(root: &Path) -> Option<PathBuf> {
     let text = root.to_string_lossy();
     let bytes = text.as_bytes();
     if bytes.len() < 2 || bytes[1] != b':' || !bytes[0].is_ascii_alphabetic() {
         return None;
     }
-    Some((bytes[0] as char).to_ascii_uppercase())
+    Some(PathBuf::from(format!(
+        "{}:\\",
+        (bytes[0] as char).to_ascii_uppercase()
+    )))
 }
 
 fn cursor_is_valid(cursor: JournalCursor, journal: JournalInfo) -> bool {
@@ -617,10 +622,13 @@ mod tests {
     }
 
     #[test]
-    fn finds_drive_roots_only() {
-        assert_eq!(drive_root_letter(Path::new(r"C:\")), Some('C'));
-        assert_eq!(drive_root_letter(Path::new(r"C:\Users")), None);
-        assert_eq!(drive_root_letter(Path::new(r"\\server\share")), None);
+    fn finds_local_volume_roots_from_drive_paths() {
+        assert_eq!(volume_root(Path::new(r"C:\")), Some(PathBuf::from(r"C:\")));
+        assert_eq!(
+            volume_root(Path::new(r"d:\Projects\Kite")),
+            Some(PathBuf::from(r"D:\"))
+        );
+        assert_eq!(volume_root(Path::new(r"\\server\share")), None);
     }
 
     #[test]
