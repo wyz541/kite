@@ -117,8 +117,10 @@ Windows Core 在下载前检查当前 EXE 文件及所在目录是否可写。
 检查失败时，Kite 不下载、不退出，并提示用户复制到可写目录。
 助手最多等待当前 Kite PID 10 秒。
 助手强制结束同名 Kite 进程。
-助手等待目标 EXE 文件锁释放。
-助手把当前 EXE 移动为 `Kite.exe.old`。
+助手直接尝试把当前 EXE 移动为 `Kite.exe.old`。
+移动失败时，助手重试。
+重试直接重命名目标文件。
+此操作兼容 Windows 加载器的共享删除权限。
 助手复制已经校验的新 EXE。
 助手再次计算目标文件 SHA-256。
 助手启动新 EXE。
@@ -217,6 +219,8 @@ macOS 不实现第二套版本比较或资产选择逻辑。
 - `SHA256SUMS.txt` 解析测试。
 - 在线 Release 解析测试。
 - 在线 Windows 资产下载和摘要测试。
+- Windows 加载器兼容文件锁替换测试。
+- Windows 更新助手 UTF-8 BOM 测试。
 - Windows 单元测试。
 - Windows Clippy。
 - Windows 发布构建。

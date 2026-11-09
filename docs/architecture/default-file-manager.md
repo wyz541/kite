@@ -38,15 +38,21 @@ Kite 写入当前用户注册表。
 
 ```text
 HKEY_CURRENT_USER\Software\Classes\Folder\shell\open\command
+HKEY_CURRENT_USER\Software\Classes\Folder\shell\explore\command
 ```
 
-命令格式如下：
+两个命令都使用以下格式：
 
 ```text
 "C:\Path\Kite.exe" "%1"
 ```
 
 `%1` 是 Shell 传入的文件夹路径。
+
+Kite 向两个命令键写入空 `DelegateExecute` 值。
+Windows 系统级 `open` 和 `explore` 命令使用 Explorer 的委托执行器。
+当前用户命令必须阻止该委托继承。
+否则 Shell 会忽略 Kite 命令。
 
 ### 备份位置
 
@@ -58,23 +64,30 @@ HKEY_CURRENT_USER\Software\Kite\ExplorerIntegration
 
 备份包含以下数据：
 
-- 设置前的命令键是否存在。
-- 设置前的默认命令值是否存在。
-- 设置前的默认命令值。
+- `open` 和 `explore` 命令键是否存在。
+- 两个键的默认命令值是否存在。
+- 两个键的默认命令值。
+- 两个键的 `DelegateExecute` 值是否存在。
+- 两个键的 `DelegateExecute` 值和类型。
 - Kite 注册的命令。
 - 备份格式版本。
 
+旧版备份格式仍可恢复。
+旧版备份不管理 `explore` 和 `DelegateExecute`。
+
 ### 启用流程
 
-1. 读取当前用户的文件夹打开命令。
-2. 读取已有 Kite 备份。
-3. 如果当前命令仍是备份中的 Kite 命令，保留原备份。
-4. 如果当前命令已由其他应用更改，将当前命令保存为新备份。
-5. 写入 Kite 命令。
-6. 保存备份。
-7. 通知 Shell 关联已变化。
+1. 读取当前用户的 `open` 命令。
+2. 读取当前用户的 `explore` 命令。
+3. 读取已有 Kite 备份。
+4. 如果当前命令仍是备份中的 Kite 命令，保留原备份。
+5. 如果当前命令已由其他应用更改，将当前命令保存为新备份。
+6. 写入两个 Kite 命令。
+7. 清空两个命令键的 `DelegateExecute`。
+8. 保存备份。
+9. 通知 Shell 关联已变化。
 
-备份写入失败时，Kite 恢复原命令。
+备份写入失败时，Kite 恢复原命令和原 `DelegateExecute` 值。
 
 ### Windows Search 和 PowerToys Run
 
@@ -97,13 +110,14 @@ PowerToys Run 缓存应用列表。
 ### 恢复流程
 
 1. 读取 Kite 备份。
-2. 读取当前文件夹打开命令。
-3. 如果当前命令不是 Kite 命令，停止恢复。
-4. 如果备份键原本不存在，删除 Kite 创建的命令键。
-5. 如果备份值原本不存在，删除 Kite 写入的默认值。
-6. 如果备份命令存在，写回备份命令。
-7. 清除 Kite 备份。
-8. 通知 Shell 关联已变化。
+2. 读取当前 `open` 命令。
+3. 读取当前 `explore` 命令。
+4. 如果任一当前命令不是 Kite 命令，停止恢复。
+5. 恢复两个命令键的存在状态。
+6. 恢复两个默认命令值。
+7. 恢复两个 `DelegateExecute` 值。
+8. 清除 Kite 备份。
+9. 通知 Shell 关联已变化。
 
 恢复流程不覆盖其他应用后来设置的默认值。
 
@@ -199,11 +213,14 @@ SwiftUI 内容视图出现后处理待处理队列。
 Windows 测试覆盖以下行为：
 
 - 命令路径使用引号。
-- 启用时保存旧命令。
+- 启用时保存 `open` 和 `explore` 旧命令。
+- 启用时清空两个 `DelegateExecute` 值。
 - 重复启用保留原备份。
-- 恢复写回旧命令。
+- 恢复写回两个旧命令。
+- 恢复写回两个旧 `DelegateExecute` 值。
 - 旧命令不存在时恢复为不存在。
 - 外部修改后拒绝覆盖。
+- 旧版备份只恢复 `open` 命令。
 
 macOS CI 覆盖以下检查：
 
