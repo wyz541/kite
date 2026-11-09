@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
+use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -15,16 +16,19 @@ use ignore::{WalkBuilder, WalkState};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use sysinfo::{Disks, System};
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, PhraseQuery, Query, RegexQuery};
+use tantivy::query::{BooleanQuery, Occur, PhraseQuery, Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{
-    Field, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument, TextFieldIndexing,
-    TextOptions, Value,
+    Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TEXT, TantivyDocument,
+    TextFieldIndexing, TextOptions, Value,
 };
 use tantivy::tokenizer::{SimpleTokenizer, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 use thread_priority::{ThreadBuilderExt, ThreadPriority};
 
 use crate::fs::{EntryKind, search_path_quality_rank, type_label};
+#[cfg(test)]
+use crate::search_filters::SearchTimeFilter;
+use crate::search_filters::{SearchFilters, SearchKindFilter};
 
 pub const CONTENT_SEARCH_MAX_FILES: usize = 50;
 pub const CONTENT_SEARCH_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
@@ -115,6 +119,7 @@ struct ContentFields {
     name: Field,
     size: Field,
     modified_ms: Field,
+    extension_key: Field,
     body: Field,
 }
 
@@ -351,6 +356,17 @@ impl ContentSearchService {
         regex: bool,
         max_files: usize,
     ) -> Result<Option<ContentSearchSnapshot>, String> {
+        self.search_with_filters(roots, query, regex, max_files, SearchFilters::default())
+    }
+
+    pub fn search_with_filters(
+        &self,
+        roots: &[PathBuf],
+        query: &str,
+        regex: bool,
+        max_files: usize,
+        filters: SearchFilters,
+    ) -> Result<Option<ContentSearchSnapshot>, String> {
         let query = query.trim();
         if query.is_empty() {
             return Ok(None);
@@ -367,7 +383,15 @@ impl ContentSearchService {
         }
 
         let started = Instant::now();
-        let result = self.search_inner(&roots, query, regex, max_files, cancel.as_ref(), started);
+        let result = self.search_inner(
+            &roots,
+            query,
+            regex,
+            max_files,
+            filters,
+            cancel.as_ref(),
+            started,
+        );
         if let Ok(mut active) = self.search_cancel.lock()
             && active
                 .as_ref()
@@ -381,17 +405,32 @@ impl ContentSearchService {
         result.map(Some)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn search_inner(
         &self,
         roots: &[PathBuf],
         query: &str,
         regex: bool,
         max_files: usize,
+        filters: SearchFilters,
         cancel: &AtomicBool,
         started: Instant,
     ) -> Result<ContentSearchSnapshot, String> {
         let max_files = max_files.clamp(1, CONTENT_SEARCH_MAX_FILES);
         let status = self.status();
+        if filters.kind == SearchKindFilter::Folders {
+            return Ok(ContentSearchSnapshot {
+                query: query.to_string(),
+                roots: roots.to_vec(),
+                files: Vec::new(),
+                index_state: status.state,
+                partial: false,
+                truncated: false,
+                scanned_documents: 0,
+                total_matches: 0,
+                duration_ms: started.elapsed().as_millis() as u64,
+            });
+        }
         let mut files = Vec::new();
         let mut partial = status.state != ContentIndexState::Ready;
         let mut truncated = false;
@@ -399,7 +438,7 @@ impl ContentSearchService {
         if regex {
             validate_query(query, true)?;
         } else if query.chars().count() >= 2 {
-            files = self.search_index(roots, query, max_files, cancel)?;
+            files = self.search_index(roots, query, max_files, filters, cancel)?;
         }
 
         let needs_preview = regex || files.is_empty();
@@ -414,6 +453,7 @@ impl ContentSearchService {
                 query,
                 regex,
                 max_files,
+                filters,
                 started + budget,
                 cancel,
                 &self.index_dir,
@@ -484,6 +524,7 @@ impl ContentSearchService {
         roots: &[PathBuf],
         query: &str,
         max_files: usize,
+        filters: SearchFilters,
         cancel: &AtomicBool,
     ) -> Result<Vec<ContentFileMatch>, String> {
         if cancel.load(Ordering::Relaxed) {
@@ -513,6 +554,35 @@ impl ContentSearchService {
                         .into_iter()
                         .map(|query| (Occur::Should, query))
                         .collect(),
+                )),
+            ));
+        }
+        if let Some(extensions) = filters.kind_extensions() {
+            let extension_queries = extensions
+                .iter()
+                .map(|extension| {
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(
+                            Term::from_field_text(self.schema.extension_key, extension),
+                            IndexRecordOption::Basic,
+                        )) as Box<dyn Query>,
+                    )
+                })
+                .collect::<Vec<_>>();
+            if !extension_queries.is_empty() {
+                clauses.push((Occur::Must, Box::new(BooleanQuery::new(extension_queries))));
+            }
+        }
+        if let Some(modified_after) = filters.modified_after_unix_ms() {
+            clauses.push((
+                Occur::Must,
+                Box::new(RangeQuery::new(
+                    Bound::Included(Term::from_field_i64(
+                        self.schema.modified_ms,
+                        modified_after,
+                    )),
+                    Bound::Unbounded,
                 )),
             ));
         }
@@ -589,7 +659,7 @@ fn default_index_dir() -> PathBuf {
         .or_else(dirs::data_dir)
         .unwrap_or_else(std::env::temp_dir)
         .join("Kite")
-        .join("search-index-v1")
+        .join("search-index-v2")
 }
 
 fn open_or_create_index(index_dir: &Path) -> Result<(Index, ContentFields), String> {
@@ -615,7 +685,8 @@ fn content_schema() -> Schema {
     builder.add_text_field("root", STRING | STORED);
     builder.add_text_field("name", TEXT | STORED);
     builder.add_u64_field("size", STORED);
-    builder.add_i64_field("modified_ms", STORED);
+    builder.add_i64_field("modified_ms", INDEXED | STORED);
+    builder.add_text_field("extension_key", STRING);
     let body_options = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer("default")
@@ -649,6 +720,9 @@ impl ContentFields {
             modified_ms: schema
                 .get_field("modified_ms")
                 .map_err(|_| "内容索引缺少 modified_ms 字段".to_string())?,
+            extension_key: schema
+                .get_field("extension_key")
+                .map_err(|_| "内容索引缺少 extension_key 字段".to_string())?,
             body: schema
                 .get_field("body")
                 .map_err(|_| "内容索引缺少 body 字段".to_string())?,
@@ -962,6 +1036,10 @@ fn index_file(
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| path_text.clone());
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
 
     writer.delete_term(Term::from_field_text(schema.path_key, &key));
     let mut document = TantivyDocument::default();
@@ -972,6 +1050,7 @@ fn index_file(
     document.add_text(schema.name, &name);
     document.add_u64(schema.size, metadata.len());
     document.add_i64(schema.modified_ms, modified_ms);
+    document.add_text(schema.extension_key, extension);
     document.add_text(schema.body, text.to_lowercase());
     writer
         .add_document(document)
@@ -1140,11 +1219,13 @@ struct LiveSearchOutcome {
     truncated: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn live_search(
     roots: &[PathBuf],
     query: &str,
     regex: bool,
     max_files: usize,
+    filters: SearchFilters,
     deadline: Instant,
     cancel: &AtomicBool,
     index_dir: &Path,
@@ -1193,6 +1274,9 @@ fn live_search(
                 if metadata.len() > CONTENT_SEARCH_MAX_FILE_BYTES
                     || is_cloud_placeholder(entry.path(), &metadata)
                 {
+                    return WalkState::Continue;
+                }
+                if !filters.matches(entry.path(), false, metadata.modified().ok()) {
                     return WalkState::Continue;
                 }
                 let Ok((count, matches)) = search_file_matches(entry.path(), query, regex, cancel)
@@ -1774,5 +1858,56 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(service.index_dir.clone());
+    }
+
+    #[test]
+    fn applies_content_filters_before_file_limit() {
+        let root = test_root("filters");
+        let index_dir = test_root("filters-index");
+        fs::create_dir_all(&root).expect("create filter root");
+        for index in 0..60 {
+            fs::write(
+                root.join(format!("kitefilter-{index:02}.txt")),
+                "kitefilter content",
+            )
+            .expect("write txt filter fixture");
+        }
+        fs::write(root.join("kitefilter-current.md"), "kitefilter content")
+            .expect("write current markdown fixture");
+        let old_path = root.join("kitefilter-old.md");
+        fs::write(&old_path, "kitefilter content").expect("write old markdown fixture");
+        let old_time = SystemTime::now() - Duration::from_secs(40 * 24 * 60 * 60);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&old_path)
+            .expect("open old markdown fixture");
+        file.set_times(fs::FileTimes::new().set_modified(old_time))
+            .expect("set old markdown time");
+        let service = ContentSearchService::open_at(index_dir.clone()).expect("open service");
+        service
+            .ensure_roots(std::slice::from_ref(&root))
+            .expect("ensure filter root");
+        wait_until_ready(&service, 62);
+
+        let result = service
+            .search_with_filters(
+                std::slice::from_ref(&root),
+                "kitefilter",
+                false,
+                50,
+                SearchFilters {
+                    kind: SearchKindFilter::Markdown,
+                    modified: SearchTimeFilter::Last7Days,
+                },
+            )
+            .expect("filtered search succeeds")
+            .expect("filtered search returns result");
+        assert_eq!(result.files.len(), 1);
+        assert_eq!(result.files[0].name, "kitefilter-current.md");
+        assert!(!result.truncated);
+
+        service.set_indexing_paused(true);
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(index_dir);
     }
 }

@@ -3,7 +3,7 @@
 > 结论：Kite 使用持久化 Tantivy 名称索引执行全局文件名搜索。名称索引完整覆盖范围时，Kite 直接返回结果。索引未就绪时，Kite 先显示 Everything、Windows Search 或 Spotlight 的预览，再使用遍历补齐。Kite 使用 Tantivy 内容索引和 `grep-searcher` 生成内容匹配。后台任务始终让位于前台交互。
 
 状态：已实现
-日期：2026-11-08
+日期：2026-11-09
 关联调研：[Rust 搜索引擎调研](../RUST_SEARCH_ENGINE_RESEARCH.md)
 
 ## 1. 能力
@@ -68,7 +68,7 @@ Kite 同时把该文件加入索引更新队列。
 ### 3.1 名称索引
 
 ```text
-Kite/name-index-v2/
+Kite/name-index-v3/
 ```
 
 名称索引只保存名称查询需要的数据。
@@ -79,6 +79,9 @@ Kite/name-index-v2/
 | `path_key` | 规范化路径、删除和范围过滤 |
 | `root_key` | 名称索引根目录 |
 | `name_key` | 小写完整文件名，用于子串匹配 |
+| `is_dir` | 文件夹过滤 |
+| `modified_ms` | 修改时间过滤 |
+| `extension_key` | 文件类型过滤 |
 | `path` | 显示完整路径 |
 
 名称索引使用 Tantivy。
@@ -89,7 +92,7 @@ Kite/name-index-v2/
 ### 3.2 内容索引
 
 ```text
-Kite/search-index-v1/
+Kite/search-index-v2/
 ```
 
 内容索引字段如下。
@@ -103,6 +106,7 @@ Kite/search-index-v1/
 | `name` | 文件名 |
 | `size` | 文件大小 |
 | `modified_ms` | 修改时间 |
+| `extension_key` | 文件类型过滤 |
 | `body` | 小写文本词项 |
 
 索引不保存完整正文。
@@ -147,6 +151,15 @@ Rust Core 也接受正则查询。
 精确名称和精确文件主名排在最前。
 目标路径相同且匹配质量相同时，`trunk`、`main`、`master`、`develop` 路径优先。
 `publish`、`release`、`build`、`dist`、`archive` 和缓存路径排在其后。
+
+名称和内容模式共享以下过滤条件。
+
+- 项目类型：全部项目、文件夹、文档、源代码、Markdown、图片或媒体。
+- 修改时间：任意时间、最近 24 小时、最近 7 天或最近 30 天。
+
+类型和时间条件先进入索引查询。
+全量遍历也在结果上限前应用过滤条件。
+因此过滤后的结果不会被未过滤结果挤掉。
 
 ## 5. 搜索范围
 
@@ -324,6 +337,8 @@ Core 测试覆盖以下场景。
 12. USN V2 和 V3 记录解析。
 13. USN Journal ID 和游标校验。
 14. 普通用户读取 USN 并解析新建文件路径。
+15. 名称过滤在 1000 项上限前生效。
+16. 内容过滤在 50 文件上限前生效。
 
 本地验证还运行 Rust 格式检查、全部 Core 测试、Clippy、Windows 构建和 macOS 应用构建。
 

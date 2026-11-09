@@ -2,20 +2,23 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use crate::fs::GlobalNameSearchSnapshot;
+use crate::search_filters::SearchFilters;
 
 #[cfg(target_os = "macos")]
 pub fn search_indexed_names(
     roots: &[PathBuf],
     query: &str,
+    filters: SearchFilters,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
-    macos::search(roots, query, cancel)
+    macos::search(roots, query, filters, cancel)
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
 pub fn search_indexed_names(
     _roots: &[PathBuf],
     _query: &str,
+    _filters: SearchFilters,
     _cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
     Ok(None)
@@ -33,10 +36,12 @@ mod macos {
         FileEntry, SEARCH_RESULT_LIMIT, file_entry_from_metadata, has_generated_parent,
         is_generated_search_directory, is_hidden, sort_global_name_entries,
     };
+    use crate::search_filters::SearchFilters;
 
     pub(super) fn search(
         roots: &[PathBuf],
         query: &str,
+        filters: SearchFilters,
         cancel: &AtomicBool,
     ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
         let query = query.trim();
@@ -83,6 +88,9 @@ mod macos {
                 {
                     continue;
                 }
+                if !filters.matches(&path, metadata.is_dir(), metadata.modified().ok()) {
+                    continue;
+                }
                 entries.push(file_entry_from_metadata(path, name, &metadata));
                 if entries.len() > SEARCH_RESULT_LIMIT {
                     break;
@@ -115,9 +123,10 @@ mod macos {
 pub fn search_indexed_names(
     roots: &[PathBuf],
     query: &str,
+    filters: SearchFilters,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
-    windows::search(roots, query, cancel).map_err(|error| error.to_string())
+    windows::search(roots, query, filters, cancel).map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
@@ -146,6 +155,7 @@ mod windows {
         FileEntry, SEARCH_RESULT_LIMIT, file_entry_from_metadata, has_generated_parent,
         is_generated_search_directory, is_hidden, sort_global_name_entries,
     };
+    use crate::search_filters::SearchFilters;
 
     struct ComApartment {
         owned: bool,
@@ -171,13 +181,14 @@ mod windows {
     pub(super) fn search(
         roots: &[PathBuf],
         query: &str,
+        filters: SearchFilters,
         cancel: &AtomicBool,
     ) -> WindowsResult<Option<GlobalNameSearchSnapshot>> {
         let query = query.trim();
         if query.is_empty() {
             return Ok(None);
         }
-        if let Some(snapshot) = everything::search(roots, query, cancel) {
+        if let Some(snapshot) = everything::search(roots, query, filters, cancel) {
             return Ok(Some(snapshot));
         }
         let _com = ComApartment::new();
@@ -258,7 +269,7 @@ mod windows {
                 if name.is_empty() || !name.to_lowercase().contains(&query_lower) {
                     continue;
                 }
-                let Some(entry) = build_entry(path, name, &roots) else {
+                let Some(entry) = build_entry(path, name, &roots, filters) else {
                     continue;
                 };
                 if entries.len() > SEARCH_RESULT_LIMIT {
@@ -341,7 +352,12 @@ mod windows {
                 .ends_with(':')
     }
 
-    fn build_entry(path: PathBuf, name: String, roots: &[PathBuf]) -> Option<FileEntry> {
+    fn build_entry(
+        path: PathBuf,
+        name: String,
+        roots: &[PathBuf],
+        filters: SearchFilters,
+    ) -> Option<FileEntry> {
         if name.is_empty() || name.starts_with('.') {
             return None;
         }
@@ -351,6 +367,9 @@ mod windows {
             || (metadata.is_dir() && is_generated_search_directory(&path))
             || has_generated_parent(&path, root)
         {
+            return None;
+        }
+        if !filters.matches(&path, metadata.is_dir(), metadata.modified().ok()) {
             return None;
         }
         Some(file_entry_from_metadata(path, name, &metadata))
@@ -384,6 +403,7 @@ mod windows {
         use libloading::{Library, Symbol};
 
         use crate::fs::FileEntry;
+        use crate::search_filters::SearchFilters;
 
         type SetSearchW = unsafe extern "system" fn(*const u16);
         type SetMatchCase = unsafe extern "system" fn(i32);
@@ -400,6 +420,7 @@ mod windows {
         pub(super) fn search(
             roots: &[PathBuf],
             query: &str,
+            filters: SearchFilters,
             cancel: &AtomicBool,
         ) -> Option<super::GlobalNameSearchSnapshot> {
             if cancel.load(Ordering::Relaxed) {
@@ -464,7 +485,7 @@ mod windows {
                         .map(|value| value.to_string_lossy().into_owned())
                         .unwrap_or_default();
                     if name.to_lowercase().contains(&query.to_lowercase())
-                        && let Some(entry) = super::build_entry(path, name, roots)
+                        && let Some(entry) = super::build_entry(path, name, roots, filters)
                     {
                         entries.push(entry);
                     }

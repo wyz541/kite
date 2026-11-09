@@ -282,6 +282,7 @@ impl KiteCore {
         &self,
         paths: Vec<String>,
         query: String,
+        filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<GlobalSearchResultDto>, KiteError> {
         let cancel = Arc::new(AtomicBool::new(false));
         {
@@ -293,7 +294,8 @@ impl KiteCore {
         }
 
         let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        let result = crate::global_name_search::search_names(&roots, &query, cancel.as_ref());
+        let result =
+            crate::global_name_search::search_names(&roots, &query, filters, cancel.as_ref());
 
         if let Ok(mut active) = self.search_cancel.lock()
             && active
@@ -323,6 +325,7 @@ impl KiteCore {
         &self,
         paths: Vec<String>,
         query: String,
+        filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<GlobalSearchResultDto>, KiteError> {
         let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -333,7 +336,8 @@ impl KiteCore {
                 .map_err(|_| KiteError::operation("索引搜索状态锁不可用"))?;
             *active = Some(Arc::clone(&cancel));
         }
-        let result = crate::indexed_search::search_indexed_names(&roots, &query, cancel.as_ref());
+        let result =
+            crate::indexed_search::search_indexed_names(&roots, &query, filters, cancel.as_ref());
         if let Ok(mut active) = self.indexed_search_cancel.lock()
             && active
                 .as_ref()
@@ -425,11 +429,12 @@ impl KiteCore {
         query: String,
         regex: bool,
         max_files: u32,
+        filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<ContentSearchResultDto>, KiteError> {
         let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
         service
-            .search(&roots, &query, regex, max_files.max(1) as usize)
+            .search_with_filters(&roots, &query, regex, max_files.max(1) as usize, filters)
             .map(|snapshot| snapshot.map(content_search_result_dto))
             .map_err(KiteError::operation)
     }
@@ -763,6 +768,7 @@ mod tests {
                     trunk.to_string_lossy().into_owned(),
                 ],
                 "PocoCheck".to_string(),
+                crate::search_filters::SearchFilters::default(),
             )
             .expect("global search succeeds")
             .expect("global search returns a snapshot");
@@ -776,6 +782,36 @@ mod tests {
                 .ends_with(std::path::Path::new("trunk").join("PocoCheck"))
         );
         assert!(!result.truncated);
+    }
+
+    #[test]
+    fn core_applies_global_name_filters() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-core-global-filter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("create filter fixture");
+        std::fs::write(directory.join("needle.txt"), b"text").expect("write text fixture");
+        std::fs::write(directory.join("needle.md"), b"markdown").expect("write markdown fixture");
+        let core = KiteCore::new();
+        let result = core
+            .search_directories(
+                vec![directory.to_string_lossy().into_owned()],
+                "needle".to_string(),
+                crate::search_filters::SearchFilters {
+                    kind: crate::search_filters::SearchKindFilter::Markdown,
+                    modified: crate::search_filters::SearchTimeFilter::Any,
+                },
+            )
+            .expect("filtered global search succeeds")
+            .expect("filtered global search returns result");
+        let _ = std::fs::remove_dir_all(directory);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].name, "needle.md");
     }
 
     #[test]
@@ -800,7 +836,13 @@ mod tests {
         core.prepare_content_search(vec![root.clone()])
             .expect("prepare content index");
         let result = core
-            .search_content(vec![root], "needle".to_string(), false, 20)
+            .search_content(
+                vec![root],
+                "needle".to_string(),
+                false,
+                20,
+                crate::search_filters::SearchFilters::default(),
+            )
             .expect("content search succeeds")
             .expect("content search returns a result");
         let _ = std::fs::remove_dir_all(&directory);

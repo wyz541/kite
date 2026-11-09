@@ -1205,6 +1205,11 @@ struct KiteContentSearchResults: View {
                     Text("\(search.totalMatches) 处匹配")
                         .font(.system(size: 9.5, weight: .semibold, design: .rounded))
                         .foregroundStyle(.tertiary)
+                    if let summary = model.globalSearchFilterSummary {
+                        Text(summary)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
                     if search.partial {
                         Text("索引更新中")
                             .font(.system(size: 9.5, weight: .semibold, design: .rounded))
@@ -1445,6 +1450,11 @@ struct KiteGlobalSearchResults: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.primary.opacity(0.055), in: Capsule())
+                    if let summary = model.globalSearchFilterSummary {
+                        Text(summary)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
                     if search.partial {
                         Text("索引结果，正在核对全部文件…")
                             .font(.system(size: 9.5, weight: .medium))

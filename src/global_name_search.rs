@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use crate::fs::{GlobalNameSearchSnapshot, SEARCH_RESULT_LIMIT, sort_global_name_entries};
+use crate::search_filters::SearchFilters;
 use crate::{fs, indexed_search, name_index};
 
 pub fn ensure_roots(roots: &[PathBuf]) {
@@ -20,18 +21,20 @@ pub fn status(roots: &[PathBuf]) -> Vec<name_index::NameIndexStatus> {
 pub fn search_names(
     roots: &[PathBuf],
     query: &str,
+    filters: SearchFilters,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
     ensure_roots(roots);
     let service = name_index::shared_service()
         .ok()
         .map(|service| service.as_ref());
-    search_names_with_service(roots, query, cancel, service)
+    search_names_with_service(roots, query, filters, cancel, service)
 }
 
 fn search_names_with_service(
     roots: &[PathBuf],
     query: &str,
+    filters: SearchFilters,
     cancel: &AtomicBool,
     service: Option<&name_index::NameIndexService>,
 ) -> Result<Option<GlobalNameSearchSnapshot>, String> {
@@ -39,17 +42,22 @@ fn search_names_with_service(
     if query.is_empty() {
         return Ok(None);
     }
-    let indexed = service.and_then(|service| service.search(roots, query, cancel).ok().flatten());
+    let indexed = service.and_then(|service| {
+        service
+            .search_with_filters(roots, query, filters, cancel)
+            .ok()
+            .flatten()
+    });
     if let Some(snapshot) = indexed.as_ref()
         && !snapshot.partial
     {
         return Ok(Some(snapshot.clone()));
     }
 
-    let accelerated = indexed_search::search_indexed_names(roots, query, cancel)
+    let accelerated = indexed_search::search_indexed_names(roots, query, filters, cancel)
         .ok()
         .flatten();
-    let walked = fs::search_global_names(roots, query, cancel)?;
+    let walked = fs::search_global_names_with_filters(roots, query, filters, cancel)?;
     let Some(walked) = walked else {
         return Ok(None);
     };
@@ -149,6 +157,7 @@ mod tests {
         let snapshot = search_names_with_service(
             std::slice::from_ref(&root),
             "needle",
+            SearchFilters::default(),
             &cancel,
             Some(&service),
         )
