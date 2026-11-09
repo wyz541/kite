@@ -755,6 +755,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires packaged Kensaku sidecars"]
     fn core_searches_file_content_and_returns_lines() {
         let directory = std::env::temp_dir().join(format!(
             "kite-core-content-search-{}-{}",
