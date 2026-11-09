@@ -539,7 +539,7 @@ pub fn install_windows_update(
     fs::create_dir_all(&updates).map_err(|error| format!("无法创建更新目录：{error}"))?;
     let helper = updates.join(format!("apply-{version}-{}.ps1", std::process::id()));
     let log = updates.join("update.log");
-    let helper_contents = format!("\u{feff}{WINDOWS_UPDATE_HELPER}");
+    let helper_contents = format!("\u{feff}{}", windows_update_helper());
     fs::write(&helper, helper_contents.as_bytes())
         .map_err(|error| format!("无法写入更新助手：{error}"))?;
 
@@ -573,6 +573,45 @@ pub fn install_windows_update(
         .spawn()
         .map_err(|error| format!("无法启动更新助手：{error}"))?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+const WINDOWS_UPDATE_TARGET_REPLACEMENT: &str = r#"
+# Windows executable images can share delete access while running.
+# Rename the target directly instead of requiring an exclusive write lock.
+function Move-UpdateTargetToBackup {
+    param(
+        [Parameter(Mandatory=$true)][string]$TargetPath,
+        [Parameter(Mandatory=$true)][string]$BackupPath,
+        [int]$TimeoutMilliseconds = 30000,
+        [int]$RetryMilliseconds = 250
+    )
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMilliseconds)
+    $attempt = 0
+    while ($true) {
+        try {
+            if (Test-Path -LiteralPath $BackupPath) { Remove-Item -LiteralPath $BackupPath -Force }
+            if (Test-Path -LiteralPath $TargetPath) { Move-Item -LiteralPath $TargetPath -Destination $BackupPath -Force }
+            return
+        } catch {
+            if ((Get-Date) -ge $deadline) { throw }
+            $attempt++
+            if (($attempt % 20) -eq 1) {
+                Write-UpdateLog "Waiting for target file replacement lock (attempt $attempt)"
+            }
+            Stop-KiteProcesses
+            Start-Sleep -Milliseconds $RetryMilliseconds
+        }
+    }
+}
+"#;
+
+#[cfg(target_os = "windows")]
+fn windows_update_helper() -> String {
+    WINDOWS_UPDATE_HELPER.replace(
+        "__MOVE_UPDATE_TARGET_TO_BACKUP__",
+        WINDOWS_UPDATE_TARGET_REPLACEMENT,
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -623,6 +662,7 @@ function Stop-KiteProcesses {
         throw "无法结束现有 Kite 进程。请关闭所有 Kite 窗口后重试。"
     }
 }
+__MOVE_UPDATE_TARGET_TO_BACKUP__
 $backup = "$Target.old"
 $targetDirectory = Split-Path -Parent $Target
 try {
@@ -631,20 +671,7 @@ try {
     if ($process) { $process.WaitForExit(10000) | Out-Null }
     Write-UpdateLog "Stopping existing Kite processes before update"
     Stop-KiteProcesses
-    $stream = $null
-    for ($attempt = 0; $attempt -lt 120; $attempt++) {
-        try {
-            $stream = [IO.File]::Open($Target, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-            $stream.Close()
-            break
-        } catch {
-            if ($attempt -eq 119) { throw }
-            Stop-KiteProcesses
-            Start-Sleep -Milliseconds 250
-        }
-    }
-    if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
-    if (Test-Path -LiteralPath $Target) { Move-Item -LiteralPath $Target -Destination $backup -Force }
+    Move-UpdateTargetToBackup -TargetPath $Target -BackupPath $backup
     Copy-Item -LiteralPath $Source -Destination $Target -Force
     $actualHash = (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualHash -ne $ExpectedHash) { throw "SHA-256 mismatch" }
@@ -676,7 +703,7 @@ try {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     fn release_json(version: &str, digest: &str) -> String {
         json!({
@@ -782,10 +809,148 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_update_helper_stops_existing_kite_processes() {
-        assert!(WINDOWS_UPDATE_HELPER.contains("function Stop-KiteProcesses"));
-        assert!(WINDOWS_UPDATE_HELPER.contains("Stop-Process -Id "));
-        assert!(WINDOWS_UPDATE_HELPER.contains("-Force -ErrorAction Stop"));
-        assert!(WINDOWS_UPDATE_HELPER.contains("Stopping existing Kite processes before update"));
+        let helper = windows_update_helper();
+        assert!(helper.contains("function Stop-KiteProcesses"));
+        assert!(helper.contains("Stop-Process -Id "));
+        assert!(helper.contains("-Force -ErrorAction Stop"));
+        assert!(helper.contains("Stopping existing Kite processes before update"));
+        assert!(!helper.contains("__MOVE_UPDATE_TARGET_TO_BACKUP__"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_update_helper_is_utf8_with_bom() {
+        let helper_contents = format!("\u{feff}{}", windows_update_helper());
+        assert!(helper_contents.as_bytes().starts_with(&[0xef, 0xbb, 0xbf]));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_update_helper_replaces_target_with_a_loader_compatible_lock() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-update-loader-lock-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create loader lock test directory");
+        let target = directory.join("KiteUpdateFixture.exe");
+        let backup = directory.join("KiteUpdateFixture.exe.old");
+        let source = directory.join("new-KiteUpdateFixture.exe");
+        let ready = directory.join("holder-ready");
+        let release = directory.join("holder-release");
+        let holder_script = directory.join("holder.ps1");
+        let test_script = directory.join("replace-target.ps1");
+        fs::write(&target, b"old executable").expect("write locked target fixture");
+        fs::write(&source, b"new executable").expect("write source fixture");
+        fs::write(
+            &holder_script,
+            r#"
+param([string]$Path, [string]$ReadyPath, [string]$ReleasePath)
+$stream = [IO.File]::Open(
+    $Path,
+    [IO.FileMode]::Open,
+    [IO.FileAccess]::Read,
+    ([IO.FileShare]::Read -bor [IO.FileShare]::Delete)
+)
+[IO.File]::WriteAllText($ReadyPath, "ready")
+$deadline = (Get-Date).AddSeconds(20)
+while (-not (Test-Path -LiteralPath $ReleasePath) -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 25
+}
+$stream.Dispose()
+"#,
+        )
+        .expect("write loader lock holder");
+        let test_helper = format!(
+            r#"
+param(
+    [string]$TargetPath,
+    [string]$BackupPath,
+    [string]$SourcePath
+)
+$ErrorActionPreference = 'Stop'
+function Write-UpdateLog([string]$Message) {{}}
+function Stop-KiteProcesses {{}}
+{}
+Move-UpdateTargetToBackup -TargetPath $TargetPath -BackupPath $BackupPath -TimeoutMilliseconds 750 -RetryMilliseconds 25
+Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
+"#,
+            WINDOWS_UPDATE_TARGET_REPLACEMENT
+        );
+        fs::write(&test_script, test_helper).expect("write target replacement test");
+
+        let mut holder = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+            ])
+            .arg(&holder_script)
+            .arg(&target)
+            .arg(&ready)
+            .arg(&release)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("start loader lock holder");
+
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists()
+            && Instant::now() < ready_deadline
+            && holder
+                .try_wait()
+                .expect("inspect loader lock holder")
+                .is_none()
+        {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let holder_ready = ready.exists();
+        let output = holder_ready.then(|| {
+            std::process::Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                ])
+                .arg(&test_script)
+                .arg(&target)
+                .arg(&backup)
+                .arg(&source)
+                .output()
+                .expect("run target replacement test")
+        });
+
+        let _ = fs::write(&release, b"release");
+        let _ = holder.wait();
+        let backup_contents = fs::read(&backup).ok();
+        let target_contents = fs::read(&target).ok();
+        let _ = fs::remove_dir_all(&directory);
+
+        assert!(holder_ready, "loader lock holder did not become ready");
+        let output = output.expect("loader lock holder was not ready");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "target replacement failed\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        assert_eq!(
+            backup_contents.as_deref(),
+            Some(b"old executable".as_slice())
+        );
+        assert_eq!(
+            target_contents.as_deref(),
+            Some(b"new executable".as_slice())
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -799,7 +964,7 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        let helper_contents = format!("\u{feff}{WINDOWS_UPDATE_HELPER}");
+        let helper_contents = format!("\u{feff}{}", windows_update_helper());
         fs::write(&path, helper_contents.as_bytes()).expect("write update helper syntax fixture");
         let command = format!(
             "$null = [scriptblock]::Create((Get-Content -Raw -LiteralPath '{}')); if ($?) {{ exit 0 }} else {{ exit 1 }}",

@@ -215,7 +215,7 @@ macOS 在纵向列表边界拦截剩余事件。
 ## 默认文件夹打开方式
 
 Kite 支持将自身设为默认文件查看器。
-Windows 使用当前用户 `Folder\shell\open\command`。
+Windows 使用当前用户 `Folder\shell\open` 和 `Folder\shell\explore`。
 macOS 13 到 15 使用 LaunchServices `public.folder`。
 macOS 26 及更高版本使用全局 `NSFileViewer` 偏好。
 
