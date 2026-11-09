@@ -56,6 +56,9 @@ Daemon：
 2. Kite 可执行文件旁的 `kensaku-daemon.exe` 或 `kensaku-daemon`
 3. `PATH`
 
+Windows `v0.6.65` 及更高版本发现 sidecar 缺失时，Kite 自动下载当前稳定 Release ZIP。
+Kite 校验 ZIP 的 SHA-256 后安装 `kensaku-cli.exe` 和 `kensaku-daemon.exe`。
+
 ## 4. 构建 Sidecar
 
 运行：

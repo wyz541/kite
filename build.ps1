@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSCommandPath
 $dist = Join-Path $root 'dist'
 $binary = Join-Path $root 'target\release\kite-explorer.exe'
-$version = '0.6.64'
+$version = '0.6.65'
 $releaseName = "Kite-v$version-windows-x64"
 $staging = Join-Path $dist $releaseName
 $archive = Join-Path $dist "$releaseName.zip"
@@ -77,6 +77,20 @@ try {
         [IO.File]::Delete($archive)
     }
     Compress-Archive -Path (Join-Path $resolvedStaging '*') -DestinationPath $archive -CompressionLevel Optimal
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipArchive = [IO.Compression.ZipFile]::OpenRead($archive)
+    try {
+        $zipEntries = @($zipArchive.Entries.FullName)
+    }
+    finally {
+        $zipArchive.Dispose()
+    }
+    foreach ($requiredEntry in @('Kite.exe', 'kensaku-cli.exe', 'kensaku-daemon.exe')) {
+        if ($zipEntries -notcontains $requiredEntry) {
+            throw "Release ZIP is missing $requiredEntry"
+        }
+    }
 
     $distBinary = Join-Path $dist 'Kite.exe'
     Copy-Item -LiteralPath $binary -Destination $distBinary -Force
