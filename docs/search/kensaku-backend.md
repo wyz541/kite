@@ -56,6 +56,9 @@ Daemon：
 2. Kite 可执行文件旁的 `kensaku-daemon.exe` 或 `kensaku-daemon`
 3. `PATH`
 
+Daemon 发现只检查文件存在。
+Kite 不执行 `kensaku-daemon --help`，因为 daemon 会进入服务模式。
+
 Windows `v0.6.65` 及更高版本发现 sidecar 缺失时，Kite 自动下载当前稳定 Release ZIP。
 Kite 校验 ZIP 的 SHA-256 后安装 `kensaku-cli.exe`、`kensaku-daemon.exe` 和 `onnxruntime.dll`。
 
