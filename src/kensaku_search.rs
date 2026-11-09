@@ -33,8 +33,8 @@ const CONTENT_CANDIDATE_LIMIT: usize = 400;
 const SNIPPET_SCAN_BYTES: u64 = 8 * 1024 * 1024;
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(3);
 
-static CLI_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
-static DAEMON_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+static CLI_PATH: OnceLock<PathBuf> = OnceLock::new();
+static DAEMON_PATH: OnceLock<PathBuf> = OnceLock::new();
 static STATE_CACHE: OnceLock<Mutex<Option<CachedState>>> = OnceLock::new();
 static CONTENT_CANCEL: OnceLock<AtomicBool> = OnceLock::new();
 static DAEMON_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -332,15 +332,20 @@ fn ensure_daemon(roots: &[PathBuf]) -> Result<(), String> {
     if roots.is_empty() {
         return Err("没有可用的 Kensaku 搜索根目录".to_string());
     }
+    let guard = DAEMON_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = guard
+        .lock()
+        .map_err(|_| "Kensaku daemon 锁不可用".to_string())?;
+    #[cfg(all(target_os = "windows", not(test)))]
+    if cli_path().is_none() || daemon_path().is_none() {
+        crate::updater::repair_windows_sidecars()
+            .map_err(|error| format!("Kensaku sidecar 缺失，自动安装失败：{error}"))?;
+    }
     let _cli = cli_path().ok_or_else(|| "找不到 kensaku-cli".to_string())?;
     let daemon = daemon_path()
         .ok_or_else(|| "找不到 kensaku-daemon；请运行 Kensaku sidecar 构建脚本".to_string())?;
     let data_dir = kensaku_data_dir();
     fs::create_dir_all(&data_dir).map_err(|error| format!("无法创建 Kensaku 数据目录：{error}"))?;
-    let guard = DAEMON_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = guard
-        .lock()
-        .map_err(|_| "Kensaku daemon 锁不可用".to_string())?;
     let config_path = data_dir.join("config.json");
     let configured = config_roots(&config_path);
     let mut merged = configured.clone();
@@ -519,26 +524,27 @@ fn spawn_daemon(daemon: &Path, data_dir: &Path) -> Result<(), String> {
 }
 
 fn daemon_path() -> Option<&'static Path> {
-    DAEMON_PATH
-        .get_or_init(|| {
-            let mut candidates = Vec::new();
-            if let Some(path) = std::env::var_os("KITE_KENSAKU_DAEMON") {
-                candidates.push(PathBuf::from(path));
-            }
-            if let Ok(executable) = std::env::current_exe()
-                && let Some(parent) = executable.parent()
-            {
-                for name in ["kensaku-daemon.exe", "kensaku-daemon"] {
-                    candidates.push(parent.join(name));
-                }
-            }
-            candidates.push(PathBuf::from("kensaku-daemon.exe"));
-            candidates.push(PathBuf::from("kensaku-daemon"));
-            candidates
-                .into_iter()
-                .find(|candidate| command_works(candidate))
-        })
-        .as_deref()
+    if let Some(path) = DAEMON_PATH.get() {
+        return Some(path.as_path());
+    }
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("KITE_KENSAKU_DAEMON") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        for name in ["kensaku-daemon.exe", "kensaku-daemon"] {
+            candidates.push(parent.join(name));
+        }
+    }
+    candidates.push(PathBuf::from("kensaku-daemon.exe"));
+    candidates.push(PathBuf::from("kensaku-daemon"));
+    let found = candidates
+        .into_iter()
+        .find(|candidate| command_works(candidate))?;
+    let _ = DAEMON_PATH.set(found);
+    DAEMON_PATH.get().map(|path| path.as_path())
 }
 
 fn kensaku_data_dir() -> PathBuf {
@@ -790,26 +796,27 @@ fn path_key(path: &Path) -> String {
 }
 
 fn cli_path() -> Option<&'static Path> {
-    CLI_PATH
-        .get_or_init(|| {
-            let mut candidates = Vec::new();
-            if let Some(path) = std::env::var_os("KITE_KENSAKU_CLI") {
-                candidates.push(PathBuf::from(path));
-            }
-            if let Ok(executable) = std::env::current_exe()
-                && let Some(parent) = executable.parent()
-            {
-                for name in ["kensaku-cli.exe", "kensaku-cli"] {
-                    candidates.push(parent.join(name));
-                }
-            }
-            candidates.push(PathBuf::from("kensaku-cli.exe"));
-            candidates.push(PathBuf::from("kensaku-cli"));
-            candidates
-                .into_iter()
-                .find(|candidate| command_works(candidate))
-        })
-        .as_deref()
+    if let Some(path) = CLI_PATH.get() {
+        return Some(path.as_path());
+    }
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("KITE_KENSAKU_CLI") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        for name in ["kensaku-cli.exe", "kensaku-cli"] {
+            candidates.push(parent.join(name));
+        }
+    }
+    candidates.push(PathBuf::from("kensaku-cli.exe"));
+    candidates.push(PathBuf::from("kensaku-cli"));
+    let found = candidates
+        .into_iter()
+        .find(|candidate| command_works(candidate))?;
+    let _ = CLI_PATH.set(found);
+    CLI_PATH.get().map(|path| path.as_path())
 }
 
 fn command_works(path: &Path) -> bool {
