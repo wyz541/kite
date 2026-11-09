@@ -133,6 +133,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cat release-assets/SHA256SUMS.txt release-assets/SHA256SUMS-macos.txt > release-assets/combined-SHA256SUMS.txt
+          mv release-assets/combined-SHA256SUMS.txt release-assets/SHA256SUMS.txt
           notes="docs/RELEASE_NOTES_${TAG}.md"
           test -f "$notes"
           echo "RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
@@ -146,7 +147,7 @@ jobs:
             release-assets/Kite.exe
             release-assets/Kite-*-windows-x64.zip
             release-assets/Kite-*-macOS-arm64.zip
-            release-assets/combined-SHA256SUMS.txt
+            release-assets/SHA256SUMS.txt
           )
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --clobber

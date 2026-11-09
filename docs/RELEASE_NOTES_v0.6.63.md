@@ -56,7 +56,7 @@ Global name and content search now use the same local Kensaku daemon.
 
 - Windows: use `Kite-v0.6.63-windows-x64.zip`.
 - Windows direct executable: use `Kite.exe`.
-- macOS Apple Silicon: use `Kite-v0.6.63-macOS-arm64.zip`.
+- macOS: use `Kite-v0.6.63-macOS-arm64.zip` on Apple Silicon.
 - Verify downloads with `SHA256SUMS.txt`.
 
 ## Limit
