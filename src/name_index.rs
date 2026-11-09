@@ -302,6 +302,11 @@ impl NameIndexService {
         Self::open_at(index_dir, true)
     }
 
+    #[cfg(feature = "performance")]
+    pub fn open_for_performance(index_dir: PathBuf) -> Result<Self, String> {
+        Self::open_at(index_dir, false)
+    }
+
     fn open_at(index_dir: PathBuf, usn_enabled: bool) -> Result<Self, String> {
         #[cfg(not(windows))]
         let _ = usn_enabled;

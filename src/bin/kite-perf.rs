@@ -15,6 +15,7 @@ use kite_core::content_search::{
 };
 use kite_core::devices;
 use kite_core::fs as kite_fs;
+use kite_core::name_index::{NameIndexService, NameIndexState};
 use kite_core::session::{
     SESSION_SCHEMA_VERSION, SessionStateDto, SessionTabDto, load_session_for_performance,
     save_session_for_performance,
@@ -29,6 +30,7 @@ use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 const REPORT_SCHEMA_VERSION: u32 = 1;
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
 const CONTENT_INDEX_TIMEOUT: Duration = Duration::from_secs(180);
+const NAME_INDEX_TIMEOUT: Duration = Duration::from_secs(180);
 const INCREMENTAL_INDEX_TIMEOUT: Duration = Duration::from_secs(10);
 
 const AREAS: [&str; 13] = [
@@ -227,6 +229,7 @@ fn run() -> Result<(), String> {
     measure_tabs_and_session(&fixtures, &profile, &mut results)?;
     measure_directory_watch(&fixtures, &profile, &mut results)?;
     measure_name_searches(&fixtures, &profile, &mut results)?;
+    measure_name_index(&fixtures, &profile, &mut results)?;
     measure_content_search(&fixtures, &profile, &mut results)?;
     measure_preview_and_editor(&fixtures, &profile, &mut results)?;
     measure_file_operations(&fixtures, &profile, &mut results)?;
@@ -1440,6 +1443,180 @@ fn measure_name_searches(
         "SwiftUI search-field feedback and frame-stall measurement",
     );
     Ok(())
+}
+
+fn measure_name_index(
+    fixtures: &FixtureSet,
+    config: &ProfileConfig,
+    results: &mut Vec<MetricResult>,
+) -> Result<(), String> {
+    let Some((tree_size, tree)) = fixtures.trees.iter().next_back() else {
+        return Ok(());
+    };
+    let tree_size = *tree_size;
+    let roots = vec![tree.clone()];
+    let index_root = fixtures.root.join("indexes").join("name");
+    fs::create_dir_all(&index_root)
+        .map_err(|error| format!("cannot create name index fixture root: {error}"))?;
+
+    measure_scenario(
+        results,
+        "Global name search",
+        &format!("name_index_cold_build_{tree_size}"),
+        "core",
+        config.cold_samples,
+        0,
+        vec![
+            "Each sample creates a new Tantivy name index for the same fixed tree.".to_string(),
+            "Build time includes traversal, metadata reads, document writes, and commit."
+                .to_string(),
+        ],
+        |iteration| {
+            let index_dir = index_root.join(format!("cold-{iteration}"));
+            let service = NameIndexService::open_for_performance(index_dir.clone())?;
+            service.ensure_roots(&roots);
+            wait_for_name_index(&service, tree, tree_size as u64, NAME_INDEX_TIMEOUT)?;
+            let status = service
+                .status(std::slice::from_ref(tree))
+                .into_iter()
+                .next()
+                .ok_or_else(|| "name index status is unavailable".to_string())?;
+            let indexed_entries = status.indexed_entries;
+            let index_bytes = directory_size(&index_dir)?;
+            drop(service);
+            Ok(
+                WorkAmount::items(indexed_entries.max(1)).with_details(json!({
+                    "expected_files": tree_size,
+                    "indexed_entries": indexed_entries,
+                    "index_bytes": index_bytes,
+                    "provider": status.provider.as_str(),
+                    "coverage": status.coverage.as_str(),
+                })),
+            )
+        },
+    );
+
+    let warm_index = index_root.join("warm");
+    let service = NameIndexService::open_for_performance(warm_index.clone())?;
+    service.ensure_roots(&roots);
+    wait_for_name_index(&service, tree, tree_size as u64, NAME_INDEX_TIMEOUT)?;
+    let status = service
+        .status(std::slice::from_ref(tree))
+        .into_iter()
+        .next()
+        .ok_or_else(|| "warm name index status is unavailable".to_string())?;
+    let indexed_entries = status.indexed_entries;
+    let provider = status.provider.as_str();
+    let coverage = status.coverage.as_str();
+    let index_bytes = directory_size(&warm_index)?;
+    measure_scenario(
+        results,
+        "Global name search",
+        &format!("name_index_warm_query_{tree_size}"),
+        "core",
+        config.samples,
+        1,
+        vec![
+            "Measures indexed candidate lookup, metadata validation, ranking, and result cap."
+                .to_string(),
+            "The query does not traverse the selected root.".to_string(),
+        ],
+        |_| {
+            let cancel = AtomicBool::new(false);
+            let snapshot = service
+                .search(&roots, "needle", &cancel)?
+                .ok_or_else(|| "indexed name search was cancelled".to_string())?;
+            if snapshot.entries.is_empty() {
+                return Err("indexed name search returned no matches".to_string());
+            }
+            Ok(WorkAmount::items(tree_size as u64).with_details(json!({
+                "matched_entries": snapshot.entries.len(),
+                "truncated": snapshot.truncated,
+                "partial": snapshot.partial,
+                "indexed_entries": indexed_entries,
+                "index_bytes": index_bytes,
+                "provider": provider,
+                "coverage": coverage,
+            })))
+        },
+    );
+
+    measure_scenario(
+        results,
+        "Global name search",
+        "name_index_incremental_update_to_query",
+        "core",
+        config.cold_samples,
+        0,
+        vec![
+            "Writes a uniquely named file, waits for the index watcher, then queries the name."
+                .to_string(),
+            "The result is an end-to-end freshness latency inside the Core boundary.".to_string(),
+        ],
+        |iteration| {
+            let token = format!("nameindexzebra{iteration:04}");
+            let path = tree.join(format!("{token}.txt"));
+            fs::write(&path, b"fixture")
+                .map_err(|error| format!("cannot write name index fixture: {error}"))?;
+            let deadline = Instant::now() + INCREMENTAL_INDEX_TIMEOUT;
+            loop {
+                let cancel = AtomicBool::new(false);
+                let snapshot = service
+                    .search(&roots, &token, &cancel)?
+                    .ok_or_else(|| "incremental name search was cancelled".to_string())?;
+                if snapshot.entries.iter().any(|entry| entry.path == path) {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!("incremental name was not found: {token}"));
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(WorkAmount::items(1).with_details(json!({
+                "query": token,
+                "indexed_entries": indexed_entries,
+                "index_bytes": index_bytes,
+            })))
+        },
+    );
+
+    Ok(())
+}
+
+fn wait_for_name_index(
+    service: &NameIndexService,
+    root: &Path,
+    expected: u64,
+    timeout: Duration,
+) -> Result<(), String> {
+    let roots = [root.to_path_buf()];
+    let deadline = Instant::now() + timeout;
+    loop {
+        let status = service
+            .status(&roots)
+            .into_iter()
+            .next()
+            .ok_or_else(|| "name index status is unavailable".to_string())?;
+        if status.state == NameIndexState::Ready
+            && status.usable
+            && status.indexed_entries >= expected
+        {
+            return Ok(());
+        }
+        if status.state == NameIndexState::Error {
+            return Err(status
+                .message
+                .unwrap_or_else(|| "name index entered error state".to_string()));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "name index timeout: state={}, indexed_entries={}, expected={expected}",
+                status.state.as_str(),
+                status.indexed_entries
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn measure_content_search(
