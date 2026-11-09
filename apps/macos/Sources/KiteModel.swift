@@ -558,6 +558,7 @@ struct BrowserGlobalSearchState {
     let entries: [BrowserEntry]
     let groups: [BrowserGlobalSearchGroup]
     let truncated: Bool
+    let partial: Bool
 
     init(dto: GlobalSearchResultDto) {
         roots = dto.roots
@@ -565,6 +566,7 @@ struct BrowserGlobalSearchState {
         entries = dto.entries.map(BrowserEntry.init(dto:))
         groups = Self.group(entries)
         truncated = dto.truncated
+        partial = dto.partial
     }
 
     private static func group(_ entries: [BrowserEntry]) -> [BrowserGlobalSearchGroup] {
@@ -773,6 +775,8 @@ final class KiteModel: ObservableObject {
     @Published var globalSearchText = ""
     @Published var globalSearchMode: GlobalSearchMode = .name
     @Published var globalSearchScope: GlobalSearchScope = .currentFolder
+    @Published var globalSearchKindFilter: SearchKindFilter = .all
+    @Published var globalSearchTimeFilter: SearchTimeFilter = .any
     @Published private(set) var globalSearch: BrowserGlobalSearchState?
     @Published private(set) var globalSearchLoading = false
     @Published private(set) var contentSearch: BrowserContentSearchState?
@@ -1167,6 +1171,59 @@ final class KiteModel: ObservableObject {
         }
     }
 
+    private var searchFilters: SearchFilters {
+        SearchFilters(kind: globalSearchKindFilter, modified: globalSearchTimeFilter)
+    }
+
+    var globalSearchKindFilterTitle: String {
+        switch globalSearchKindFilter {
+        case .all: return "全部项目"
+        case .folders: return "文件夹"
+        case .documents: return "文档"
+        case .sourceCode: return "源代码"
+        case .markdown: return "Markdown"
+        case .images: return "图片"
+        case .media: return "媒体"
+        }
+    }
+
+    var globalSearchTimeFilterTitle: String {
+        switch globalSearchTimeFilter {
+        case .any: return "任意时间"
+        case .last24Hours: return "最近 24 小时"
+        case .last7Days: return "最近 7 天"
+        case .last30Days: return "最近 30 天"
+        }
+    }
+
+    var globalSearchKindFilterCompactTitle: String {
+        switch globalSearchKindFilter {
+        case .all: return "类型"
+        case .folders: return "文件夹"
+        case .documents: return "文档"
+        case .sourceCode: return "代码"
+        case .markdown: return "MD"
+        case .images: return "图片"
+        case .media: return "媒体"
+        }
+    }
+
+    var globalSearchTimeFilterCompactTitle: String {
+        switch globalSearchTimeFilter {
+        case .any: return "时间"
+        case .last24Hours: return "24小时"
+        case .last7Days: return "7天"
+        case .last30Days: return "30天"
+        }
+    }
+
+    var globalSearchFilterSummary: String? {
+        guard globalSearchKindFilter != .all || globalSearchTimeFilter != .any else {
+            return nil
+        }
+        return "\(globalSearchKindFilterTitle) · \(globalSearchTimeFilterTitle)"
+    }
+
     private func submitNameGlobalSearch() {
         let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
@@ -1189,11 +1246,12 @@ final class KiteModel: ObservableObject {
         contentSearch = nil
         errorMessage = nil
         let core = self.core
+        let filters = searchFilters
 
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) {
-                    try core.searchDirectories(paths: roots, query: query)
+                    try core.searchDirectories(paths: roots, query: query, filters: filters)
                 }.value
 
                 guard generation == self.globalSearchGeneration else { return }
@@ -1232,6 +1290,7 @@ final class KiteModel: ObservableObject {
         contentSearch = nil
         errorMessage = nil
         let core = self.core
+        let filters = searchFilters
 
         Task {
             do {
@@ -1243,7 +1302,8 @@ final class KiteModel: ObservableObject {
                         roots: roots,
                         query: query,
                         regex: false,
-                        maxFiles: 50
+                        maxFiles: 50,
+                        filters: filters
                     )
                 }.value
 
@@ -1292,6 +1352,31 @@ final class KiteModel: ObservableObject {
             prepareContentIndex()
         }
         scheduleGlobalSearch()
+    }
+
+    func globalSearchKindFilterDidChange() {
+        globalSearchFiltersDidChange()
+    }
+
+    func globalSearchTimeFilterDidChange() {
+        globalSearchFiltersDidChange()
+    }
+
+    private func globalSearchFiltersDidChange() {
+        cancelGlobalSearchDebounce()
+        globalSearchGeneration &+= 1
+        contentSearchGeneration &+= 1
+        core.cancelDirectorySearch()
+        core.cancelContentSearch()
+        globalSearchLoading = false
+        contentSearchLoading = false
+        globalSearch = nil
+        contentSearch = nil
+        errorMessage = nil
+        let query = globalSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            submitGlobalSearch()
+        }
     }
 
     func globalSearchTextDidChange() {

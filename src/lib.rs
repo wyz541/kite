@@ -8,10 +8,13 @@ pub mod ffi;
 #[cfg(windows)]
 pub mod file_watcher;
 pub mod fs;
+pub mod global_name_search;
+pub mod kensaku_search;
 pub mod perf_trace;
 pub mod platform;
 #[cfg(windows)]
 pub mod recycle_bin;
+pub mod search_filters;
 pub mod session;
 pub mod text_editor;
 pub mod ui_preferences;

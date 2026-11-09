@@ -1,6 +1,6 @@
 [package]
 name = "kite-explorer"
-version = "0.6.62"
+version = "0.6.63"
 edition = "2024"
 description = "A fast, native cross-platform file manager with a shared Rust Core, Windows GPUI UI, and native macOS SwiftUI UI with Liquid Glass"
 license = "MIT"
@@ -49,7 +49,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tar = { version = "0.4.46", default-features = false }
-tantivy = { version = "0.27.0", default-features = false, features = ["mmap", "lz4-compression"] }
 thiserror = "2"
 thread-priority = "3.1.1"
 trash = "5"
@@ -60,6 +59,7 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 futures-channel = "0.3"
+libloading = "0.8.9"
 gpui-kit = { version = "0.8.0", optional = true, features = ["syntect"] }
 raw-window-handle = { version = "0.6.2", optional = true }
 winreg = "0.56"
@@ -67,9 +67,14 @@ windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_System_Com",
     "Win32_System_DataExchange",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_Power",
+    "Win32_System_Search",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_System_SystemServices",
     "Win32_Storage_FileSystem",
     "Win32_UI_Shell",

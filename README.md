@@ -93,6 +93,7 @@ macOS 可与 Finder 共享文件剪贴板。
 - 支持文件类型筛选、分组和显示规则重置。
 - macOS 和 Windows 支持分栏递归搜索。
 - 两端通过独立全局搜索窗口搜索文件名或文件内容。
+- 全局名称和内容搜索由 Kite 启动的 Kensaku daemon 提供。
 - 名称和内容模式支持当前文件夹、收藏文件夹和本地磁盘。
 - macOS 使用系统根卷名称作为范围名称，并搜索 `/`；Windows 提供“网络卷”范围。
 - 多磁盘范围只在按 Enter 或点击搜索后执行，避免输入时重复扫描。
@@ -180,10 +181,10 @@ Kite 仍处于 `0.6.x` 活跃开发阶段。
 - 分栏视图支持批量选择。列表视图仍只保留一个当前行。
 - 文件名搜索最多显示 1000 个结果。
 - 内容搜索最多显示 50 个文件。
-- 内容搜索首次使用会在后台建立本地索引。
-- 内容搜索只索引 UTF-8 和 ASCII 文本。
-- 内容搜索不解析 PDF、Word、Excel 或压缩包。
-- 内容搜索默认跳过隐藏项、构建目录、依赖目录和超过 8 MiB 的文件。
+- Kensaku daemon 首次使用会在后台建立本地索引。
+- Kensaku sidecar 必须随发布包安装；源代码构建运行 `python scripts/kensaku/build_sidecars.py`。
+- Kensaku CLI 路径见 [Kensaku 搜索后端](docs/search/kensaku-backend.md)。
+- Kensaku 内容覆盖范围取决于已安装的 extractor、OCR pack 和 Kensaku 配置。
 - WPD/MTP 删除操作不会进入回收站。
 - Windows 禁止重命名或删除 WPD/MTP 设备根目录。
 - WPD/MTP 写入速度取决于设备和 Windows Shell。

@@ -85,6 +85,12 @@ private struct KiteGlobalSearchWindowView: View {
         .onChange(of: model.globalSearchScope) { _ in
             model.globalSearchScopeDidChange()
         }
+        .onChange(of: model.globalSearchKindFilter) { _ in
+            model.globalSearchKindFilterDidChange()
+        }
+        .onChange(of: model.globalSearchTimeFilter) { _ in
+            model.globalSearchTimeFilterDidChange()
+        }
         .onExitCommand {
             NSApp.keyWindow?.performClose(nil)
         }
@@ -113,6 +119,55 @@ private struct KiteGlobalSearchWindowView: View {
                 KiteSearchScopeControl(model: model)
                     .frame(width: 190, height: 22)
             }
+
+            Menu {
+                filterButton("全部项目", selected: model.globalSearchKindFilter == .all) {
+                    model.globalSearchKindFilter = .all
+                }
+                filterButton("文件夹", selected: model.globalSearchKindFilter == .folders) {
+                    model.globalSearchKindFilter = .folders
+                }
+                filterButton("文档", selected: model.globalSearchKindFilter == .documents) {
+                    model.globalSearchKindFilter = .documents
+                }
+                filterButton("源代码", selected: model.globalSearchKindFilter == .sourceCode) {
+                    model.globalSearchKindFilter = .sourceCode
+                }
+                filterButton("Markdown", selected: model.globalSearchKindFilter == .markdown) {
+                    model.globalSearchKindFilter = .markdown
+                }
+                filterButton("图片", selected: model.globalSearchKindFilter == .images) {
+                    model.globalSearchKindFilter = .images
+                }
+                filterButton("媒体", selected: model.globalSearchKindFilter == .media) {
+                    model.globalSearchKindFilter = .media
+                }
+            } label: {
+                Label(model.globalSearchKindFilterCompactTitle, systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Menu {
+                filterButton("任意时间", selected: model.globalSearchTimeFilter == .any) {
+                    model.globalSearchTimeFilter = .any
+                }
+                filterButton("最近 24 小时", selected: model.globalSearchTimeFilter == .last24Hours) {
+                    model.globalSearchTimeFilter = .last24Hours
+                }
+                filterButton("最近 7 天", selected: model.globalSearchTimeFilter == .last7Days) {
+                    model.globalSearchTimeFilter = .last7Days
+                }
+                filterButton("最近 30 天", selected: model.globalSearchTimeFilter == .last30Days) {
+                    model.globalSearchTimeFilter = .last30Days
+                }
+            } label: {
+                Label(model.globalSearchTimeFilterCompactTitle, systemImage: "clock")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
 
             TextField(
                 model.globalSearchMode == .content ? "搜索文件内容" : "搜索文件名",
@@ -156,6 +211,21 @@ private struct KiteGlobalSearchWindowView: View {
         .frame(height: 52)
         .kiteGlass(.panel, cornerRadius: KiteTheme.controlRadius)
         .padding(12)
+    }
+
+    @ViewBuilder
+    private func filterButton(
+        _ title: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            if selected {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 
     @ViewBuilder
