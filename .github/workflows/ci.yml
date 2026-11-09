@@ -12,6 +12,7 @@ on:
       - .cargo/**
       - src/**
       - build.ps1
+      - scripts/kensaku/**
       - README.md
       - .github/workflows/ci.yml
       - .github/scripts/**

@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::fs::{self, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18,14 +17,6 @@ use crate::search_filters::SearchFilters;
 pub const SEARCH_RESULT_LIMIT: usize = 1_000;
 
 const DIRECTORY_SEARCH_THREADS: usize = 2;
-const GLOBAL_NAME_SEARCH_THREADS: usize = 1;
-const GLOBAL_NAME_SEARCH_ROOT_THREADS: usize = 3;
-
-#[cfg(test)]
-thread_local! {
-    pub(crate) static GLOBAL_NAME_SEARCH_WALKS: std::cell::Cell<usize> =
-        const { std::cell::Cell::new(0) };
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
@@ -299,91 +290,6 @@ pub fn search_directory(
     )
 }
 
-pub fn search_global_names(
-    roots: &[PathBuf],
-    query: &str,
-    cancel: &AtomicBool,
-) -> Result<Option<GlobalNameSearchSnapshot>, String> {
-    search_global_names_with_filters(roots, query, SearchFilters::default(), cancel)
-}
-
-pub fn search_global_names_with_filters(
-    roots: &[PathBuf],
-    query: &str,
-    filters: SearchFilters,
-    cancel: &AtomicBool,
-) -> Result<Option<GlobalNameSearchSnapshot>, String> {
-    #[cfg(test)]
-    GLOBAL_NAME_SEARCH_WALKS.with(|count| count.set(count.get() + 1));
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(None);
-    }
-    let roots = normalize_search_roots(roots);
-    if roots.is_empty() {
-        return Err("没有可搜索的文件夹".to_string());
-    }
-
-    let mut snapshots = Vec::new();
-    for roots in roots.chunks(GLOBAL_NAME_SEARCH_ROOT_THREADS) {
-        if cancel.load(AtomicOrdering::Relaxed) {
-            return Ok(None);
-        }
-        let chunk = std::thread::scope(|scope| {
-            let handles = roots
-                .iter()
-                .map(|root| {
-                    scope.spawn(move || {
-                        search_directory_inner(
-                            root,
-                            query,
-                            SortSpec::default(),
-                            filters,
-                            cancel,
-                            true,
-                            GLOBAL_NAME_SEARCH_THREADS,
-                        )
-                    })
-                })
-                .collect::<Vec<_>>();
-            handles
-                .into_iter()
-                .map(|handle| {
-                    handle
-                        .join()
-                        .map_err(|_| "搜索任务未正确结束".to_string())?
-                })
-                .collect::<Result<Vec<_>, String>>()
-        })?;
-        snapshots.extend(chunk);
-    }
-
-    let mut entries = Vec::<FileEntry>::new();
-    let mut truncated = false;
-    for snapshot in snapshots.into_iter().flatten() {
-        truncated |= snapshot.truncated;
-        entries.extend(snapshot.entries);
-    }
-
-    sort_global_name_entries(&mut entries, query);
-    let mut seen = HashSet::new();
-    entries.retain(|entry| seen.insert(path_key(&entry.path)));
-    truncated |= entries.len() > SEARCH_RESULT_LIMIT;
-    entries.truncate(SEARCH_RESULT_LIMIT);
-
-    if cancel.load(AtomicOrdering::Relaxed) {
-        return Ok(None);
-    }
-
-    Ok(Some(GlobalNameSearchSnapshot {
-        roots,
-        query: query.to_string(),
-        entries,
-        truncated,
-        partial: false,
-    }))
-}
-
 fn search_directory_inner(
     root: &Path,
     query: &str,
@@ -517,16 +423,6 @@ fn handle_search_entry(
         &metadata,
     ));
     WalkState::Continue
-}
-
-fn normalize_search_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    roots
-        .iter()
-        .filter(|root| !root.as_os_str().is_empty())
-        .filter(|root| seen.insert(path_key(root)))
-        .cloned()
-        .collect()
 }
 
 fn path_key(path: &Path) -> String {
@@ -1100,124 +996,6 @@ mod tests {
             &root.join("node_modules")
         ));
         assert!(!has_generated_parent(&root.join("target.txt"), root));
-    }
-
-    #[test]
-    fn global_name_search_prefers_development_trees_and_skips_generated_directories() {
-        let root = std::env::temp_dir().join(format!(
-            "kite-global-name-rank-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_nanos()
-        ));
-        fs::create_dir_all(root.join("publish_s2").join("PocoCheck")).expect("create publish tree");
-        fs::create_dir_all(root.join("trunk").join("PocoCheck")).expect("create trunk tree");
-        fs::create_dir_all(root.join("node_modules").join("PocoCheck"))
-            .expect("create generated tree");
-
-        let cancel = AtomicBool::new(false);
-        let snapshot = search_global_names(std::slice::from_ref(&root), "PocoCheck", &cancel)
-            .expect("global name search")
-            .expect("non-empty search");
-
-        assert_eq!(snapshot.entries.len(), 2);
-        assert!(
-            snapshot.entries[0]
-                .path
-                .ends_with(Path::new("trunk").join("PocoCheck"))
-        );
-        assert!(
-            snapshot
-                .entries
-                .iter()
-                .all(|entry| !entry.path.to_string_lossy().contains("node_modules"))
-        );
-
-        fs::remove_dir_all(root).expect("clean test directory");
-    }
-
-    #[test]
-    fn global_name_search_checks_every_root_before_marking_results_incomplete() {
-        let base = std::env::temp_dir().join(format!(
-            "kite-global-name-roots-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_nanos()
-        ));
-        let first = base.join("first");
-        let second = base.join("second");
-        fs::create_dir_all(&first).expect("create first root fixture");
-        fs::create_dir_all(&second).expect("create second root fixture");
-        for index in 0..6 {
-            fs::write(first.join(format!("other-{index}.txt")), b"fixture")
-                .expect("write first root fixture");
-        }
-        fs::write(second.join("needle.txt"), b"fixture").expect("write second root fixture");
-
-        let cancel = AtomicBool::new(false);
-        let snapshot = search_global_names(&[first, second], "needle", &cancel)
-            .expect("global name search")
-            .expect("non-empty search");
-
-        assert!(
-            snapshot
-                .entries
-                .iter()
-                .any(|entry| entry.name == "needle.txt"),
-            "the later root must be searched"
-        );
-        assert!(
-            !snapshot.truncated,
-            "a complete search must not be truncated"
-        );
-
-        fs::remove_dir_all(base).expect("clean test directory");
-    }
-
-    #[test]
-    fn global_name_search_marks_truncation_only_after_the_limit_is_exceeded() {
-        let root = std::env::temp_dir().join(format!(
-            "kite-global-name-limit-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).expect("create limit fixture");
-        for index in 0..SEARCH_RESULT_LIMIT {
-            fs::write(root.join(format!("match-{index:04}.txt")), b"fixture")
-                .expect("write limit fixture");
-        }
-
-        let cancel = AtomicBool::new(false);
-        let exact = search_global_names(std::slice::from_ref(&root), "match", &cancel)
-            .expect("global name search")
-            .expect("non-empty search");
-        assert_eq!(exact.entries.len(), SEARCH_RESULT_LIMIT);
-        assert!(!exact.truncated);
-
-        fs::write(root.join("match-over-limit.txt"), b"fixture").expect("write over-limit fixture");
-        let over = search_global_names(std::slice::from_ref(&root), "match", &cancel)
-            .expect("global name search")
-            .expect("non-empty search");
-        assert_eq!(over.entries.len(), SEARCH_RESULT_LIMIT);
-        assert!(over.truncated);
-
-        fs::remove_dir_all(root).expect("clean test directory");
-    }
-
-    #[test]
-    fn global_name_root_normalization_preserves_distinct_nested_roots() {
-        let root = PathBuf::from("fixture-root");
-        let nested = root.join("nested");
-        let roots = normalize_search_roots(&[root.clone(), nested.clone(), root.clone()]);
-
-        assert_eq!(roots, vec![root, nested]);
     }
 }
 pub fn transfer_entry(

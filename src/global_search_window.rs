@@ -104,7 +104,6 @@ pub(crate) struct GlobalSearchWindow {
     search_cancel: Option<Arc<AtomicBool>>,
     expanded_groups: HashSet<String>,
     _search_task: Task<()>,
-    _indexed_search_task: Task<()>,
     _live_search_task: Task<()>,
     _subscription: Subscription,
 }
@@ -142,10 +141,8 @@ impl GlobalSearchWindow {
                         this.expanded_groups.clear();
                         this.error = None;
                     }
-                    if this.mode == GlobalSearchMode::Content
-                        && let Ok(service) = content_search::shared_service()
-                    {
-                        service.note_interaction();
+                    if this.mode == GlobalSearchMode::Content {
+                        content_search::note_interaction();
                     }
                     this.schedule_live_search(window, cx);
                 }
@@ -177,7 +174,6 @@ impl GlobalSearchWindow {
             search_cancel: None,
             expanded_groups: HashSet::new(),
             _search_task: Task::ready(()),
-            _indexed_search_task: Task::ready(()),
             _live_search_task: Task::ready(()),
             _subscription: subscription,
         }
@@ -342,20 +338,15 @@ impl GlobalSearchWindow {
         if !self.scope.prepares_content_index_in_background() {
             return;
         }
-        if let Ok(service) = content_search::shared_service() {
-            let _ = service.ensure_roots(&self.scope_roots());
-        }
+        let _ = content_search::prepare_roots(&self.scope_roots());
     }
 
     fn cancel_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
-        self._indexed_search_task = Task::ready(());
         if let Some(cancel) = self.search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
-        if let Ok(service) = content_search::shared_service() {
-            service.cancel_search();
-        }
+        content_search::cancel_search();
     }
 
     fn cancel_live_search(&mut self) {
@@ -425,39 +416,11 @@ impl GlobalSearchWindow {
         self.expanded_groups.clear();
         self.loading = true;
         self.error = None;
-        if let Ok(service) = content_search::shared_service() {
-            service.note_interaction();
-            let _ = service.ensure_roots(&roots);
+        if mode == GlobalSearchMode::Content {
+            content_search::note_interaction();
+            let _ = content_search::prepare_roots(&roots);
         }
         cx.notify();
-
-        if mode == GlobalSearchMode::Name && self.scope != GlobalSearchScope::CurrentFolder {
-            let indexed_roots = roots.clone();
-            let indexed_query = query.clone();
-            let indexed_cancel = Arc::clone(&cancel);
-            self._indexed_search_task = cx.spawn_in(window, async move |this, cx| {
-                let result = cx
-                    .background_spawn(async move {
-                        kite_core::indexed_search::search_indexed_names(
-                            &indexed_roots,
-                            &indexed_query,
-                            filters,
-                            indexed_cancel.as_ref(),
-                        )
-                    })
-                    .await;
-                let _ = this.update_in(cx, |this, _, cx| {
-                    if this.generation != generation || !this.loading {
-                        return;
-                    }
-                    if let Ok(Some(snapshot)) = result {
-                        this.name_results = Some(global_name_results(snapshot));
-                        this.error = None;
-                        cx.notify();
-                    }
-                });
-            });
-        }
 
         self._search_task = cx.spawn_in(window, async move |this, cx| {
             let result = cx
@@ -467,17 +430,14 @@ impl GlobalSearchWindow {
                             search_name_roots(&roots, &query, filters, cancel.as_ref())
                                 .map(SearchOutcome::Name)
                         }
-                        GlobalSearchMode::Content => content_search::shared_service()
-                            .and_then(|service| {
-                                service.search_with_filters(
-                                    &roots,
-                                    &query,
-                                    false,
-                                    CONTENT_SEARCH_MAX_FILES,
-                                    filters,
-                                )
-                            })
-                            .map(SearchOutcome::Content),
+                        GlobalSearchMode::Content => content_search::search_with_filters(
+                            &roots,
+                            &query,
+                            false,
+                            CONTENT_SEARCH_MAX_FILES,
+                            filters,
+                        )
+                        .map(SearchOutcome::Content),
                     }
                 })
                 .await;
@@ -488,7 +448,6 @@ impl GlobalSearchWindow {
                 }
                 this.loading = false;
                 this.search_cancel = None;
-                this._indexed_search_task = Task::ready(());
                 match result {
                     Ok(SearchOutcome::Name(result)) => {
                         this.name_results = result;
@@ -1095,11 +1054,11 @@ impl Render for GlobalSearchWindow {
                                 .gap_2()
                                 .child(Icon::new(IconName::Search).size_4())
                                 .child(if !index_progress.is_empty() {
-                                    "正在建立名称索引…"
+                                    "Kensaku 正在建立索引…"
                                 } else if self.scope.allows_live_search() {
                                     "正在搜索…"
                                 } else {
-                                    "正在扫描所有搜索位置…"
+                                    "正在等待 Kensaku 搜索结果…"
                                 }),
                         )
                         .when(!index_progress.is_empty(), |this| {
