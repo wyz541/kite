@@ -70,6 +70,8 @@ jobs:
       - name: Build macOS release
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          KITE_SKIP_KENSAKU: "1"
         run: bash apps/macos/build.sh
 
       - name: Measure macOS startup

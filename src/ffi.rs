@@ -51,6 +51,7 @@ pub struct GlobalSearchResultDto {
     pub query: String,
     pub entries: Vec<DirectoryEntryDto>,
     pub truncated: bool,
+    pub partial: bool,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -279,6 +280,7 @@ impl KiteCore {
         &self,
         paths: Vec<String>,
         query: String,
+        filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<GlobalSearchResultDto>, KiteError> {
         let cancel = Arc::new(AtomicBool::new(false));
         {
@@ -290,7 +292,8 @@ impl KiteCore {
         }
 
         let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        let result = crate::fs::search_global_names(&roots, &query, cancel.as_ref());
+        let result =
+            crate::global_name_search::search_names(&roots, &query, filters, cancel.as_ref());
 
         if let Ok(mut active) = self.search_cancel.lock()
             && active
@@ -312,6 +315,7 @@ impl KiteCore {
             query: snapshot.query,
             entries: snapshot.entries.iter().map(entry_dto).collect(),
             truncated: snapshot.truncated,
+            partial: snapshot.partial,
         }))
     }
 
@@ -324,55 +328,33 @@ impl KiteCore {
     }
 
     pub fn prepare_content_search(&self, roots: Vec<String>) -> Result<(), KiteError> {
-        let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        service
-            .ensure_roots(&roots)
-            .map(|_| ())
-            .map_err(KiteError::operation)
+        content_search::prepare_roots(&roots).map_err(KiteError::operation)
     }
 
     pub fn content_search_status(&self) -> ContentIndexStatusDto {
-        match content_search::shared_service() {
-            Ok(service) => {
-                let status = service.status();
-                ContentIndexStatusDto {
-                    state: status.state.as_str().to_string(),
-                    indexed_files: status.indexed_files,
-                    message: status.message,
-                }
-            }
-            Err(message) => ContentIndexStatusDto {
-                state: "error".to_string(),
-                indexed_files: 0,
-                message: Some(message),
-            },
+        let status = content_search::status();
+        ContentIndexStatusDto {
+            state: status.state.as_str().to_string(),
+            indexed_files: status.indexed_files,
+            message: status.message,
         }
     }
 
     pub fn note_content_search_interaction(&self) {
-        if let Ok(service) = content_search::shared_service() {
-            service.note_interaction();
-        }
+        content_search::note_interaction();
     }
 
     pub fn set_content_search_paused(&self, paused: bool) {
-        if let Ok(service) = content_search::shared_service() {
-            service.set_indexing_paused(paused);
-        }
+        content_search::set_indexing_paused(paused);
     }
 
     pub fn cancel_content_search(&self) {
-        if let Ok(service) = content_search::shared_service() {
-            service.cancel_search();
-        }
+        content_search::cancel_search();
     }
 
     pub fn clear_content_search_index(&self) -> Result<(), KiteError> {
-        content_search::shared_service()
-            .map_err(KiteError::operation)?
-            .clear()
-            .map_err(KiteError::operation)
+        content_search::clear().map_err(KiteError::operation)
     }
 
     pub fn search_content(
@@ -381,13 +363,18 @@ impl KiteCore {
         query: String,
         regex: bool,
         max_files: u32,
+        filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<ContentSearchResultDto>, KiteError> {
-        let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        service
-            .search(&roots, &query, regex, max_files.max(1) as usize)
-            .map(|snapshot| snapshot.map(content_search_result_dto))
-            .map_err(KiteError::operation)
+        content_search::search_with_filters(
+            &roots,
+            &query,
+            regex,
+            max_files.max(1) as usize,
+            filters,
+        )
+        .map(|snapshot| snapshot.map(content_search_result_dto))
+        .map_err(KiteError::operation)
     }
 
     pub fn devices(&self) -> DeviceSnapshotDto {
@@ -697,6 +684,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires packaged Kensaku sidecars"]
     fn core_searches_multiple_name_roots() {
         let directory = std::env::temp_dir().join(format!(
             "kite-core-global-search-{}-{}",
@@ -719,6 +707,7 @@ mod tests {
                     trunk.to_string_lossy().into_owned(),
                 ],
                 "PocoCheck".to_string(),
+                crate::search_filters::SearchFilters::default(),
             )
             .expect("global search succeeds")
             .expect("global search returns a snapshot");
@@ -735,6 +724,38 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires packaged Kensaku sidecars"]
+    fn core_applies_global_name_filters() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-core-global-filter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).expect("create filter fixture");
+        std::fs::write(directory.join("needle.txt"), b"text").expect("write text fixture");
+        std::fs::write(directory.join("needle.md"), b"markdown").expect("write markdown fixture");
+        let core = KiteCore::new();
+        let result = core
+            .search_directories(
+                vec![directory.to_string_lossy().into_owned()],
+                "needle".to_string(),
+                crate::search_filters::SearchFilters {
+                    kind: crate::search_filters::SearchKindFilter::Markdown,
+                    modified: crate::search_filters::SearchTimeFilter::Any,
+                },
+            )
+            .expect("filtered global search succeeds")
+            .expect("filtered global search returns result");
+        let _ = std::fs::remove_dir_all(directory);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].name, "needle.md");
+    }
+
+    #[test]
+    #[ignore = "requires packaged Kensaku sidecars"]
     fn core_searches_file_content_and_returns_lines() {
         let directory = std::env::temp_dir().join(format!(
             "kite-core-content-search-{}-{}",
@@ -756,7 +777,13 @@ mod tests {
         core.prepare_content_search(vec![root.clone()])
             .expect("prepare content index");
         let result = core
-            .search_content(vec![root], "needle".to_string(), false, 20)
+            .search_content(
+                vec![root],
+                "needle".to_string(),
+                false,
+                20,
+                crate::search_filters::SearchFilters::default(),
+            )
             .expect("content search succeeds")
             .expect("content search returns a result");
         let _ = std::fs::remove_dir_all(&directory);

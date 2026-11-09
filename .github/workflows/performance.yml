@@ -10,11 +10,15 @@ on:
       - "src/content_search.rs"
       - "src/devices.rs"
       - "src/fs.rs"
+      - "src/global_name_search.rs"
+      - "src/kensaku_search.rs"
+      - "src/search_filters.rs"
       - "src/session.rs"
       - "src/text_editor.rs"
       - "src/updater.rs"
       - "src/vcs.rs"
       - "scripts/performance/**"
+      - "scripts/kensaku/**"
       - ".github/workflows/performance.yml"
   workflow_dispatch:
     inputs:

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -10,9 +10,6 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kite_core::archive::{self, ArchiveFormat};
-use kite_core::content_search::{
-    CONTENT_SEARCH_MAX_FILES, ContentIndexState, ContentSearchService,
-};
 use kite_core::devices;
 use kite_core::fs as kite_fs;
 use kite_core::session::{
@@ -28,8 +25,6 @@ use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
-const CONTENT_INDEX_TIMEOUT: Duration = Duration::from_secs(180);
-const INCREMENTAL_INDEX_TIMEOUT: Duration = Duration::from_secs(10);
 
 const AREAS: [&str; 13] = [
     "Startup and launch",
@@ -384,7 +379,6 @@ struct FixtureSet {
     root: PathBuf,
     directories: BTreeMap<usize, PathBuf>,
     trees: BTreeMap<usize, PathBuf>,
-    content_dir: PathBuf,
     copy_root: PathBuf,
     archive_root: PathBuf,
     vcs_dir: Option<PathBuf>,
@@ -552,7 +546,6 @@ impl FixtureSet {
             root: root.to_path_buf(),
             directories,
             trees,
-            content_dir,
             copy_root,
             archive_root,
             vcs_dir,
@@ -1366,67 +1359,6 @@ fn measure_name_searches(
         );
     }
 
-    for (size, path) in &fixtures.trees {
-        let roots = vec![path.clone()];
-        let tree_size = *size;
-        measure_scenario(
-            results,
-            "Global name search",
-            &format!("global_name_search_{size}"),
-            "core",
-            config.samples,
-            1,
-            vec![
-                "Measures the single-root Core traversal and ranking path.".to_string(),
-                "The Core search has a 5 second and 250000 entry budget.".to_string(),
-            ],
-            |_| {
-                let cancel = AtomicBool::new(false);
-                let snapshot = kite_fs::search_global_names(&roots, "needle", &cancel)?
-                    .ok_or_else(|| "global name search was cancelled".to_string())?;
-                if snapshot.entries.is_empty() {
-                    return Err("global name search returned no matches".to_string());
-                }
-                Ok(WorkAmount::items(tree_size as u64).with_details(json!({
-                    "matched_entries": snapshot.entries.len(),
-                    "truncated": snapshot.truncated,
-                })))
-            },
-        );
-    }
-
-    if let (Some((directory_size, directory)), Some((tree_size, tree))) = (
-        fixtures.directories.iter().next_back(),
-        fixtures.trees.iter().next(),
-    ) {
-        let roots = vec![directory.clone(), tree.clone()];
-        let total = directory_size.saturating_add(*tree_size) as u64;
-        measure_scenario(
-            results,
-            "Global name search",
-            "global_name_search_multi_root",
-            "core",
-            config.samples,
-            1,
-            vec![
-                "Measures normalization, traversal, de-duplication, and ranking for two roots."
-                    .to_string(),
-            ],
-            |_| {
-                let cancel = AtomicBool::new(false);
-                let snapshot = kite_fs::search_global_names(&roots, "needle", &cancel)?
-                    .ok_or_else(|| "multi-root search was cancelled".to_string())?;
-                if snapshot.entries.is_empty() {
-                    return Err("multi-root search returned no matches".to_string());
-                }
-                Ok(WorkAmount::items(total).with_details(json!({
-                    "matched_entries": snapshot.entries.len(),
-                    "truncated": snapshot.truncated,
-                })))
-            },
-        );
-    }
-
     record_gap(
         results,
         "Column search",
@@ -1439,164 +1371,27 @@ fn measure_name_searches(
         "macos_runtime",
         "SwiftUI search-field feedback and frame-stall measurement",
     );
+    record_gap(
+        results,
+        "Global name search",
+        "core",
+        "Kensaku daemon and CLI benchmark require packaged sidecars",
+    );
     Ok(())
 }
 
 fn measure_content_search(
-    fixtures: &FixtureSet,
-    config: &ProfileConfig,
+    _fixtures: &FixtureSet,
+    _config: &ProfileConfig,
     results: &mut Vec<MetricResult>,
 ) -> Result<(), String> {
-    let roots = vec![fixtures.content_dir.clone()];
-    let expected = config.content_files as u64;
-    let indexes_root = fixtures.root.join("indexes");
-    fs::create_dir_all(&indexes_root)
-        .map_err(|error| format!("cannot create index fixture root: {error}"))?;
-
-    measure_scenario(
-        results,
-        "Global content search",
-        "cold_content_index_build",
-        "core",
-        config.cold_samples,
-        0,
-        vec![
-            "Each sample creates a new isolated Tantivy index.".to_string(),
-            "Build time includes index creation, traversal, tokenization, and writer commit."
-                .to_string(),
-        ],
-        |iteration| {
-            let index_dir = indexes_root.join(format!("cold-{iteration}"));
-            let service = ContentSearchService::open_for_performance(index_dir.clone())?;
-            service.ensure_roots(&roots)?;
-            wait_for_content_index(&service, expected, CONTENT_INDEX_TIMEOUT)?;
-            let index_bytes = directory_size(&index_dir)?;
-            drop(service);
-            Ok(WorkAmount::items(expected).with_details(json!({
-                "index_bytes": index_bytes,
-                "expected_documents": expected,
-            })))
-        },
-    );
-
-    let warm_index = indexes_root.join("warm");
-    let service = ContentSearchService::open_for_performance(warm_index.clone())?;
-    service.ensure_roots(&roots)?;
-    wait_for_content_index(&service, expected, CONTENT_INDEX_TIMEOUT)?;
-    let index_bytes = directory_size(&warm_index)?;
-    measure_scenario(
-        results,
-        "Global content search",
-        "warm_content_query",
-        "core",
-        config.samples,
-        1,
-        vec![
-            "Measures indexed candidate lookup plus exact line verification.".to_string(),
-            "The query returns at most 50 files.".to_string(),
-        ],
-        |_| {
-            let snapshot = service
-                .search(&roots, "baseline_needle", false, CONTENT_SEARCH_MAX_FILES)?
-                .ok_or_else(|| "content search was cancelled".to_string())?;
-            if snapshot.files.is_empty() {
-                return Err("content search returned no files".to_string());
-            }
-            Ok(
-                WorkAmount::items(snapshot.files.len() as u64).with_details(json!({
-                    "documents_scanned": snapshot.scanned_documents,
-                    "total_matches": snapshot.total_matches,
-                    "partial": snapshot.partial,
-                    "truncated": snapshot.truncated,
-                    "index_bytes": index_bytes,
-                })),
-            )
-        },
-    );
-
-    measure_scenario(
-        results,
-        "Global content search",
-        "incremental_update_to_query",
-        "core",
-        config.cold_samples,
-        0,
-        vec![
-            "Writes a unique token, waits for watcher/index refresh, then queries the token."
-                .to_string(),
-            "The result is an end-to-end freshness latency inside the Core boundary.".to_string(),
-        ],
-        |iteration| {
-            let path = fixtures
-                .content_dir
-                .join(format!("incremental-{iteration:04}.txt"));
-            let token = format!("zebrafruit{iteration:04}");
-            fs::write(&path, format!("baseline content\n{token}\n"))
-                .map_err(|error| format!("cannot write incremental fixture: {error}"))?;
-            let deadline = Instant::now() + INCREMENTAL_INDEX_TIMEOUT;
-            loop {
-                let snapshot = service
-                    .search(&roots, &token, false, CONTENT_SEARCH_MAX_FILES)?
-                    .ok_or_else(|| "incremental search was cancelled".to_string())?;
-                let expected_name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if snapshot.files.iter().any(|file| file.name == expected_name) {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    return Err(format!("incremental token was not found: {token}"));
-                }
-                thread::sleep(Duration::from_millis(25));
-            }
-            Ok(WorkAmount::items(1).with_details(json!({
-                "query": token,
-                "index_bytes": index_bytes,
-            })))
-        },
-    );
-
     record_gap(
         results,
         "Global content search",
-        "windows_runtime",
-        "GPUI result-card rendering and frame-stall measurement",
-    );
-    record_gap(
-        results,
-        "Global content search",
-        "macos_runtime",
-        "SwiftUI result-card rendering and frame-stall measurement",
+        "core",
+        "Kensaku daemon and CLI benchmark require packaged sidecars",
     );
     Ok(())
-}
-
-fn wait_for_content_index(
-    service: &ContentSearchService,
-    expected: u64,
-    timeout: Duration,
-) -> Result<(), String> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        let status = service.status();
-        if status.state == ContentIndexState::Ready && status.indexed_files >= expected {
-            return Ok(());
-        }
-        if status.state == ContentIndexState::Error {
-            return Err(status
-                .message
-                .unwrap_or_else(|| "content index entered error state".to_string()));
-        }
-        if Instant::now() >= deadline {
-            return Err(format!(
-                "content index timeout: state={}, indexed_files={}, expected={expected}",
-                status.state.as_str(),
-                status.indexed_files
-            ));
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
 }
 
 fn measure_preview_and_editor(
@@ -2309,30 +2104,6 @@ impl RssSampler {
         }
         self.peak.load(Ordering::Relaxed)
     }
-}
-
-fn directory_size(path: &Path) -> Result<u64, String> {
-    let mut total = 0_u64;
-    let mut pending = vec![path.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        let entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("cannot read directory size: {error}")),
-        };
-        for entry in entries {
-            let entry = entry.map_err(|error| format!("cannot read directory entry: {error}"))?;
-            let metadata = entry
-                .metadata()
-                .map_err(|error| format!("cannot read directory metadata: {error}"))?;
-            if metadata.is_dir() {
-                pending.push(entry.path());
-            } else if metadata.is_file() {
-                total = total.saturating_add(metadata.len());
-            }
-        }
-    }
-    Ok(total)
 }
 
 fn now_unix_ms() -> u64 {

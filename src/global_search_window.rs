@@ -1,17 +1,21 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::actions::{
-    SetGlobalSearchScopeCurrentFolder, SetGlobalSearchScopeFavorites,
-    SetGlobalSearchScopeLocalDisks, SetGlobalSearchScopeNetworkVolumes,
+    SetGlobalSearchKindAll, SetGlobalSearchKindDocuments, SetGlobalSearchKindFolders,
+    SetGlobalSearchKindImages, SetGlobalSearchKindMarkdown, SetGlobalSearchKindMedia,
+    SetGlobalSearchKindSourceCode, SetGlobalSearchScopeCurrentFolder,
+    SetGlobalSearchScopeFavorites, SetGlobalSearchScopeLocalDisks,
+    SetGlobalSearchScopeNetworkVolumes, SetGlobalSearchTimeAny, SetGlobalSearchTimeLast7Days,
+    SetGlobalSearchTimeLast24Hours, SetGlobalSearchTimeLast30Days,
 };
 use crate::content_search::{
     self, CONTENT_SEARCH_MAX_FILES, ContentFileMatch, ContentSearchSnapshot,
 };
-use crate::fs::{FileEntry, format_size, search_global_names};
+use crate::fs::{FileEntry, format_size};
 use crate::table::icon_for;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -23,6 +27,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+static GLOBAL_SEARCH_SESSION_FILTERS: OnceLock<Mutex<SearchFilters>> = OnceLock::new();
+use kite_core::search_filters::{SearchFilters, SearchKindFilter, SearchTimeFilter};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GlobalSearchMode {
@@ -71,6 +78,7 @@ struct GlobalNameResults {
     groups: Vec<GlobalNameGroup>,
     total_entries: usize,
     truncated: bool,
+    partial: bool,
 }
 
 struct GlobalNameGroup {
@@ -85,6 +93,8 @@ pub(crate) struct GlobalSearchWindow {
     network_roots: Vec<PathBuf>,
     mode: GlobalSearchMode,
     scope: GlobalSearchScope,
+    kind_filter: SearchKindFilter,
+    time_filter: SearchTimeFilter,
     query_input: Entity<InputState>,
     name_results: Option<GlobalNameResults>,
     content_results: Option<ContentSearchSnapshot>,
@@ -123,10 +133,16 @@ impl GlobalSearchWindow {
                     this.start_immediate_search(query, window, cx);
                 }
                 InputEvent::Change => {
-                    if this.mode == GlobalSearchMode::Content
-                        && let Ok(service) = content_search::shared_service()
-                    {
-                        service.note_interaction();
+                    if !this.scope.allows_live_search() && this.loading {
+                        this.cancel_search();
+                        this.loading = false;
+                        this.name_results = None;
+                        this.content_results = None;
+                        this.expanded_groups.clear();
+                        this.error = None;
+                    }
+                    if this.mode == GlobalSearchMode::Content {
+                        content_search::note_interaction();
                     }
                     this.schedule_live_search(window, cx);
                 }
@@ -134,6 +150,12 @@ impl GlobalSearchWindow {
             },
         );
 
+        let mut index_roots = favorite_roots.clone();
+        index_roots.extend(local_roots.iter().cloned());
+        index_roots.push(current_folder.clone());
+        kite_core::global_name_search::ensure_roots(&index_roots);
+
+        let session_filters = global_search_session_filters();
         Self {
             current_folder,
             favorite_roots,
@@ -141,6 +163,8 @@ impl GlobalSearchWindow {
             network_roots,
             mode: GlobalSearchMode::Name,
             scope: GlobalSearchScope::CurrentFolder,
+            kind_filter: session_filters.kind,
+            time_filter: session_filters.modified,
             query_input,
             name_results: None,
             content_results: None,
@@ -161,6 +185,57 @@ impl GlobalSearchWindow {
             GlobalSearchScope::Favorites => self.favorite_roots.clone(),
             GlobalSearchScope::LocalDisks => self.local_roots.clone(),
             GlobalSearchScope::NetworkVolumes => self.network_roots.clone(),
+        }
+    }
+
+    fn filters(&self) -> SearchFilters {
+        SearchFilters {
+            kind: self.kind_filter,
+            modified: self.time_filter,
+        }
+    }
+
+    fn set_kind_filter(
+        &mut self,
+        filter: SearchKindFilter,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.kind_filter == filter {
+            return;
+        }
+        self.kind_filter = filter;
+        store_global_search_session_filters(self.filters());
+        self.refresh_after_filter_change(window, cx);
+    }
+
+    fn set_time_filter(
+        &mut self,
+        filter: SearchTimeFilter,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.time_filter == filter {
+            return;
+        }
+        self.time_filter = filter;
+        store_global_search_session_filters(self.filters());
+        self.refresh_after_filter_change(window, cx);
+    }
+
+    fn refresh_after_filter_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_search();
+        self.cancel_live_search();
+        self.loading = false;
+        self.name_results = None;
+        self.content_results = None;
+        self.expanded_groups.clear();
+        self.error = None;
+        let query = self.query_input.read(cx).value().trim().to_string();
+        if !query.is_empty() {
+            self.start_search(query, window, cx);
+        } else {
+            cx.notify();
         }
     }
 
@@ -238,6 +313,8 @@ impl GlobalSearchWindow {
             return;
         }
         self.scope = scope;
+        let roots = self.scope_roots();
+        kite_core::global_name_search::ensure_roots(&roots);
         self.cancel_search();
         self.cancel_live_search();
         self.name_results = None;
@@ -261,9 +338,7 @@ impl GlobalSearchWindow {
         if !self.scope.prepares_content_index_in_background() {
             return;
         }
-        if let Ok(service) = content_search::shared_service() {
-            let _ = service.ensure_roots(&self.scope_roots());
-        }
+        let _ = content_search::prepare_roots(&self.scope_roots());
     }
 
     fn cancel_search(&mut self) {
@@ -271,9 +346,7 @@ impl GlobalSearchWindow {
         if let Some(cancel) = self.search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
-        if let Ok(service) = content_search::shared_service() {
-            service.cancel_search();
-        }
+        content_search::cancel_search();
     }
 
     fn cancel_live_search(&mut self) {
@@ -315,9 +388,8 @@ impl GlobalSearchWindow {
 
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.loading && !self.scope.allows_live_search() {
-            self.error = Some("当前范围正在搜索，请等待本次搜索结束".into());
-            cx.notify();
-            return;
+            self.cancel_search();
+            self.loading = false;
         }
         let query = query.trim().to_string();
         if query.is_empty() {
@@ -336,6 +408,7 @@ impl GlobalSearchWindow {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         let mode = self.mode;
+        let filters = self.filters();
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(Arc::clone(&cancel));
         self.name_results = None;
@@ -343,9 +416,9 @@ impl GlobalSearchWindow {
         self.expanded_groups.clear();
         self.loading = true;
         self.error = None;
-        if let Ok(service) = content_search::shared_service() {
-            service.note_interaction();
-            let _ = service.ensure_roots(&roots);
+        if mode == GlobalSearchMode::Content {
+            content_search::note_interaction();
+            let _ = content_search::prepare_roots(&roots);
         }
         cx.notify();
 
@@ -354,14 +427,17 @@ impl GlobalSearchWindow {
                 .background_spawn(async move {
                     match mode {
                         GlobalSearchMode::Name => {
-                            search_name_roots(&roots, &query, cancel.as_ref())
+                            search_name_roots(&roots, &query, filters, cancel.as_ref())
                                 .map(SearchOutcome::Name)
                         }
-                        GlobalSearchMode::Content => content_search::shared_service()
-                            .and_then(|service| {
-                                service.search(&roots, &query, false, CONTENT_SEARCH_MAX_FILES)
-                            })
-                            .map(SearchOutcome::Content),
+                        GlobalSearchMode::Content => content_search::search_with_filters(
+                            &roots,
+                            &query,
+                            false,
+                            CONTENT_SEARCH_MAX_FILES,
+                            filters,
+                        )
+                        .map(SearchOutcome::Content),
                     }
                 })
                 .await;
@@ -509,6 +585,89 @@ impl GlobalSearchWindow {
                                     .disabled(!has_network_roots)
                                     .action(Box::new(SetGlobalSearchScopeNetworkVolumes)),
                             )
+                    })
+            })
+            .child({
+                let selected = self.kind_filter;
+                Button::new("global-search-kind-filter")
+                    .ghost()
+                    .compact()
+                    .label(selected.compact_label())
+                    .tooltip("按项目类型过滤")
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        menu.min_w(px(210.))
+                            .label("项目类型")
+                            .separator()
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::All,
+                                SetGlobalSearchKindAll,
+                            ))
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::Folders,
+                                SetGlobalSearchKindFolders,
+                            ))
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::Documents,
+                                SetGlobalSearchKindDocuments,
+                            ))
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::SourceCode,
+                                SetGlobalSearchKindSourceCode,
+                            ))
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::Markdown,
+                                SetGlobalSearchKindMarkdown,
+                            ))
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::Images,
+                                SetGlobalSearchKindImages,
+                            ))
+                            .item(filter_kind_item(
+                                selected,
+                                SearchKindFilter::Media,
+                                SetGlobalSearchKindMedia,
+                            ))
+                    })
+            })
+            .child({
+                let selected = self.time_filter;
+                Button::new("global-search-time-filter")
+                    .ghost()
+                    .compact()
+                    .label(selected.compact_label())
+                    .tooltip("按修改时间过滤")
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        menu.min_w(px(210.))
+                            .label("修改时间")
+                            .separator()
+                            .item(filter_time_item(
+                                selected,
+                                SearchTimeFilter::Any,
+                                SetGlobalSearchTimeAny,
+                            ))
+                            .item(filter_time_item(
+                                selected,
+                                SearchTimeFilter::Last24Hours,
+                                SetGlobalSearchTimeLast24Hours,
+                            ))
+                            .item(filter_time_item(
+                                selected,
+                                SearchTimeFilter::Last7Days,
+                                SetGlobalSearchTimeLast7Days,
+                            ))
+                            .item(filter_time_item(
+                                selected,
+                                SearchTimeFilter::Last30Days,
+                                SetGlobalSearchTimeLast30Days,
+                            ))
                     })
             })
             .child(
@@ -668,6 +827,12 @@ impl GlobalSearchWindow {
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("“{}”的名称结果", results.query))
                     .child(format!("{} 项", results.total_entries))
+                    .when_some(self.filters().summary(), |this, summary| {
+                        this.child(summary)
+                    })
+                    .when(results.partial, |this| {
+                        this.child("索引结果，正在核对全部文件…")
+                    })
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
             .child(if results.groups.is_empty() {
@@ -712,6 +877,9 @@ impl GlobalSearchWindow {
                     .child(format!("“{}”的内容结果", results.query))
                     .child(format!("{} 个文件", results.files.len()))
                     .child(format!("{} 处匹配", results.total_matches))
+                    .when_some(self.filters().summary(), |this, summary| {
+                        this.child(summary)
+                    })
                     .when(results.partial, |this| this.child("索引更新中"))
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
@@ -862,6 +1030,13 @@ impl Render for GlobalSearchWindow {
                 .child(error.clone())
                 .into_any_element()
         } else if self.loading && self.name_results.is_none() && self.content_results.is_none() {
+            let roots = self.scope_roots();
+            let scope_count = roots.len();
+            let index_progress = kite_core::global_name_search::status(&roots)
+                .into_iter()
+                .filter_map(|status| status.message)
+                .collect::<Vec<_>>()
+                .join("；");
             div()
                 .flex_1()
                 .items_center()
@@ -869,8 +1044,34 @@ impl Render for GlobalSearchWindow {
                 .gap_2()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(Icon::new(IconName::Search).size_4())
-                .child("正在搜索…")
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(Icon::new(IconName::Search).size_4())
+                                .child(if !index_progress.is_empty() {
+                                    "Kensaku 正在建立索引…"
+                                } else if self.scope.allows_live_search() {
+                                    "正在搜索…"
+                                } else {
+                                    "正在等待 Kensaku 搜索结果…"
+                                }),
+                        )
+                        .when(!index_progress.is_empty(), |this| {
+                            this.child(index_progress.clone())
+                        })
+                        .when(!self.scope.allows_live_search(), |this| {
+                            this.child(if scope_count > 1 {
+                                format!("共 {scope_count} 个位置。修改关键词可取消本次搜索。")
+                            } else {
+                                "修改关键词可取消本次搜索。".to_string()
+                            })
+                        }),
+                )
                 .into_any_element()
         } else if self.mode == GlobalSearchMode::Content {
             if let Some(results) = self.content_results.as_ref() {
@@ -909,6 +1110,57 @@ impl Render for GlobalSearchWindow {
             .on_action(
                 cx.listener(|this, _: &SetGlobalSearchScopeNetworkVolumes, window, cx| {
                     this.set_scope(GlobalSearchScope::NetworkVolumes, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &SetGlobalSearchKindAll, window, cx| {
+                this.set_kind_filter(SearchKindFilter::All, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchKindFolders, window, cx| {
+                    this.set_kind_filter(SearchKindFilter::Folders, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchKindDocuments, window, cx| {
+                    this.set_kind_filter(SearchKindFilter::Documents, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchKindSourceCode, window, cx| {
+                    this.set_kind_filter(SearchKindFilter::SourceCode, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchKindMarkdown, window, cx| {
+                    this.set_kind_filter(SearchKindFilter::Markdown, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchKindImages, window, cx| {
+                    this.set_kind_filter(SearchKindFilter::Images, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchKindMedia, window, cx| {
+                    this.set_kind_filter(SearchKindFilter::Media, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &SetGlobalSearchTimeAny, window, cx| {
+                this.set_time_filter(SearchTimeFilter::Any, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchTimeLast24Hours, window, cx| {
+                    this.set_time_filter(SearchTimeFilter::Last24Hours, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchTimeLast7Days, window, cx| {
+                    this.set_time_filter(SearchTimeFilter::Last7Days, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetGlobalSearchTimeLast30Days, window, cx| {
+                    this.set_time_filter(SearchTimeFilter::Last30Days, window, cx)
                 }),
             )
             .child(
@@ -968,18 +1220,26 @@ fn empty_global_search_state(cx: &App, allows_live_search: bool) -> AnyElement {
 fn search_name_roots(
     roots: &[PathBuf],
     query: &str,
+    filters: SearchFilters,
     cancel: &AtomicBool,
 ) -> Result<Option<GlobalNameResults>, String> {
-    let Some(snapshot) = search_global_names(roots, query, cancel)? else {
+    let Some(snapshot) =
+        kite_core::global_name_search::search_names(roots, query, filters, cancel)?
+    else {
         return Ok(None);
     };
+    Ok(Some(global_name_results(snapshot)))
+}
+
+fn global_name_results(snapshot: crate::fs::GlobalNameSearchSnapshot) -> GlobalNameResults {
     let total_entries = snapshot.entries.len();
-    Ok(Some(GlobalNameResults {
+    GlobalNameResults {
         query: snapshot.query,
         groups: group_name_entries(&snapshot.entries),
         total_entries,
         truncated: snapshot.truncated,
-    }))
+        partial: snapshot.partial,
+    }
 }
 
 fn group_name_entries(entries: &[FileEntry]) -> Vec<GlobalNameGroup> {
@@ -1048,6 +1308,43 @@ fn compose_scope_menu_label(label: &str, detail: &str, disabled_reason: Option<&
     match disabled_reason {
         Some(reason) => format!("{label} · {reason}"),
         None => format!("{label} · {detail}"),
+    }
+}
+
+fn filter_kind_item<A: Action>(
+    selected: SearchKindFilter,
+    value: SearchKindFilter,
+    action: A,
+) -> PopupMenuItem {
+    PopupMenuItem::new(value.label())
+        .checked(selected == value)
+        .action(Box::new(action))
+}
+
+fn filter_time_item<A: Action>(
+    selected: SearchTimeFilter,
+    value: SearchTimeFilter,
+    action: A,
+) -> PopupMenuItem {
+    PopupMenuItem::new(value.label())
+        .checked(selected == value)
+        .action(Box::new(action))
+}
+
+fn global_search_session_filters() -> SearchFilters {
+    GLOBAL_SEARCH_SESSION_FILTERS
+        .get_or_init(|| Mutex::new(SearchFilters::default()))
+        .lock()
+        .map(|filters| *filters)
+        .unwrap_or_default()
+}
+
+fn store_global_search_session_filters(filters: SearchFilters) {
+    if let Ok(mut stored) = GLOBAL_SEARCH_SESSION_FILTERS
+        .get_or_init(|| Mutex::new(SearchFilters::default()))
+        .lock()
+    {
+        *stored = filters;
     }
 }
 

@@ -21,6 +21,11 @@ case "$PROFILE" in
 esac
 
 cd "$ROOT"
+if [[ "${KITE_SKIP_KENSAKU:-0}" != "1" ]]; then
+    if [[ -z "${KENSAKU_CLI_PATH:-}" || -z "${KENSAKU_DAEMON_PATH:-}" ]]; then
+        python3 scripts/kensaku/build_sidecars.py
+    fi
+fi
 if [[ "$PROFILE" == "release" ]]; then
     cargo build --release --locked --lib
 else
@@ -64,6 +69,20 @@ xcrun swiftc \
 cp "$ROOT/apps/macos/Info.plist" "$CONTENTS/Info.plist"
 cp "$ROOT/assets/kite.icns" "$CONTENTS/Resources/AppIcon.icns"
 cp "$TARGET_DIR/libkite_core.dylib" "$CONTENTS/Frameworks/"
+
+KENSAKU_CLI="${KENSAKU_CLI_PATH:-$ROOT/vendor/kensaku/kensaku-cli}"
+KENSAKU_DAEMON="${KENSAKU_DAEMON_PATH:-$ROOT/vendor/kensaku/kensaku-daemon}"
+if [[ "${KITE_SKIP_KENSAKU:-0}" != "1" ]]; then
+    if [[ ! -f "$KENSAKU_CLI" || ! -f "$KENSAKU_DAEMON" ]]; then
+        echo "Kensaku sidecars are missing; run scripts/kensaku/build_sidecars.py" >&2
+        exit 1
+    fi
+    cp "$KENSAKU_CLI" "$CONTENTS/MacOS/kensaku-cli"
+    cp "$KENSAKU_DAEMON" "$CONTENTS/MacOS/kensaku-daemon"
+    chmod +x "$CONTENTS/MacOS/kensaku-cli" "$CONTENTS/MacOS/kensaku-daemon"
+    cp "$ROOT/docs/search/kensaku-backend.md" "$CONTENTS/Resources/Kensaku-backend.md"
+    cp "$ROOT/docs/search/KENSAKU_LICENSE" "$CONTENTS/Resources/KENSAKU_LICENSE"
+fi
 install_name_tool -id @rpath/libkite_core.dylib "$CONTENTS/Frameworks/libkite_core.dylib"
 
 CORE_LINK="$(otool -L "$CONTENTS/MacOS/Kite" | awk '/libkite_core\.dylib/ { print $1; exit }')"
