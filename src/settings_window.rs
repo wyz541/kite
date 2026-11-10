@@ -397,7 +397,7 @@ impl SettingsWindow {
         )
     }
 
-    fn render_file_handling(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_file_handling(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let set_default = Button::new("set-default-explorer")
             .small()
             .outline()
@@ -476,7 +476,7 @@ impl SettingsWindow {
         content.into_any_element()
     }
 
-    fn render_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_updates(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let check = Button::new("check-updates")
             .small()
             .outline()
@@ -496,7 +496,7 @@ impl SettingsWindow {
             .small()
             .outline()
             .label("打开更新日志")
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
                 if let Err(error) = open_update_log() {
                     this.status = Some(error.into());
                     cx.notify();
