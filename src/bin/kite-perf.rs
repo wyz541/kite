@@ -31,7 +31,7 @@ const REPORT_SCHEMA_VERSION: u32 = 1;
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_millis(10);
 const CONTENT_INDEX_TIMEOUT: Duration = Duration::from_secs(180);
 const NAME_INDEX_TIMEOUT: Duration = Duration::from_secs(180);
-const INCREMENTAL_INDEX_TIMEOUT: Duration = Duration::from_secs(10);
+const INCREMENTAL_INDEX_TIMEOUT: Duration = Duration::from_secs(60);
 
 const AREAS: [&str; 13] = [
     "Startup and launch",
