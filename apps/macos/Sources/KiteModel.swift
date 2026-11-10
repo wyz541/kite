@@ -1250,6 +1250,21 @@ final class KiteModel: ObservableObject {
 
         Task {
             do {
+                let indexedResult = try await Task.detached(priority: .userInitiated) {
+                    try core.searchIndexedNames(paths: roots, query: query, filters: filters)
+                }.value
+
+                guard generation == self.globalSearchGeneration, self.globalSearchLoading else { return }
+                if let indexedResult {
+                    self.globalSearch = BrowserGlobalSearchState(dto: indexedResult)
+                }
+            } catch {
+                return
+            }
+        }
+
+        Task {
+            do {
                 let result = try await Task.detached(priority: .userInitiated) {
                     try core.searchDirectories(paths: roots, query: query, filters: filters)
                 }.value

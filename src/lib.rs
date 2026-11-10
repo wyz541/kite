@@ -9,7 +9,8 @@ pub mod ffi;
 pub mod file_watcher;
 pub mod fs;
 pub mod global_name_search;
-pub mod kensaku_search;
+pub mod indexed_search;
+pub mod name_index;
 pub mod perf_trace;
 pub mod platform;
 #[cfg(windows)]
@@ -19,4 +20,6 @@ pub mod session;
 pub mod text_editor;
 pub mod ui_preferences;
 pub mod updater;
+#[cfg(windows)]
+pub mod usn_journal;
 pub mod vcs;
