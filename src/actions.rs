@@ -47,6 +47,7 @@ actions!(
         RestoreDefaultExplorer,
         CreateStartMenuShortcut,
         CheckForUpdates,
+        OpenSettings,
         SaveEditor,
     ]
 );

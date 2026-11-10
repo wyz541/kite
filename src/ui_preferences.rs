@@ -12,8 +12,21 @@ const UI_PREFERENCES_SCHEMA_VERSION: u32 = 1;
 const MAX_UI_PREFERENCES_BYTES: u64 = 64 * 1024;
 const MAX_COLUMN_RULES: usize = 512;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppearancePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiPreferences {
+    pub restore_session: bool,
+    pub appearance: AppearancePreference,
+    pub sidebar_visible: bool,
+    pub preview_visible: bool,
     pub column_details_visible: bool,
     pub date_column_visible: bool,
     pub kind_column_visible: bool,
@@ -26,6 +39,10 @@ pub struct UiPreferences {
 impl Default for UiPreferences {
     fn default() -> Self {
         Self {
+            restore_session: true,
+            appearance: AppearancePreference::System,
+            sidebar_visible: true,
+            preview_visible: true,
             column_details_visible: false,
             date_column_visible: true,
             kind_column_visible: true,
@@ -73,6 +90,14 @@ impl UiPreferences {
 #[derive(Serialize, Deserialize)]
 struct UiPreferencesFile {
     schema_version: u32,
+    #[serde(default = "default_true")]
+    restore_session: bool,
+    #[serde(default)]
+    appearance: AppearancePreference,
+    #[serde(default = "default_true")]
+    sidebar_visible: bool,
+    #[serde(default = "default_true")]
+    preview_visible: bool,
     #[serde(default)]
     column_details_visible: bool,
     #[serde(default = "default_true")]
@@ -167,6 +192,10 @@ fn load_ui_preferences_at(path: &Path) -> Option<UiPreferences> {
     let mut column_rules = file.column_rules;
     prune_column_rules(&mut column_rules);
     Some(UiPreferences {
+        restore_session: file.restore_session,
+        appearance: file.appearance,
+        sidebar_visible: file.sidebar_visible,
+        preview_visible: file.preview_visible,
         column_details_visible: file.column_details_visible,
         date_column_visible: file.date_column_visible,
         kind_column_visible: file.kind_column_visible,
@@ -179,6 +208,10 @@ fn load_ui_preferences_at(path: &Path) -> Option<UiPreferences> {
 
 fn save_ui_preferences_at(path: &Path, preferences: UiPreferences) -> Result<(), String> {
     let UiPreferences {
+        restore_session,
+        appearance,
+        sidebar_visible,
+        preview_visible,
         column_details_visible,
         date_column_visible,
         kind_column_visible,
@@ -190,6 +223,10 @@ fn save_ui_preferences_at(path: &Path, preferences: UiPreferences) -> Result<(),
     prune_column_rules(&mut column_rules);
     let file = UiPreferencesFile {
         schema_version: UI_PREFERENCES_SCHEMA_VERSION,
+        restore_session,
+        appearance,
+        sidebar_visible,
+        preview_visible,
         column_details_visible,
         date_column_visible,
         kind_column_visible,
@@ -272,6 +309,31 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn saves_and_loads_window_preferences() {
+        let path = test_path();
+        save_ui_preferences_at(
+            &path,
+            UiPreferences {
+                restore_session: false,
+                appearance: AppearancePreference::Dark,
+                sidebar_visible: false,
+                preview_visible: false,
+                column_details_visible: true,
+                ..UiPreferences::default()
+            },
+        )
+        .expect("save preferences");
+
+        let preferences = load_ui_preferences_at(&path).expect("load preferences");
+        assert!(!preferences.restore_session);
+        assert_eq!(preferences.appearance, AppearancePreference::Dark);
+        assert!(!preferences.sidebar_visible);
+        assert!(!preferences.preview_visible);
+        assert!(preferences.column_details_visible);
+        fs::remove_file(path).expect("remove preferences");
     }
 
     #[test]

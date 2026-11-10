@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::actions::{CloseTab, NewTab, NextTab, PreviousTab};
 use crate::app::{AppLaunchTarget, KiteApp, SharedClipboard, TabRequest};
 use crate::session::{self, SessionStateDto, SessionTabDto};
+use crate::ui_preferences;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
@@ -39,7 +40,9 @@ impl KiteWindow {
         };
 
         let launch_target = KiteApp::launch_target_override();
+        let preferences = ui_preferences::load_ui_preferences();
         if launch_target.is_none()
+            && preferences.restore_session
             && let Some(state) = session::load_session()
         {
             this.restore_session(&state, window, cx);

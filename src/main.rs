@@ -16,6 +16,8 @@ mod global_search_window;
 #[cfg(windows)]
 mod preview_window;
 #[cfg(windows)]
+mod settings_window;
+#[cfg(windows)]
 mod shell_fs;
 #[cfg(windows)]
 mod table;
@@ -44,7 +46,13 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            Theme::change(ThemeMode::Dark, None, cx);
+            let preferences = ui_preferences::load_ui_preferences();
+            let mode = match preferences.appearance {
+                ui_preferences::AppearancePreference::Light => ThemeMode::Light,
+                ui_preferences::AppearancePreference::Dark => ThemeMode::Dark,
+                ui_preferences::AppearancePreference::System => ThemeMode::Light,
+            };
+            Theme::change(mode, None, cx);
             KiteApp::bind_keys(cx);
             KiteApp::install_menus(cx);
 

@@ -25,17 +25,20 @@ use crate::fs::{
 use crate::global_search_window;
 use crate::platform::{default_root_path, root_directory};
 use crate::preview_window::PreviewWindow;
+use crate::settings_window;
 use crate::shell_fs;
 use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
 use crate::text_editor;
-use crate::ui_preferences::{self, ColumnGroupPreference as ColumnGroup, ColumnViewRule};
+use crate::ui_preferences::{
+    self, AppearancePreference, ColumnGroupPreference as ColumnGroup, ColumnViewRule, UiPreferences,
+};
 use crate::vcs::{
     VcsOperation, VcsQuery, VcsTool, apply_statuses, load_vcs_snapshot, open_vcs_log_window,
     run_vcs_operation, run_vcs_query,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelectionHandle};
-use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
@@ -761,6 +764,7 @@ pub struct KiteApp {
     _vcs_task: Task<()>,
     view_mode: ViewMode,
     show_path_bar: bool,
+    show_sidebar: bool,
     address_editing: bool,
     search_visible: bool,
     show_preview: bool,
@@ -1021,9 +1025,10 @@ impl KiteApp {
             _vcs_task: Task::ready(()),
             view_mode,
             show_path_bar,
+            show_sidebar: ui_preferences.sidebar_visible,
             address_editing: false,
             search_visible: false,
-            show_preview: true,
+            show_preview: ui_preferences.preview_visible,
             show_column_details: ui_preferences.column_details_visible,
             show_date_column: ui_preferences.date_column_visible,
             show_kind_column: ui_preferences.kind_column_visible,
@@ -1377,6 +1382,8 @@ impl KiteApp {
                 MenuItem::action("显示或隐藏路径栏", TogglePathBar),
             ]),
             Menu::new("Kite").items([
+                MenuItem::action("设置…", OpenSettings),
+                MenuItem::separator(),
                 MenuItem::action("检查更新…", CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action("设为默认资源管理器…", SetDefaultExplorer),
@@ -4748,13 +4755,92 @@ impl KiteApp {
         cx.notify();
     }
 
+    fn open_settings_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match settings_window::open_settings_window(cx.entity(), cx) {
+            Ok(()) => {
+                self.error = None;
+            }
+            Err(error) => {
+                self.notice = None;
+                self.error = Some(error.into());
+            }
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn apply_ui_preferences(
+        &mut self,
+        preferences: UiPreferences,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_sidebar = preferences.sidebar_visible;
+        self.show_preview = preferences.preview_visible;
+        self.show_column_details = preferences.column_details_visible;
+        self.show_date_column = preferences.date_column_visible;
+        self.show_kind_column = preferences.kind_column_visible;
+        self.show_size_column = preferences.size_column_visible;
+        self.preferred_column_width = preferences.column_width;
+        cx.notify();
+    }
+
+    pub(crate) fn settings_update_status(&self) -> (bool, Option<SharedString>) {
+        (
+            self.update_in_progress,
+            self.error.clone().or_else(|| self.notice.clone()),
+        )
+    }
+
+    pub(crate) fn check_for_updates_from_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.check_for_updates(&CheckForUpdates, window, cx);
+    }
+
+    pub(crate) fn set_default_explorer_from_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_default_explorer(&SetDefaultExplorer, window, cx);
+    }
+
+    pub(crate) fn restore_default_explorer_from_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.restore_default_explorer(&RestoreDefaultExplorer, window, cx);
+    }
+
+    pub(crate) fn create_start_menu_shortcut_from_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.create_start_menu_shortcut(&CreateStartMenuShortcut, window, cx);
+    }
+
     fn toggle_theme(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         let mode = if cx.theme().mode.is_dark() {
             ThemeMode::Light
         } else {
             ThemeMode::Dark
         };
+        let appearance = if mode.is_dark() {
+            AppearancePreference::Dark
+        } else {
+            AppearancePreference::Light
+        };
+        let mut preferences = ui_preferences::load_ui_preferences();
+        preferences.appearance = appearance;
+        if let Err(error) = ui_preferences::save_ui_preferences(preferences) {
+            self.notice = None;
+            self.error = Some(error.into());
+        }
         Theme::change(mode, Some(window), cx);
+        cx.notify();
     }
     fn sidebar_item(&self, item: SidebarItem, cx: &mut Context<Self>) -> AnyElement {
         let SidebarItem {
@@ -5202,28 +5288,14 @@ impl KiteApp {
             ));
         }
 
-        let settings = DropdownButton::new("sidebar-settings")
-            .with_size(Size::Small)
-            .menu_accessibility_label("Kite 设置")
-            .button(
-                Button::new("sidebar-settings-action")
-                    .ghost()
-                    .compact()
-                    .label("设置")
-                    .tooltip("Kite 设置"),
-            )
-            .dropdown_menu(|menu, _, _| {
-                menu.menu("检查更新…", Box::new(CheckForUpdates))
-                    .separator()
-                    .menu("设为默认资源管理器…", Box::new(SetDefaultExplorer))
-                    .separator()
-                    .menu(
-                        "恢复之前的文件夹打开方式…",
-                        Box::new(RestoreDefaultExplorer),
-                    )
-                    .separator()
-                    .menu("创建开始菜单快捷方式…", Box::new(CreateStartMenuShortcut))
-            });
+        let settings = Button::new("sidebar-settings")
+            .ghost()
+            .compact()
+            .label("设置")
+            .tooltip("Kite 设置")
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.open_settings_window(window, cx)
+            }));
         let theme_icon = if cx.theme().mode.is_dark() {
             IconName::Sun
         } else {
@@ -7745,6 +7817,7 @@ impl Render for KiteApp {
                 .into_any_element()
         });
 
+        let show_sidebar = self.show_sidebar;
         let sidebar = self.render_sidebar(cx);
         let main_view = if column_mode {
             self.render_columns(window, cx)
@@ -7838,6 +7911,9 @@ impl Render for KiteApp {
             .on_action(cx.listener(|this, _: &PreviousTab, _, cx| {
                 this.request_tab(TabRequest::Previous, cx)
             }))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.open_settings_window(window, cx)
+            }))
             .on_action(cx.listener(Self::check_for_updates))
             .on_action(cx.listener(Self::set_default_explorer))
             .on_action(cx.listener(Self::restore_default_explorer))
@@ -7881,7 +7957,7 @@ impl Render for KiteApp {
                     .w_full()
                     .items_stretch()
                     .gap_2()
-                    .child(sidebar)
+                    .when(show_sidebar, |this| this.child(sidebar))
                     .child(
                         v_flex()
                             .flex_1()
