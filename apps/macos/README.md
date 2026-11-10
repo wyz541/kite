@@ -44,12 +44,13 @@ The build script creates `apps/macos/build/Kite.app`.
 - SwiftUI tab rail with new, close, and switch commands.
 - Tab and directory restoration on app relaunch.
 - One breadcrumb and path-entry control with Command+L focus and Command+Up parent navigation.
-- Sidebar for standard locations, favorites, Rust-enumerated volumes, and settings.
+- Sidebar for standard locations, favorites, Rust-enumerated volumes, and a settings window entry.
 - Sidebar context menus for opening locations, revealing them in Finder, and showing Finder info.
 - Toolbar and context-menu favorite controls.
 - macOS 26 Liquid Glass surfaces, controls, and selected rows.
 - Automatic horizontal positioning of the active directory column.
 - macOS 13 through 15 material fallback.
+- Native settings window with General, Appearance, Layout, File Handling, Updates, and About panes.
 - AppKit workspace actions.
 - File-row and column-directory context menus.
 - Refresh-first file and directory context menus.
