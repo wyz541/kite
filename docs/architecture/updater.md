@@ -19,7 +19,7 @@ Windows 与 macOS 不共享安装脚本。
 - 比较语义化版本。
 - 只接受 Kite 仓库的更新资产。
 - 强制校验 SHA-256。
-- 支持 Windows 完整包更新。
+- 支持 Windows EXE 更新。
 - 支持 macOS 应用包更新。
 - 更新失败时恢复旧版本。
 - 不把 GitHub Token 写入客户端。
@@ -44,7 +44,7 @@ Windows 与 macOS 不共享安装脚本。
 比较当前版本与最新版本
         |
         v
-选择 Windows ZIP 或 macOS ZIP
+选择 Windows EXE 或 macOS ZIP
         |
         v
 下载到本地更新目录
@@ -84,10 +84,9 @@ Release 标签允许带 `v` 前缀。
 
 ### Windows x64
 
-Windows 使用 `Kite-vX.Y.Z-windows-x64.zip`。
-ZIP 包含 `Kite.exe`、`kensaku-cli.exe`、`kensaku-daemon.exe` 和 `onnxruntime.dll`。
-Windows 更新目标为当前运行 EXE 所在目录。
-独立 `Kite.exe` 只用于旧版更新器兼容迁移。
+Windows 使用独立资产 `Kite.exe`。
+独立 EXE 不依赖 ZIP 解压。
+Windows 更新目标为当前运行 EXE。
 
 ### macOS arm64
 
@@ -118,23 +117,16 @@ Windows Core 在下载前检查当前 EXE 文件及所在目录是否可写。
 检查失败时，Kite 不下载、不退出，并提示用户复制到可写目录。
 助手最多等待当前 Kite PID 10 秒。
 助手强制结束同名 Kite 进程。
-助手结束同目录的 Kensaku 进程。
-助手校验更新 ZIP 的 SHA-256。
-助手把 ZIP 解压到独立临时目录。
-助手确认 ZIP 包含 Kite EXE、两个 Kensaku sidecar 和 ONNX Runtime。
-助手备份当前受管文件。
-助手把当前 EXE 移动为 `Kite.exe.old`。
+助手直接尝试把当前 EXE 移动为 `Kite.exe.old`。
 移动失败时，助手重试。
+重试直接重命名目标文件。
 此操作兼容 Windows 加载器的共享删除权限。
-助手安装新 EXE、`kensaku-cli.exe`、`kensaku-daemon.exe` 和 `onnxruntime.dll`。
+助手复制已经校验的新 EXE。
+助手再次计算目标文件 SHA-256。
 助手启动新 EXE。
 启动成功后，助手删除备份。
-任一阶段失败时，助手恢复受管文件并启动旧 EXE。
+任一阶段失败时，助手恢复备份并启动旧 EXE。
 日志位于 `%LOCALAPPDATA%\Kite\updates\update.log`。
-
-Windows 首次发现 sidecar 缺失时，Core 自动下载当前稳定 Release ZIP。
-Core 校验 ZIP SHA-256 后解压两个 sidecar 和 ONNX Runtime。
-Core 用临时文件替换目标 sidecar。
 
 ## macOS 安装
 
@@ -228,7 +220,6 @@ macOS 不实现第二套版本比较或资产选择逻辑。
 - 在线 Release 解析测试。
 - 在线 Windows 资产下载和摘要测试。
 - Windows 加载器兼容文件锁替换测试。
-- Windows sidecar 包解压测试。
 - Windows 更新助手 UTF-8 BOM 测试。
 - Windows 单元测试。
 - Windows Clippy。
