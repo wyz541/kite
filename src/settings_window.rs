@@ -3,10 +3,13 @@ use std::path::PathBuf;
 use crate::app::KiteApp;
 use crate::ui_preferences::{self, AppearancePreference, UiPreferences};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::Selectable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, Theme, ThemeMode,
+    h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
