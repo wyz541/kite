@@ -740,6 +740,8 @@ struct UpdateDownloadState: Equatable {
 
 @MainActor
 final class KiteModel: ObservableObject {
+    static let restoreSessionDefaultsKey = "kite.macos.restore-session"
+    static let appearanceDefaultsKey = "kite.macos.appearance"
     private static let sessionSchemaVersion: UInt32 = 1
     private static let columnSearchDebounceNanoseconds: UInt64 = 180_000_000
     private static let columnViewRulesDefaultsKey = "kite.macos.column-view-rules-v1"
@@ -2241,7 +2243,10 @@ final class KiteModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
-        if let state = core.loadSession() {
+        let restoresSession = UserDefaults.standard.object(
+            forKey: Self.restoreSessionDefaultsKey
+        ) as? Bool ?? true
+        if restoresSession, let state = core.loadSession() {
             let requestedIndex = min(Int(state.activeTab), max(state.tabs.count - 1, 0))
             var restoredTabs: [BrowserTab] = []
             var restoredActiveID: UUID?
