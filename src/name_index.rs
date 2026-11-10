@@ -2020,12 +2020,18 @@ mod tests {
 
         let new_file = root.join("wooduan-new.txt");
         fs::write(&new_file, b"fixture").expect("write updated fixture");
+        let expected_file = dunce::canonicalize(&new_file).unwrap_or_else(|_| new_file.clone());
         let mut found = false;
         for _ in 0..150 {
             if service
                 .search(std::slice::from_ref(&root), "wooduan", &cancel)
                 .expect("search updated index")
-                .is_some_and(|snapshot| snapshot.entries.iter().any(|entry| entry.path == new_file))
+                .is_some_and(|snapshot| {
+                    snapshot
+                        .entries
+                        .iter()
+                        .any(|entry| entry.path == expected_file)
+                })
             {
                 found = true;
                 break;

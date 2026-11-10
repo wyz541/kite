@@ -1559,13 +1559,18 @@ fn measure_name_index(
             let path = tree.join(format!("{token}.txt"));
             fs::write(&path, b"fixture")
                 .map_err(|error| format!("cannot write name index fixture: {error}"))?;
+            let expected_path = dunce::canonicalize(&path).unwrap_or_else(|_| path.clone());
             let deadline = Instant::now() + INCREMENTAL_INDEX_TIMEOUT;
             loop {
                 let cancel = AtomicBool::new(false);
                 let snapshot = service
                     .search(&roots, &token, &cancel)?
                     .ok_or_else(|| "incremental name search was cancelled".to_string())?;
-                if snapshot.entries.iter().any(|entry| entry.path == path) {
+                if snapshot
+                    .entries
+                    .iter()
+                    .any(|entry| entry.path == expected_path)
+                {
                     break;
                 }
                 if Instant::now() >= deadline {
