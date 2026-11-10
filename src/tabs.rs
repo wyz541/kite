@@ -8,7 +8,7 @@ use crate::session::{self, SessionStateDto, SessionTabDto};
 use crate::ui_preferences;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Theme, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -41,6 +41,9 @@ impl KiteWindow {
 
         let launch_target = KiteApp::launch_target_override();
         let preferences = ui_preferences::load_ui_preferences();
+        if preferences.appearance == ui_preferences::AppearancePreference::System {
+            Theme::change(ThemeMode::from(window.appearance()), Some(window), cx);
+        }
         if launch_target.is_none()
             && preferences.restore_session
             && let Some(state) = session::load_session()
