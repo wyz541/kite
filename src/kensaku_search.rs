@@ -32,6 +32,59 @@ const CONTENT_CANDIDATE_MULTIPLIER: usize = 8;
 const CONTENT_CANDIDATE_LIMIT: usize = 400;
 const SNIPPET_SCAN_BYTES: u64 = 8 * 1024 * 1024;
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(3);
+const KENSAKU_CONFIG_VERSION: u64 = 7;
+const KENSAKU_DEFAULT_EXCLUDED_DIRS: &[&str] = &[
+    ".git",
+    ".svn",
+    ".hg",
+    ".bzr",
+    "node_modules",
+    "vendor",
+    "Pods",
+    ".bundle",
+    "target",
+    "build",
+    "dist",
+    "out",
+    ".output",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".vercel",
+    ".netlify",
+    ".cache",
+    ".npm",
+    ".yarn",
+    ".pnpm",
+    ".cargo",
+    ".rustup",
+    ".gradle",
+    ".m2",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    ".nox",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    ".vscode",
+    ".idea",
+    ".vs",
+    ".eclipse",
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    ".Trash",
+    "lost+found",
+];
+const KENSAKU_DEFAULT_EXCLUDED_EXTENSIONS: &[&str] = &[
+    "exe", "dll", "so", "dylib", "bin", "o", "a", "lib", "class", "pyc", "pyo", "pem", "key",
+    "pfx", "p12", "crt", "cer", "db", "sqlite", "sqlite3", "lock", "lockb", "min.js", "min.css",
+    "map",
+];
 
 static CLI_PATH: OnceLock<PathBuf> = OnceLock::new();
 static DAEMON_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -358,6 +411,14 @@ fn ensure_daemon(roots: &[PathBuf]) -> Result<(), String> {
         .filter(|pid| daemon_process_is_running(*pid))
         .is_some()
         || daemon_child_is_running();
+    let config_valid = kensaku_config_is_valid(&config_path);
+    if !config_valid {
+        if running {
+            stop_daemon(&data_dir)?;
+        }
+        write_kensaku_config(&data_dir, &merged)?;
+        return spawn_daemon(daemon, &data_dir);
+    }
     if running && roots_are_covered_by(&roots, &configured) {
         return Ok(());
     }
@@ -385,6 +446,38 @@ fn config_roots(config_path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn kensaku_config_is_valid(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.get("watched_dirs").is_some_and(Value::is_array)
+        && object.get("excluded_dirs").is_some_and(Value::is_array)
+        && object
+            .get("excluded_extensions")
+            .is_some_and(Value::is_array)
+        && object.get("shortcut").is_some_and(Value::is_string)
+        && object.get("max_results").is_some_and(Value::is_u64)
+        && object.get("config_version").is_some_and(Value::is_u64)
+        && object
+            .get("is_setup_complete")
+            .is_some_and(|value| value.as_bool() == Some(true))
+}
+
+fn json_string_array(values: &[&str]) -> Value {
+    Value::Array(
+        values
+            .iter()
+            .map(|value| Value::String((*value).to_string()))
+            .collect(),
+    )
+}
+
 fn write_kensaku_config(data_dir: &Path, roots: &[PathBuf]) -> Result<(), String> {
     fs::create_dir_all(data_dir).map_err(|error| format!("无法创建 Kensaku 数据目录：{error}"))?;
     let path = data_dir.join("config.json");
@@ -405,6 +498,36 @@ fn write_kensaku_config(data_dir: &Path, roots: &[PathBuf]) -> Result<(), String
                 .collect(),
         ),
     );
+    if !object.get("excluded_dirs").is_some_and(Value::is_array) {
+        object.insert(
+            "excluded_dirs".to_string(),
+            json_string_array(KENSAKU_DEFAULT_EXCLUDED_DIRS),
+        );
+    }
+    if !object
+        .get("excluded_extensions")
+        .is_some_and(Value::is_array)
+    {
+        object.insert(
+            "excluded_extensions".to_string(),
+            json_string_array(KENSAKU_DEFAULT_EXCLUDED_EXTENSIONS),
+        );
+    }
+    if !object.get("shortcut").is_some_and(Value::is_string) {
+        object.insert(
+            "shortcut".to_string(),
+            Value::String("Alt+Space".to_string()),
+        );
+    }
+    if !object.get("max_results").is_some_and(Value::is_u64) {
+        object.insert("max_results".to_string(), Value::Number(50.into()));
+    }
+    if !object.get("config_version").is_some_and(Value::is_u64) {
+        object.insert(
+            "config_version".to_string(),
+            Value::Number(KENSAKU_CONFIG_VERSION.into()),
+        );
+    }
     object.insert("is_setup_complete".to_string(), Value::Bool(true));
     object.insert("auto_update".to_string(), Value::Bool(false));
     let bytes = serde_json::to_vec_pretty(&value)
@@ -986,6 +1109,46 @@ mod tests {
         fs::write(&candidate, b"fixture").expect("write daemon discovery fixture");
         let found = find_daemon_candidate(vec![candidate.clone()]);
         assert_eq!(found, Some(candidate));
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn repairs_legacy_config_with_required_kensaku_fields() {
+        let directory = std::env::temp_dir().join(format!(
+            "kite-kensaku-config-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create config test directory");
+        fs::write(
+            directory.join("config.json"),
+            br#"{"watched_dirs":["C:\\"],"is_setup_complete":true,"auto_update":false}"#,
+        )
+        .expect("write legacy config");
+        assert!(!kensaku_config_is_valid(&directory.join("config.json")));
+        write_kensaku_config(&directory, &[PathBuf::from("C:\\")]).expect("repair legacy config");
+        let value: Value = serde_json::from_slice(
+            &fs::read(directory.join("config.json")).expect("read repaired config"),
+        )
+        .expect("parse repaired config");
+        assert!(
+            value["excluded_dirs"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
+        assert!(
+            value["excluded_extensions"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
+        assert_eq!(value["shortcut"], "Alt+Space");
+        assert_eq!(value["max_results"], 50);
+        assert_eq!(value["config_version"], KENSAKU_CONFIG_VERSION);
+        assert_eq!(value["is_setup_complete"], true);
+        assert!(kensaku_config_is_valid(&directory.join("config.json")));
         let _ = fs::remove_dir_all(&directory);
     }
 
