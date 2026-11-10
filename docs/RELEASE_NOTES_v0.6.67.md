@@ -15,6 +15,7 @@ Kite v0.6.67 fixes empty global-search results after Kensaku starts.
 - Keep the selected Kite search roots.
 - Build the first Kensaku index with the repaired configuration.
 - Keep the configuration valid across later root updates.
+- Show explicit initial-index status while results are incomplete.
 
 ## Verification
 

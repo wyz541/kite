@@ -831,7 +831,7 @@ impl GlobalSearchWindow {
                         this.child(summary)
                     })
                     .when(results.partial, |this| {
-                        this.child("索引结果，正在核对全部文件…")
+                        this.child("Kensaku 正在建立首次索引；完成前可能显示 0 项")
                     })
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
@@ -880,7 +880,9 @@ impl GlobalSearchWindow {
                     .when_some(self.filters().summary(), |this, summary| {
                         this.child(summary)
                     })
-                    .when(results.partial, |this| this.child("索引更新中"))
+                    .when(results.partial, |this| {
+                        this.child("Kensaku 正在更新索引；结果可能不完整")
+                    })
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
             .child(if results.files.is_empty() {
