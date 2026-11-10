@@ -12,7 +12,9 @@ Kite 启动 `kensaku-daemon`。该进程负责：
 4. 内容提取。
 5. 索引持久化。
 
-`kensaku-cli` 只执行只读查询和状态读取。Kite 不直接写入 Kensaku 索引。
+Kite 通过本地 JSON-RPC 连接 daemon，读取实时状态并执行实时查询。
+`kensaku-cli` 只在 daemon 连接不可用时读取持久化索引。
+Kite 不直接写入 Kensaku 索引。
 
 ## 2. 数据目录
 
@@ -98,38 +100,59 @@ Kite 只增加根目录。Kite 不删除旧根目录，以免意外删除用户�
 
 ## 6. 查询
 
-名称搜索调用：
+Kite 对每个根目录调用 daemon `search` 方法。
+
+名称搜索请求等价于：
 
 ```text
-kensaku-cli search "name:\"<query>\"" --json --limit 5000 --path <root>
+name:"<query>" in:"<root>"
 ```
 
-内容搜索调用：
+内容搜索请求等价于：
 
 ```text
-kensaku-cli search "<query 或 re:\"<pattern>\">" --json --limit <n> --path <root>
+<query 或 re:"<pattern>"> in:"<root>"
 ```
 
-Kite 对每个根目录执行查询，然后合并、过滤和去重。
+Daemon 在扫描期间返回当前内存中的结果。
+Kite 合并、过滤和去重结果。
+索引期间 Kite 每 2 秒重新查询。
+
+Daemon 连接失败时，Kite 使用等价 CLI 参数查询持久化索引：
+
+```text
+kensaku-cli search "<query>" --json --limit <n> --path <root>
+```
 
 ## 7. 状态
 
-Kite 通过以下命令读取状态：
+首选 daemon 方法：
+
+```text
+index_state
+```
+
+状态包含 `is_indexing`、`phase`、`files_indexed`、`extract_done` 和 `extract_total`。
+状态用于显示扫描位置、索引数量和内容提取进度。
+Kite 缓存状态 2 秒。
+
+Daemon 连接失败时，Kite 回退到：
 
 ```text
 kensaku-cli state --json
 ```
 
-状态用于显示索引文件和内容文档数量。状态缓存 2 秒。
-
 ## 8. 错误处理
 
-- CLI 超时：20 秒。
-- 状态命令超时：5 秒。
+- daemon IPC 优先。
+- CLI 回退搜索超时：20 秒。
+- CLI 回退状态超时：5 秒。
 - 输出上限：16 MiB。
 - Windows 隐藏控制台窗口。
 - Daemon 标准输出和错误写入数据目录日志。
 - Kite 不静默回退到本地全盘遍历。
+- 首次目录遍历完成前，实时名称结果可能为 0 项。
+- Kite 在索引期间自动刷新当前查询。
 
 ## 9. 兼容范围
 
