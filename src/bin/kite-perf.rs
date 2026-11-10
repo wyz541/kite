@@ -983,6 +983,7 @@ where
     }
 
     if let Some(error) = error_message {
+        eprintln!("kite-perf: {area} / {scenario} failed: {error}");
         let mut result = error_result(area, scenario, boundary, notes, error);
         result.samples = samples;
         results.push(result);
