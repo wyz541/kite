@@ -1856,7 +1856,7 @@ fn normalize_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots = roots
         .iter()
         .filter(|root| root.is_dir())
-        .cloned()
+        .map(|root| dunce::canonicalize(root).unwrap_or_else(|_| root.clone()))
         .collect::<Vec<_>>();
     roots.sort_by_key(|root| root.components().count());
     let mut result = Vec::<PathBuf>::new();
@@ -1990,6 +1990,21 @@ mod tests {
         let pattern = path_scope_pattern(&path_key(&root));
         let regex = regex::Regex::new(&pattern).expect("compile root scope pattern");
         assert!(regex.is_match(&path_key(&child)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonicalizes_symlinked_roots() {
+        let base = test_root("canonical-root");
+        let root = base.join("real");
+        let alias = base.join("alias");
+        fs::create_dir_all(&root).expect("create canonical root");
+        std::os::unix::fs::symlink(&root, &alias).expect("create root symlink");
+        assert_eq!(
+            normalize_roots(std::slice::from_ref(&alias)),
+            vec![dunce::canonicalize(&root).expect("canonical root")]
+        );
+        remove_dir_with_retry(&base);
     }
 
     #[test]
