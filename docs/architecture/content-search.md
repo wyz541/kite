@@ -3,7 +3,7 @@
 > 结论：Kite 的全局名称搜索和全局内容搜索完全使用 Kensaku。Kite 启动 Kensaku daemon，daemon 负责首次扫描、监听和增量更新。Kite 不再建立自己的全局名称索引、USN 游标、Spotlight 加速器或内容索引。
 
 状态：已实现
-日期：2026-11-09
+日期：2026-11-10
 
 ## 1. 能力
 
@@ -23,8 +23,8 @@
 ```mermaid
 flowchart LR
     UI[Kite 搜索窗口] --> CORE[Kite Core]
-    CORE --> DAEMON[kensaku-daemon]
-    CORE --> CLI[kensaku-cli]
+    CORE -->|JSON-RPC state/search| DAEMON[kensaku-daemon]
+    CORE -.fallback.-> CLI[kensaku-cli]
     DAEMON --> DB[SQLite metadata]
     DAEMON --> CONTENT[Tantivy content]
     DAEMON --> WATCH[notify watcher]
@@ -37,9 +37,9 @@ flowchart LR
 | 组件 | 职责 |
 | --- | --- |
 | `kensaku-daemon` | 首次扫描、监听、增量更新、内容提取和索引写入 |
-| `kensaku-cli` | 只读搜索和状态查询 |
-| Kite Core | 启动 daemon、传递根目录、转换结果和应用 UI 过滤 |
-| Kite UI | 展示结果、取消搜索和处理打开动作 |
+| `kensaku-cli` | daemon 不可用时读取持久化索引 |
+| Kite Core | 启动 daemon、读取实时状态、发送实时查询、转换结果和应用 UI 过滤 |
+| Kite UI | 展示结果、自动刷新索引中的查询、取消搜索和处理打开动作 |
 
 ## 3. 数据流
 
@@ -51,9 +51,14 @@ sequenceDiagram
     participant CLI as Kensaku CLI
     UI->>Core: search_names(roots, query, filters)
     Core->>Daemon: 确保配置和进程存在
-    Core->>CLI: search --json --path root
-    CLI->>CLI: 打开 Kensaku 索引
-    CLI-->>Core: JSON results
+    Core->>Daemon: index_state
+    Daemon-->>Core: phase, is_indexing, progress
+    Core->>Daemon: search
+    Daemon-->>Core: JSON results
+    opt daemon IPC 不可用
+        Core->>CLI: search --json --path root
+        CLI-->>Core: JSON results
+    end
     Core-->>UI: GlobalSearchSnapshot
 ```
 
@@ -89,7 +94,9 @@ Kite 写入最小 `config.json`。配置包含 `watched_dirs` 和 `is_setup_comp
 
 内容模式把输入直接传给 Kensaku。正则模式转换为 `re:` 查询。
 
-Kite 对每个根目录调用一次 CLI。Kite 合并结果并去重。
+Kite 对每个根目录调用一次 Kensaku daemon。查询包含 `in:"<root>"` 范围。daemon 不可用时，Kite 回退到 CLI。
+
+索引期间 daemon 返回当前可见结果。Kite UI 每 2 秒重新查询，直到 `is_indexing=false`。
 
 类型和时间过滤在 Kite Core 中执行。过滤在最终结果上限前执行。
 
@@ -105,7 +112,7 @@ Kite 根据片段在文件中查找行号。文件超过 8 MiB 或片段无法�
 
 - 名称搜索支持取消。
 - 内容搜索支持取消。
-- CLI 搜索超时 20 秒。
+- daemon 搜索优先。CLI 回退搜索超时 20 秒。
 - CLI 状态超时 5 秒。
 - CLI 输出上限 16 MiB。
 - Windows 隐藏 CLI 和控制台窗口。
@@ -139,6 +146,8 @@ Kite 根据片段在文件中查找行号。文件超过 8 MiB 或片段无法�
 
 - Kensaku daemon 需要打包 sidecar。
 - Kensaku daemon 的首次索引需要时间。
+- 首次目录遍历完成前，实时名称结果可能为 0 项。
+- Kite 在索引期间自动刷新当前查询。
 - Kite 不修改 Kensaku 内部 schema。
 - Kite 内容行号是兼容转换结果。
 - Kensaku CLI 与 daemon 的协议升级需要同步验证。

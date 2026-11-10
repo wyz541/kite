@@ -6,8 +6,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSCommandPath
 $dist = Join-Path $root 'dist'
-$binary = Join-Path $root 'target\release\kite-explorer.exe'
-$version = '0.6.67'
+$targetRoot = if ($env:CARGO_TARGET_DIR) {
+    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+} else {
+    Join-Path $root 'target'
+}
+$binary = Join-Path $targetRoot 'release\kite-explorer.exe'
+$version = '0.6.68'
 $releaseName = "Kite-v$version-windows-x64"
 $staging = Join-Path $dist $releaseName
 $archive = Join-Path $dist "$releaseName.zip"
