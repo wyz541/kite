@@ -1456,7 +1456,7 @@ struct KiteGlobalSearchResults: View {
                             .foregroundStyle(.tertiary)
                     }
                     if search.partial {
-                        Text("Kensaku 索引更新中")
+                        Text("索引结果，正在核对全部文件…")
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }

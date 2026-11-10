@@ -168,6 +168,7 @@ impl KiteError {
 #[derive(Debug, uniffi::Object)]
 pub struct KiteCore {
     search_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    indexed_search_cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 #[uniffi::export]
@@ -176,6 +177,7 @@ impl KiteCore {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             search_cancel: Mutex::new(None),
+            indexed_search_cancel: Mutex::new(None),
         })
     }
 
@@ -319,42 +321,106 @@ impl KiteCore {
         }))
     }
 
-    pub fn cancel_directory_search(&self) {
-        if let Ok(active) = self.search_cancel.lock()
-            && let Some(cancel) = active.as_ref()
+    pub fn search_indexed_names(
+        &self,
+        paths: Vec<String>,
+        query: String,
+        filters: crate::search_filters::SearchFilters,
+    ) -> Result<Option<GlobalSearchResultDto>, KiteError> {
+        let roots = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        let cancel = Arc::new(AtomicBool::new(false));
         {
-            cancel.store(true, Ordering::Relaxed);
+            let mut active = self
+                .indexed_search_cancel
+                .lock()
+                .map_err(|_| KiteError::operation("索引搜索状态锁不可用"))?;
+            *active = Some(Arc::clone(&cancel));
+        }
+        let result =
+            crate::indexed_search::search_indexed_names(&roots, &query, filters, cancel.as_ref());
+        if let Ok(mut active) = self.indexed_search_cancel.lock()
+            && active
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &cancel))
+        {
+            *active = None;
+        }
+        let Some(snapshot) = result.map_err(KiteError::operation)? else {
+            return Ok(None);
+        };
+        Ok(Some(GlobalSearchResultDto {
+            roots: snapshot
+                .roots
+                .iter()
+                .map(|root| root.to_string_lossy().into_owned())
+                .collect(),
+            query: snapshot.query,
+            entries: snapshot.entries.iter().map(entry_dto).collect(),
+            truncated: snapshot.truncated,
+            partial: snapshot.partial,
+        }))
+    }
+
+    pub fn cancel_directory_search(&self) {
+        for slot in [&self.search_cancel, &self.indexed_search_cancel] {
+            if let Ok(active) = slot.lock()
+                && let Some(cancel) = active.as_ref()
+            {
+                cancel.store(true, Ordering::Relaxed);
+            }
         }
     }
 
     pub fn prepare_content_search(&self, roots: Vec<String>) -> Result<(), KiteError> {
+        let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        content_search::prepare_roots(&roots).map_err(KiteError::operation)
+        service
+            .ensure_roots(&roots)
+            .map(|_| ())
+            .map_err(KiteError::operation)
     }
 
     pub fn content_search_status(&self) -> ContentIndexStatusDto {
-        let status = content_search::status();
-        ContentIndexStatusDto {
-            state: status.state.as_str().to_string(),
-            indexed_files: status.indexed_files,
-            message: status.message,
+        match content_search::shared_service() {
+            Ok(service) => {
+                let status = service.status();
+                ContentIndexStatusDto {
+                    state: status.state.as_str().to_string(),
+                    indexed_files: status.indexed_files,
+                    message: status.message,
+                }
+            }
+            Err(message) => ContentIndexStatusDto {
+                state: "error".to_string(),
+                indexed_files: 0,
+                message: Some(message),
+            },
         }
     }
 
     pub fn note_content_search_interaction(&self) {
-        content_search::note_interaction();
+        if let Ok(service) = content_search::shared_service() {
+            service.note_interaction();
+        }
     }
 
     pub fn set_content_search_paused(&self, paused: bool) {
-        content_search::set_indexing_paused(paused);
+        if let Ok(service) = content_search::shared_service() {
+            service.set_indexing_paused(paused);
+        }
     }
 
     pub fn cancel_content_search(&self) {
-        content_search::cancel_search();
+        if let Ok(service) = content_search::shared_service() {
+            service.cancel_search();
+        }
     }
 
     pub fn clear_content_search_index(&self) -> Result<(), KiteError> {
-        content_search::clear().map_err(KiteError::operation)
+        content_search::shared_service()
+            .map_err(KiteError::operation)?
+            .clear()
+            .map_err(KiteError::operation)
     }
 
     pub fn search_content(
@@ -365,16 +431,12 @@ impl KiteCore {
         max_files: u32,
         filters: crate::search_filters::SearchFilters,
     ) -> Result<Option<ContentSearchResultDto>, KiteError> {
+        let service = content_search::shared_service().map_err(KiteError::operation)?;
         let roots = roots.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        content_search::search_with_filters(
-            &roots,
-            &query,
-            regex,
-            max_files.max(1) as usize,
-            filters,
-        )
-        .map(|snapshot| snapshot.map(content_search_result_dto))
-        .map_err(KiteError::operation)
+        service
+            .search_with_filters(&roots, &query, regex, max_files.max(1) as usize, filters)
+            .map(|snapshot| snapshot.map(content_search_result_dto))
+            .map_err(KiteError::operation)
     }
 
     pub fn devices(&self) -> DeviceSnapshotDto {
@@ -684,7 +746,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires packaged Kensaku sidecars"]
     fn core_searches_multiple_name_roots() {
         let directory = std::env::temp_dir().join(format!(
             "kite-core-global-search-{}-{}",
@@ -724,7 +785,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires packaged Kensaku sidecars"]
     fn core_applies_global_name_filters() {
         let directory = std::env::temp_dir().join(format!(
             "kite-core-global-filter-{}-{}",
@@ -755,7 +815,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires packaged Kensaku sidecars"]
     fn core_searches_file_content_and_returns_lines() {
         let directory = std::env::temp_dir().join(format!(
             "kite-core-content-search-{}-{}",

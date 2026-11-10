@@ -12,7 +12,6 @@ on:
       - .cargo/**
       - src/**
       - build.ps1
-      - scripts/kensaku/**
       - .github/workflows/windows.yml
       - .github/scripts/**
   pull_request:
