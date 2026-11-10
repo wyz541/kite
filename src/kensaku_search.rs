@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +14,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
+#[cfg(windows)]
+use std::fs::OpenOptions;
+
 use crate::content_search::{
     ContentFileMatch, ContentIndexState, ContentLineMatch, ContentSearchSnapshot,
 };
@@ -25,13 +28,16 @@ use crate::search_filters::SearchFilters;
 
 const STATE_CACHE_TTL: Duration = Duration::from_secs(2);
 const STATE_TIMEOUT: Duration = Duration::from_secs(5);
-const SEARCH_TIMEOUT: Duration = Duration::from_secs(20);
+const DAEMON_STATE_TIMEOUT: Duration = Duration::from_millis(250);
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
+const CLI_SEARCH_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_COMMAND_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const NAME_CANDIDATE_LIMIT: usize = 5_000;
 const CONTENT_CANDIDATE_MULTIPLIER: usize = 8;
 const CONTENT_CANDIDATE_LIMIT: usize = 400;
 const SNIPPET_SCAN_BYTES: u64 = 8 * 1024 * 1024;
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(3);
+const KENSAKU_PROTOCOL_VERSION: u64 = 1;
 const KENSAKU_CONFIG_VERSION: u64 = 7;
 const KENSAKU_DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     ".git",
@@ -102,14 +108,24 @@ struct KensakuIndexState {
     #[serde(default)]
     content_docs: u64,
     #[serde(default)]
+    files_indexed: u64,
+    #[serde(default)]
+    content_indexed: u64,
+    #[serde(default)]
+    extract_done: u64,
+    #[serde(default)]
+    extract_total: u64,
+    #[serde(default)]
     is_indexing: bool,
     #[serde(default)]
     phase: String,
+    #[serde(default)]
+    paused: bool,
 }
 
 #[derive(Clone, Debug)]
 struct CachedState {
-    cli: PathBuf,
+    data_dir: PathBuf,
     fetched_at: Instant,
     state: Option<KensakuIndexState>,
 }
@@ -155,8 +171,7 @@ pub fn prepare_content(roots: &[PathBuf]) -> Result<(), String> {
 }
 
 pub fn content_status() -> Option<KensakuContentStatus> {
-    let cli = cli_path()?;
-    let index_state = load_state(cli, None).ok().flatten()?;
+    let index_state = load_state(None, None).ok().flatten()?;
     let state = if index_state.is_indexing {
         ContentIndexState::Indexing
     } else if index_state.phase == "error" {
@@ -168,10 +183,7 @@ pub fn content_status() -> Option<KensakuContentStatus> {
         state,
         indexed_files: state_indexed_files(&index_state),
         message: if index_state.is_indexing {
-            Some(format!(
-                "Kensaku 正在建立索引：{} 项",
-                state_indexed_files(&index_state)
-            ))
+            Some(indexing_message(&index_state))
         } else if index_state.phase == "error" {
             Some("Kensaku 索引处于错误状态".to_string())
         } else {
@@ -194,9 +206,7 @@ pub fn search_names(
     if roots.is_empty() {
         return Ok(None);
     }
-    let Some(cli) = cli_path() else {
-        return Ok(None);
-    };
+    let cli = cli_path();
     let Some(state) = load_state(cli, Some(cancel))? else {
         return Ok(None);
     };
@@ -212,17 +222,14 @@ pub fn search_names(
         if cancel.load(Ordering::Relaxed) {
             return Ok(None);
         }
-        let args = vec![
-            OsString::from("search"),
-            OsString::from(&indexed_query),
-            OsString::from("--json"),
-            OsString::from("--limit"),
-            OsString::from(NAME_CANDIDATE_LIMIT.to_string()),
-            OsString::from("--path"),
-            root.as_os_str().to_os_string(),
-        ];
-        let Some(payload) =
-            run_json::<KensakuSearchPayload>(cli, &args, Some(cancel), SEARCH_TIMEOUT)?
+        let Some(payload) = search_payload_for_root(
+            cli,
+            &indexed_query,
+            root,
+            NAME_CANDIDATE_LIMIT,
+            false,
+            cancel,
+        )?
         else {
             continue;
         };
@@ -275,9 +282,7 @@ pub fn search_content(
     let max_files = max_files.clamp(1, crate::content_search::CONTENT_SEARCH_MAX_FILES);
     let cancel = content_cancel();
     cancel.store(false, Ordering::Relaxed);
-    let Some(cli) = cli_path() else {
-        return Ok(None);
-    };
+    let cli = cli_path();
     let Some(state) = load_state(cli, Some(cancel))? else {
         return Ok(None);
     };
@@ -300,17 +305,8 @@ pub fn search_content(
         if cancel.load(Ordering::Relaxed) {
             return Ok(None);
         }
-        let args = vec![
-            OsString::from("search"),
-            OsString::from(&indexed_query),
-            OsString::from("--json"),
-            OsString::from("--limit"),
-            OsString::from(limit.to_string()),
-            OsString::from("--path"),
-            root.as_os_str().to_os_string(),
-        ];
         let Some(payload) =
-            run_json::<KensakuSearchPayload>(cli, &args, Some(cancel), SEARCH_TIMEOUT)?
+            search_payload_for_root(cli, &indexed_query, root, limit, true, cancel)?
         else {
             continue;
         };
@@ -327,7 +323,23 @@ pub fn search_content(
         }
     }
 
-    if !saw_response || cancel.load(Ordering::Relaxed) {
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    if !saw_response {
+        if state.is_indexing {
+            return Ok(Some(ContentSearchSnapshot {
+                query: query.to_string(),
+                roots,
+                files: Vec::new(),
+                index_state: ContentIndexState::Indexing,
+                partial: true,
+                truncated: false,
+                scanned_documents: state.content_docs,
+                total_matches: 0,
+                duration_ms: started.elapsed().as_millis() as u64,
+            }));
+        }
         return Ok(None);
     }
     files.sort_by(|left, right| {
@@ -407,10 +419,7 @@ fn ensure_daemon(roots: &[PathBuf]) -> Result<(), String> {
             merged.push(root.clone());
         }
     }
-    let running = daemon_pid(&data_dir)
-        .filter(|pid| daemon_process_is_running(*pid))
-        .is_some()
-        || daemon_child_is_running();
+    let running = daemon_is_running(&data_dir);
     let config_valid = kensaku_config_is_valid(&config_path);
     if !config_valid {
         if running {
@@ -583,6 +592,10 @@ fn daemon_process_is_running(pid: u32) -> bool {
     })
 }
 
+fn daemon_is_running(data_dir: &Path) -> bool {
+    daemon_pid(data_dir).is_some_and(daemon_process_is_running) || daemon_child_is_running()
+}
+
 fn stop_daemon(data_dir: &Path) -> Result<(), String> {
     let pid = daemon_pid(data_dir);
     if let Some(child_slot) = DAEMON_CHILD.get()
@@ -700,7 +713,30 @@ fn state_roots(state: &KensakuIndexState) -> Vec<PathBuf> {
 }
 
 fn state_indexed_files(state: &KensakuIndexState) -> u64 {
-    state.content_docs.max(state.files)
+    state
+        .content_docs
+        .max(state.files)
+        .max(state.files_indexed)
+        .max(state.content_indexed)
+}
+
+fn indexing_message(state: &KensakuIndexState) -> String {
+    if state.paused {
+        return "Kensaku 索引已暂停".to_string();
+    }
+    match state.phase.as_str() {
+        "starting" => "Kensaku 正在连接索引服务".to_string(),
+        "walking" if state_indexed_files(state) == 0 => {
+            format!("Kensaku 正在扫描 {} 个位置", state.roots.len().max(1))
+        }
+        "walking" => format!("Kensaku 正在建立索引：{} 项", state_indexed_files(state)),
+        "extracting" if state.extract_total > 0 => format!(
+            "Kensaku 正在读取内容：{}/{}",
+            state.extract_done, state.extract_total
+        ),
+        "committing" => format!("Kensaku 正在提交索引：{} 项", state_indexed_files(state)),
+        _ => format!("Kensaku 正在建立索引：{} 项", state_indexed_files(state)),
+    }
 }
 
 fn name_query(query: &str) -> String {
@@ -971,23 +1007,248 @@ fn make_cli_command(path: &Path) -> Command {
     command
 }
 
+trait DaemonReadWrite: Read + Write {}
+
+impl<T: Read + Write> DaemonReadWrite for T {}
+
+#[cfg(windows)]
+fn open_daemon_stream(_data_dir: &Path) -> Result<Box<dyn DaemonReadWrite>, String> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(r"\\.\pipe\kensaku")
+        .map(|stream| Box::new(stream) as Box<dyn DaemonReadWrite>)
+        .map_err(|error| format!("无法连接 Kensaku daemon：{error}"))
+}
+
+#[cfg(unix)]
+fn open_daemon_stream(data_dir: &Path) -> Result<Box<dyn DaemonReadWrite>, String> {
+    use std::os::unix::net::UnixStream;
+
+    let socket_root = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.to_path_buf());
+    let stream = UnixStream::connect(socket_root.join("kensaku.sock"))
+        .map_err(|error| format!("无法连接 Kensaku daemon：{error}"))?;
+    stream
+        .set_read_timeout(Some(SEARCH_TIMEOUT))
+        .map_err(|error| format!("无法设置 Kensaku daemon 读取超时：{error}"))?;
+    stream
+        .set_write_timeout(Some(SEARCH_TIMEOUT))
+        .map_err(|error| format!("无法设置 Kensaku daemon 写入超时：{error}"))?;
+    Ok(Box::new(stream))
+}
+
+fn daemon_request(method: &str, params: Value) -> Result<Value, String> {
+    let data_dir = kensaku_data_dir();
+    let token = fs::read_to_string(data_dir.join("daemon.token"))
+        .map_err(|error| format!("无法读取 Kensaku daemon token：{error}"))?;
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("Kensaku daemon token 为空".to_string());
+    }
+    let Value::Object(mut params) = params else {
+        return Err("Kensaku daemon 请求参数不是对象".to_string());
+    };
+    params.insert("token".to_string(), Value::String(token.to_string()));
+    params.insert(
+        "protocol_version".to_string(),
+        Value::from(KENSAKU_PROTOCOL_VERSION),
+    );
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    });
+    let mut stream = open_daemon_stream(&data_dir)?;
+    writeln!(stream, "{request}").map_err(|error| format!("无法写入 Kensaku daemon：{error}"))?;
+    stream
+        .flush()
+        .map_err(|error| format!("无法刷新 Kensaku daemon 请求：{error}"))?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|error| format!("无法读取 Kensaku daemon 响应：{error}"))?;
+    if line.len() > MAX_COMMAND_OUTPUT_BYTES {
+        return Err("Kensaku daemon 响应超过上限".to_string());
+    }
+    let response: Value = serde_json::from_str(&line)
+        .map_err(|error| format!("无法解析 Kensaku daemon 响应：{error}"))?;
+    if let Some(error) = response.get("error") {
+        return Err(error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("Kensaku daemon 返回错误")
+            .to_string());
+    }
+    Ok(response.get("result").cloned().unwrap_or(Value::Null))
+}
+
+fn daemon_request_cancellable(
+    method: &str,
+    params: Value,
+    cancel: &AtomicBool,
+    timeout: Duration,
+) -> Result<Option<Value>, String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    let method = method.to_string();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let _ = thread::spawn(move || {
+        let _ = sender.send(daemon_request(&method, params));
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Kensaku daemon 请求超时".to_string());
+        }
+        match receiver.recv_timeout(remaining.min(Duration::from_millis(50))) {
+            Ok(result) => return result.map(Some),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Kensaku daemon 请求线程已结束".to_string());
+            }
+        }
+    }
+}
+
+fn search_payload_for_root(
+    cli: Option<&Path>,
+    query: &str,
+    root: &Path,
+    limit: usize,
+    snippets: bool,
+    cancel: &AtomicBool,
+) -> Result<Option<KensakuSearchPayload>, String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    match daemon_request_cancellable(
+        "search",
+        json!({
+            "query": scoped_query(query, root),
+            "limit": limit,
+            "offset": 0,
+            "snippets": snippets,
+        }),
+        cancel,
+        SEARCH_TIMEOUT,
+    ) {
+        Ok(Some(value)) => {
+            if let Ok(payload) = serde_json::from_value::<KensakuSearchPayload>(value) {
+                return Ok(Some(payload));
+            }
+        }
+        Ok(None) => return Ok(None),
+        Err(_) if daemon_is_running(&kensaku_data_dir()) => return Ok(None),
+        Err(_) => {}
+    }
+    let Some(cli) = cli else {
+        return Ok(None);
+    };
+    let args = vec![
+        OsString::from("search"),
+        OsString::from(query),
+        OsString::from("--json"),
+        OsString::from("--limit"),
+        OsString::from(limit.to_string()),
+        OsString::from("--path"),
+        root.as_os_str().to_os_string(),
+    ];
+    run_json::<KensakuSearchPayload>(cli, &args, Some(cancel), CLI_SEARCH_TIMEOUT)
+}
+
+fn scoped_query(query: &str, root: &Path) -> String {
+    format!(
+        "{} in:\"{}\"",
+        query.trim(),
+        escape_query_value(&root.to_string_lossy())
+    )
+}
+
+fn cli_index_state(cli: Option<&Path>, cancel: Option<&AtomicBool>) -> Option<KensakuIndexState> {
+    let cli = cli?;
+    let args = [OsString::from("state"), OsString::from("--json")];
+    run_json::<KensakuIndexState>(cli, &args, cancel, STATE_TIMEOUT)
+        .ok()
+        .flatten()
+}
+
+fn provisional_index_state(data_dir: &Path) -> KensakuIndexState {
+    KensakuIndexState {
+        roots: config_roots(&data_dir.join("config.json"))
+            .iter()
+            .map(|root| root.to_string_lossy().into_owned())
+            .collect(),
+        files: 0,
+        content_docs: 0,
+        files_indexed: 0,
+        content_indexed: 0,
+        extract_done: 0,
+        extract_total: 0,
+        is_indexing: true,
+        phase: "starting".to_string(),
+        paused: false,
+    }
+}
+
 fn load_state(
-    cli: &Path,
+    cli: Option<&Path>,
     cancel: Option<&AtomicBool>,
 ) -> Result<Option<KensakuIndexState>, String> {
+    if cancel.is_some_and(|cancel| cancel.load(Ordering::Relaxed)) {
+        return Ok(None);
+    }
+    let data_dir = kensaku_data_dir();
     let cache = STATE_CACHE.get_or_init(|| Mutex::new(None));
+    let stale_state = cache.lock().ok().and_then(|cache| {
+        cache
+            .as_ref()
+            .filter(|cached| cached.data_dir == data_dir)
+            .and_then(|cached| cached.state.clone())
+    });
     if let Ok(cache) = cache.lock()
         && let Some(cached) = cache.as_ref()
-        && cached.cli == cli
+        && cached.data_dir == data_dir
         && cached.fetched_at.elapsed() < STATE_CACHE_TTL
     {
         return Ok(cached.state.clone());
     }
-    let args = [OsString::from("state"), OsString::from("--json")];
-    let state = run_json::<KensakuIndexState>(cli, &args, cancel, STATE_TIMEOUT)?;
+    let no_cancel = AtomicBool::new(false);
+    let request_cancel = cancel.unwrap_or(&no_cancel);
+    let daemon_state = match daemon_request_cancellable(
+        "index_state",
+        json!({}),
+        request_cancel,
+        DAEMON_STATE_TIMEOUT,
+    ) {
+        Ok(Some(value)) => serde_json::from_value::<KensakuIndexState>(value).ok(),
+        Ok(None) => return Ok(None),
+        Err(_) => None,
+    };
+    let daemon_running = daemon_is_running(&data_dir);
+    let state = daemon_state.or_else(|| {
+        if daemon_running {
+            let mut state = stale_state.unwrap_or_else(|| provisional_index_state(&data_dir));
+            state.is_indexing = true;
+            if state.phase.is_empty() {
+                state.phase = "starting".to_string();
+            }
+            Some(state)
+        } else {
+            cli_index_state(cli, cancel).or(stale_state)
+        }
+    });
     if let Ok(mut cache) = cache.lock() {
         *cache = Some(CachedState {
-            cli: cli.to_path_buf(),
+            data_dir,
             fetched_at: Instant::now(),
             state: state.clone(),
         });
@@ -1091,6 +1352,68 @@ mod tests {
     }
 
     #[test]
+    fn daemon_scope_query_escapes_path() {
+        assert_eq!(
+            scoped_query(r#"name:"needle""#, Path::new(r#"C:\A "B""#)),
+            r#"name:"needle" in:"C:\\A \"B\"""#
+        );
+    }
+
+    #[test]
+    fn parses_live_daemon_index_progress() {
+        let state: KensakuIndexState = serde_json::from_str(
+            r#"{
+                "files": 0,
+                "dirs": 0,
+                "content_docs": 0,
+                "roots": ["C:\\", "D:\\"],
+                "is_indexing": true,
+                "phase": "walking",
+                "files_indexed": 0,
+                "content_indexed": 0,
+                "extract_done": 0,
+                "extract_total": 0
+            }"#,
+        )
+        .expect("parse live daemon state");
+        assert!(state.is_indexing);
+        assert_eq!(state.roots.len(), 2);
+        assert_eq!(indexing_message(&state), "Kensaku 正在扫描 2 个位置");
+    }
+
+    #[test]
+    #[ignore = "requires a running Kensaku daemon"]
+    fn exercises_live_daemon_contract() {
+        let state = daemon_request("index_state", json!({})).expect("read live daemon state");
+        assert!(state.get("is_indexing").is_some());
+        let root = state["roots"]
+            .as_array()
+            .and_then(|roots| roots.first())
+            .and_then(Value::as_str)
+            .expect("daemon root");
+        let response = daemon_request(
+            "search",
+            json!({
+                "query": scoped_query("name:\"hello\"", Path::new(root)),
+                "limit": 10,
+                "offset": 0,
+                "snippets": false,
+            }),
+        )
+        .expect("live daemon search");
+        assert!(response.get("results").is_some());
+        let names = search_names(
+            &[PathBuf::from(root)],
+            "hello",
+            SearchFilters::default(),
+            &AtomicBool::new(false),
+        )
+        .expect("Kite live search")
+        .expect("Kite live snapshot");
+        assert!(!names.entries.is_empty());
+    }
+
+    #[test]
     fn daemon_candidate_discovery_does_not_execute_file() {
         let directory = std::env::temp_dir().join(format!(
             "kite-daemon-discovery-test-{}-{}",
@@ -1173,6 +1496,17 @@ mod tests {
             std::env::var("KITE_KENSAKU_SMOKE_ROOT").expect("smoke root environment"),
         );
         prepare_names(std::slice::from_ref(&root)).expect("start fake daemon");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            if load_state(None, None)
+                .ok()
+                .flatten()
+                .is_some_and(|state| !state.is_indexing)
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
         let config = kensaku_data_dir().join("config.json");
         let value: Value =
             serde_json::from_slice(&fs::read(config).expect("read config")).expect("parse config");

@@ -105,6 +105,7 @@ pub(crate) struct GlobalSearchWindow {
     expanded_groups: HashSet<String>,
     _search_task: Task<()>,
     _live_search_task: Task<()>,
+    _index_refresh_task: Task<()>,
     _subscription: Subscription,
 }
 
@@ -133,6 +134,7 @@ impl GlobalSearchWindow {
                     this.start_immediate_search(query, window, cx);
                 }
                 InputEvent::Change => {
+                    this.cancel_index_refresh();
                     if !this.scope.allows_live_search() && this.loading {
                         this.cancel_search();
                         this.loading = false;
@@ -175,6 +177,7 @@ impl GlobalSearchWindow {
             expanded_groups: HashSet::new(),
             _search_task: Task::ready(()),
             _live_search_task: Task::ready(()),
+            _index_refresh_task: Task::ready(()),
             _subscription: subscription,
         }
     }
@@ -343,6 +346,7 @@ impl GlobalSearchWindow {
 
     fn cancel_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.cancel_index_refresh();
         if let Some(cancel) = self.search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -351,6 +355,10 @@ impl GlobalSearchWindow {
 
     fn cancel_live_search(&mut self) {
         self._live_search_task = Task::ready(());
+    }
+
+    fn cancel_index_refresh(&mut self) {
+        self._index_refresh_task = Task::ready(());
     }
 
     fn start_immediate_search(
@@ -404,6 +412,16 @@ impl GlobalSearchWindow {
             return;
         }
 
+        let keep_existing_results = match self.mode {
+            GlobalSearchMode::Name => self
+                .name_results
+                .as_ref()
+                .is_some_and(|results| results.query == query),
+            GlobalSearchMode::Content => self
+                .content_results
+                .as_ref()
+                .is_some_and(|results| results.query == query),
+        };
         self.cancel_search();
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
@@ -411,9 +429,11 @@ impl GlobalSearchWindow {
         let filters = self.filters();
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(Arc::clone(&cancel));
-        self.name_results = None;
-        self.content_results = None;
-        self.expanded_groups.clear();
+        if !keep_existing_results {
+            self.name_results = None;
+            self.content_results = None;
+            self.expanded_groups.clear();
+        }
         self.loading = true;
         self.error = None;
         if mode == GlobalSearchMode::Content {
@@ -423,6 +443,7 @@ impl GlobalSearchWindow {
         cx.notify();
 
         self._search_task = cx.spawn_in(window, async move |this, cx| {
+            let refresh_query = query.clone();
             let result = cx
                 .background_spawn(async move {
                     match mode {
@@ -442,18 +463,21 @@ impl GlobalSearchWindow {
                 })
                 .await;
 
-            let _ = this.update_in(cx, |this, _, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 if this.generation != generation {
                     return;
                 }
                 this.loading = false;
                 this.search_cancel = None;
+                let mut refresh_index = false;
                 match result {
                     Ok(SearchOutcome::Name(result)) => {
+                        refresh_index = result.as_ref().is_some_and(|result| result.partial);
                         this.name_results = result;
                         this.error = None;
                     }
                     Ok(SearchOutcome::Content(result)) => {
+                        refresh_index = result.as_ref().is_some_and(|result| result.partial);
                         this.content_results = result;
                         this.error = None;
                     }
@@ -461,7 +485,37 @@ impl GlobalSearchWindow {
                         this.error = Some(error.into());
                     }
                 }
+                refresh_index = refresh_index
+                    && matches!(
+                        content_search::status().state,
+                        content_search::ContentIndexState::Indexing
+                    );
+                if refresh_index {
+                    this.schedule_index_refresh(refresh_query, generation, window, cx);
+                }
                 cx.notify();
+            });
+        });
+    }
+
+    fn schedule_index_refresh(
+        &mut self,
+        query: String,
+        generation: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_index_refresh();
+        self._index_refresh_task = cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.generation != generation || this.loading {
+                    return;
+                }
+                let current = this.query_input.read(cx).value().trim().to_string();
+                if current == query {
+                    this.start_search(query, window, cx);
+                }
             });
         });
     }
@@ -831,7 +885,7 @@ impl GlobalSearchWindow {
                         this.child(summary)
                     })
                     .when(results.partial, |this| {
-                        this.child("Kensaku 正在建立首次索引；完成前可能显示 0 项")
+                        this.child("Kensaku 正在建立索引；结果会自动刷新")
                     })
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
@@ -881,7 +935,7 @@ impl GlobalSearchWindow {
                         this.child(summary)
                     })
                     .when(results.partial, |this| {
-                        this.child("Kensaku 正在更新索引；结果可能不完整")
+                        this.child("Kensaku 正在更新索引；结果会自动刷新")
                     })
                     .when(results.truncated, |this| this.child("结果不完整")),
             )
