@@ -19,6 +19,7 @@ pub mod search_filters;
 pub mod session;
 pub mod text_editor;
 pub mod ui_preferences;
+pub mod update_notes;
 pub mod updater;
 #[cfg(windows)]
 pub mod usn_journal;

@@ -163,6 +163,14 @@ struct ModalState {
     _subscription: Subscription,
 }
 
+struct UpdateDialogState {
+    info: crate::updater::UpdateInfo,
+    notes: crate::update_notes::UpdateNotesContent,
+    scroll: ScrollHandle,
+    error: Option<SharedString>,
+    retry_available: bool,
+}
+
 pub(crate) type SharedClipboard = Rc<RefCell<Option<FileClipboard>>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -748,6 +756,7 @@ pub struct KiteApp {
     notice: Option<SharedString>,
     update_in_progress: bool,
     update_download_progress: Option<crate::updater::UpdateDownloadProgress>,
+    update_dialog: Option<UpdateDialogState>,
     modal: Option<ModalState>,
     clipboard: SharedClipboard,
     load_generation: u64,
@@ -1009,6 +1018,7 @@ impl KiteApp {
             notice: None,
             update_in_progress: false,
             update_download_progress: None,
+            update_dialog: None,
             modal: None,
             clipboard,
             load_generation: 0,
@@ -2758,87 +2768,142 @@ impl KiteApp {
     fn offer_update(
         &mut self,
         update: crate::updater::UpdateInfo,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let notes = crate::update_notes::parse_release_notes(&update.release_notes);
+        if update.update_available {
+            let readiness_error = crate::updater::windows_update_target()
+                .err()
+                .map(SharedString::from);
+            self.error = None;
+            self.notice = Some(format!("发现 Kite {} 新版本", update.latest_version).into());
+            self.update_dialog = Some(UpdateDialogState {
+                info: update,
+                notes,
+                scroll: ScrollHandle::new(),
+                error: readiness_error,
+                retry_available: false,
+            });
+        } else {
+            self.error = None;
+            self.notice = Some(format!("Kite {} 已是最新版本", update.current_version).into());
+            self.update_dialog = Some(UpdateDialogState {
+                info: update,
+                notes,
+                scroll: ScrollHandle::new(),
+                error: None,
+                retry_available: false,
+            });
+        }
+        cx.notify();
+    }
+
+    fn dismiss_update_dialog(
+        &mut self,
+        _: &ClickEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !update.update_available {
-            self.error = None;
-            self.notice = Some(format!("Kite {} 已是最新版本", update.current_version).into());
-            cx.notify();
-            let message = "Kite 已是最新版本";
-            let detail = format!(
-                "当前版本：{}
-最新版本：{}",
-                update.current_version, update.latest_version
-            );
-            let answers = [PromptButton::ok("确定")];
-            let answer = window.prompt(PromptLevel::Info, message, Some(&detail), &answers, cx);
-            cx.spawn_in(window, async move |_, _| {
-                let _ = answer.await;
-            })
-            .detach();
-            return;
-        }
+        self.hide_update_dialog(window, cx);
+    }
 
-        if let Err(error) = crate::updater::windows_update_target() {
+    fn hide_update_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let error = self
+            .update_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.error.clone());
+        let downloading = self.update_in_progress;
+        self.update_dialog = None;
+        if !downloading {
             self.notice = None;
-            self.error = Some(error.clone().into());
+            if error.is_some() {
+                self.error = error;
+            }
+        }
+        self.focus_table(window, cx);
+        cx.notify();
+    }
+
+    fn open_update_release_notes(
+        &mut self,
+        _: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(url) = self
+            .update_dialog
+            .as_ref()
+            .map(|dialog| dialog.info.release_url.clone())
+        else {
+            return;
+        };
+        if !url.starts_with("https://github.com/wyz541/kite/releases/") {
+            if let Some(dialog) = self.update_dialog.as_mut() {
+                dialog.error = Some("发布说明地址无效。".into());
+                dialog.retry_available = false;
+            }
             cx.notify();
-            let answers = [PromptButton::ok("确定")];
-            let answer = window.prompt(
-                PromptLevel::Warning,
-                "无法自动更新 Kite",
-                Some(&error),
-                &answers,
-                cx,
-            );
-            cx.spawn_in(window, async move |_, _| {
-                let _ = answer.await;
-            })
-            .detach();
             return;
         }
+        if let Err(error) = open::that(url) {
+            if let Some(dialog) = self.update_dialog.as_mut() {
+                dialog.error = Some(format!("无法打开完整发布说明：{error}").into());
+                dialog.retry_available = false;
+            }
+            cx.notify();
+        }
+    }
 
-        let message = format!("发现 Kite {}", update.latest_version);
-        let notes = update_notes_summary(&update.release_notes);
-        let detail = format!(
-            "当前版本：{}
-
-{notes}",
-            update.current_version
-        );
-        let answers = [PromptButton::ok("下载并更新"), PromptButton::cancel("稍后")];
-        let answer = window.prompt(PromptLevel::Info, &message, Some(&detail), &answers, cx);
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(choice) = answer.await else {
+    fn start_update_download(
+        &mut self,
+        _: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.update_in_progress {
+            return;
+        }
+        let update = {
+            let Some(dialog) = self.update_dialog.as_mut() else {
                 return;
             };
-            if choice != 0 {
+            if !dialog.info.update_available {
                 return;
             }
-            let version = update.latest_version.clone();
-            let initial_progress = crate::updater::UpdateDownloadProgress {
-                downloaded_bytes: 0,
-                total_bytes: update.asset_size,
-                active: true,
-            };
-            let _ = this.update_in(cx, |this, _, cx| {
-                this.update_in_progress = true;
-                this.error = None;
-                this.update_download_progress = Some(initial_progress);
-                this.notice = Some(update_download_notice(&version, initial_progress).into());
+            if let Err(error) = crate::updater::windows_update_target() {
+                dialog.error = Some(error.into());
+                dialog.retry_available = true;
                 cx.notify();
-            });
+                return;
+            }
+            dialog.error = None;
+            dialog.retry_available = false;
+            dialog.info.clone()
+        };
 
-            let download_finished = Arc::new(AtomicBool::new(false));
-            let observed_download_finished = download_finished.clone();
-            let progress_version = update.latest_version.clone();
-            let progress_entity = this.clone();
+        let version = update.latest_version.clone();
+        let initial_progress = crate::updater::UpdateDownloadProgress {
+            downloaded_bytes: 0,
+            total_bytes: update.asset_size,
+            active: true,
+        };
+        self.update_in_progress = true;
+        self.error = None;
+        self.update_download_progress = Some(initial_progress);
+        self.notice = Some(update_download_notice(&version, initial_progress).into());
+        cx.notify();
+
+        let download_finished = Arc::new(AtomicBool::new(false));
+        let observed_download_finished = download_finished.clone();
+        let progress_version = update.latest_version.clone();
+        let progress_entity = cx.entity();
+        cx.spawn_in(window, async move |this, cx| {
             let progress_task = cx.spawn(async move |cx| {
                 loop {
                     let progress = crate::updater::download_progress();
                     if progress.active || progress.downloaded_bytes == 0 {
-                        let _ = progress_entity.update(cx, |this, cx| {
+                        progress_entity.update(cx, |this, cx| {
                             this.update_download_progress = Some(progress);
                             this.notice =
                                 Some(update_download_notice(&progress_version, progress).into());
@@ -2883,7 +2948,12 @@ impl KiteApp {
                     }
                     Err(error) => {
                         this.notice = None;
-                        this.error = Some(error.into());
+                        if let Some(dialog) = this.update_dialog.as_mut() {
+                            dialog.error = Some(error.into());
+                            dialog.retry_available = true;
+                        } else {
+                            this.error = Some(error.into());
+                        }
                         cx.notify();
                     }
                 }
@@ -4464,6 +4534,8 @@ impl KiteApp {
             });
             self.focus_table(window, cx);
             cx.notify();
+        } else if self.update_dialog.is_some() {
+            self.hide_update_dialog(window, cx);
         } else if self.modal.is_some() {
             self.close_modal(window, cx);
         } else if self.column_search_path.is_some() {
@@ -6603,7 +6675,491 @@ impl KiteApp {
         rows
     }
 
+    fn render_update_dialog(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(dialog) = self.update_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let update = dialog.info.clone();
+        let notes = dialog.notes.clone();
+        let error = dialog.error.clone();
+        let retry_available = dialog.retry_available;
+        let scroll = dialog.scroll.clone();
+
+        let progress = self.update_download_progress;
+        let downloading = self.update_in_progress && progress.is_some();
+        let fraction = progress
+            .and_then(|progress| progress.fraction())
+            .map(|fraction| fraction as f32);
+        let released = crate::update_notes::published_date_label(update.published_at.as_deref());
+        let title = if !update.update_available {
+            "Kite 已是最新版本".to_string()
+        } else if downloading {
+            format!("正在更新到 Kite {}", update.latest_version)
+        } else if error.is_some() {
+            format!("Kite {} 暂时无法安装", update.latest_version)
+        } else {
+            format!("Kite {} 可用", update.latest_version)
+        };
+        let subtitle = if !update.update_available {
+            format!("当前版本 {} 是最新稳定版本。", update.current_version)
+        } else if downloading {
+            "下载和校验完成后，Kite 会自动重启。".to_string()
+        } else if error.is_some() {
+            "更新尚未开始。请查看提示后处理。".to_string()
+        } else {
+            "先查看本次变化，再决定何时更新。".to_string()
+        };
+        let progress_label = progress
+            .map(|progress| update_download_notice(&update.latest_version, progress))
+            .unwrap_or_default();
+        let percent_label = fraction
+            .map(|fraction| format!("{:.0}%", fraction * 100.0))
+            .unwrap_or_else(|| "正在准备".to_string());
+
+        let note_sections = notes
+            .sections
+            .iter()
+            .map(|section| {
+                v_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(div().text_sm().font_semibold().child(section.title.clone()))
+                    .children(section.items.iter().map(|item| {
+                        h_flex()
+                            .w_full()
+                            .items_start()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .mt(px(7.))
+                                    .size(px(5.))
+                                    .flex_shrink_0()
+                                    .rounded_full()
+                                    .bg(cx.theme().primary),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_sm()
+                                    .line_height(relative(1.45))
+                                    .text_color(cx.theme().foreground.opacity(0.9))
+                                    .child(item.clone()),
+                            )
+                            .into_any_element()
+                    }))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        let notes_body = if update.update_available {
+            v_flex()
+                .w_full()
+                .gap_5()
+                .p_5()
+                .pr_7()
+                .when_some(error.clone(), |this, error| {
+                    this.child(
+                        h_flex()
+                            .w_full()
+                            .items_start()
+                            .gap_3()
+                            .p_3()
+                            .rounded_md()
+                            .bg(cx.theme().danger.opacity(0.08))
+                            .border_1()
+                            .border_color(cx.theme().danger.opacity(0.28))
+                            .child(
+                                Icon::new(IconName::TriangleAlert)
+                                    .size_4()
+                                    .mt(px(1.))
+                                    .text_color(cx.theme().danger),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_sm()
+                                    .line_height(relative(1.35))
+                                    .text_color(cx.theme().danger)
+                                    .child(error),
+                            ),
+                    )
+                })
+                .when_some(notes.summary.clone(), |this, summary| {
+                    this.child(
+                        v_flex()
+                            .w_full()
+                            .gap_1()
+                            .p_4()
+                            .rounded_lg()
+                            .bg(cx.theme().background.opacity(0.58))
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("本次更新"),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .line_height(relative(1.45))
+                                    .text_color(cx.theme().foreground.opacity(0.92))
+                                    .child(summary),
+                            ),
+                    )
+                })
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .child(div().text_sm().font_semibold().child("更新内容"))
+                        .child(
+                            Button::new("update-release-notes")
+                                .link()
+                                .compact()
+                                .label("查看完整发布说明")
+                                .on_click(cx.listener(Self::open_update_release_notes)),
+                        ),
+                )
+                .children(note_sections)
+                .when(
+                    notes.summary.is_none() && notes.sections.is_empty(),
+                    |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("本次发布没有提供可显示的更新说明。"),
+                        )
+                    },
+                )
+                .into_any_element()
+        } else {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_4()
+                .p_6()
+                .child(
+                    div()
+                        .size(px(64.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(cx.theme().success.opacity(0.12))
+                        .child(
+                            Icon::new(IconName::CircleCheck)
+                                .size_8()
+                                .text_color(cx.theme().success),
+                        ),
+                )
+                .child(div().text_lg().font_semibold().child("你正在使用最新版本"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("当前版本 {}", update.current_version)),
+                )
+                .into_any_element()
+        };
+
+        let footer_hint = if downloading {
+            progress_label.clone()
+        } else if error.is_some() {
+            "没有下载或安装任何更新。".to_string()
+        } else if update.update_available {
+            format!(
+                "更新包 {} · 下载完成后自动重启",
+                format_size(update.asset_size)
+            )
+        } else {
+            "Kite 只在用户选择检查更新后访问更新服务。".to_string()
+        };
+
+        div()
+            .id("update-dialog-backdrop")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .occlude()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_6()
+            .bg(rgba(0x000000b8))
+            .child(
+                v_flex()
+                    .id("update-dialog")
+                    .role(Role::Dialog)
+                    .aria_label(title.clone())
+                    .w(px(720.))
+                    .max_w(relative(0.94))
+                    .h(px(620.))
+                    .max_h(relative(0.9))
+                    .overflow_hidden()
+                    .rounded_lg()
+                    .bg(cx.theme().popover)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .shadow_xl()
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .flex_shrink_0()
+                            .gap_4()
+                            .p_5()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().background.opacity(0.34))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_start()
+                                    .gap_4()
+                                    .child(
+                                        div()
+                                            .size(px(46.))
+                                            .flex_shrink_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded_lg()
+                                            .bg(cx.theme().primary.opacity(0.14))
+                                            .child(
+                                                Icon::new(if update.update_available {
+                                                    IconName::CircleArrowUp
+                                                } else {
+                                                    IconName::CircleCheck
+                                                })
+                                                .size_6()
+                                                .text_color(cx.theme().primary),
+                                            ),
+                                    )
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .child(div().text_lg().font_semibold().child(title))
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(subtitle),
+                                            ),
+                                    )
+                                    .child(
+                                        Button::new("update-dialog-close")
+                                            .ghost()
+                                            .compact()
+                                            .icon(IconName::X)
+                                            .tooltip(if downloading { "隐藏" } else { "关闭" })
+                                            .on_click(cx.listener(Self::dismiss_update_dialog)),
+                                    ),
+                            )
+                            .when(update.update_available, |this| {
+                                this.child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(update_meta_pill(
+                                            "当前版本",
+                                            update.current_version.clone().into(),
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(
+                                            Icon::new(IconName::ChevronRight)
+                                                .size_3()
+                                                .text_color(cx.theme().muted_foreground),
+                                        )
+                                        .child(update_meta_pill(
+                                            "新版本",
+                                            update.latest_version.clone().into(),
+                                            true,
+                                            cx,
+                                        ))
+                                        .when_some(released, |this, released| {
+                                            this.child(div().flex_1()).child(
+                                                h_flex()
+                                                    .gap_1()
+                                                    .items_center()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(
+                                                        Icon::new(IconName::CalendarDays).size_3(),
+                                                    )
+                                                    .child(released),
+                                            )
+                                        }),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .child(
+                                div()
+                                    .id("update-notes-scroll")
+                                    .absolute()
+                                    .inset_0()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&scroll)
+                                    .child(notes_body),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_1()
+                                    .right_1()
+                                    .bottom_1()
+                                    .child(update_scrollbar_element(&scroll, cx)),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .flex_shrink_0()
+                            .gap_3()
+                            .p_4()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().background.opacity(0.22))
+                            .when(downloading, |this| {
+                                this.child(
+                                    v_flex()
+                                        .w_full()
+                                        .gap_2()
+                                        .child(
+                                            h_flex()
+                                                .w_full()
+                                                .items_center()
+                                                .justify_between()
+                                                .text_sm()
+                                                .child(progress_label.clone())
+                                                .child(
+                                                    div()
+                                                        .font_medium()
+                                                        .text_color(cx.theme().primary)
+                                                        .child(percent_label.clone()),
+                                                ),
+                                        )
+                                        .child(
+                                            Progress::new("kite-update-progress")
+                                                .when_some(fraction, |this, fraction| {
+                                                    this.value(fraction * 100.0)
+                                                })
+                                                .when(fraction.is_none(), |this| this.loading(true))
+                                                .color(cx.theme().primary)
+                                                .with_size(Size::Small)
+                                                .accessibility_label("Kite 更新下载进度"),
+                                        ),
+                                )
+                            })
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_4()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_xs()
+                                            .text_color(if error.is_some() {
+                                                cx.theme().danger
+                                            } else {
+                                                cx.theme().muted_foreground
+                                            })
+                                            .child(footer_hint),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .flex_shrink_0()
+                                            .gap_2()
+                                            .when(!update.update_available, |this| {
+                                                this.child(
+                                                    Button::new("update-done")
+                                                        .primary()
+                                                        .label("完成")
+                                                        .on_click(
+                                                            cx.listener(
+                                                                Self::dismiss_update_dialog,
+                                                            ),
+                                                        ),
+                                                )
+                                            })
+                                            .when(update.update_available && !downloading, |this| {
+                                                this.child(
+                                                    Button::new("update-later")
+                                                        .label(
+                                                            if error.is_some() && !retry_available {
+                                                                "关闭"
+                                                            } else {
+                                                                "稍后"
+                                                            },
+                                                        )
+                                                        .on_click(
+                                                            cx.listener(
+                                                                Self::dismiss_update_dialog,
+                                                            ),
+                                                        ),
+                                                )
+                                                .when(error.is_none() || retry_available, |this| {
+                                                    this.child(
+                                                        Button::new("update-install")
+                                                            .primary()
+                                                            .label(if error.is_some() {
+                                                                "重试更新"
+                                                            } else {
+                                                                "下载并更新"
+                                                            })
+                                                            .on_click(cx.listener(
+                                                                Self::start_update_download,
+                                                            )),
+                                                    )
+                                                })
+                                            })
+                                            .when(downloading, |this| {
+                                                this.child(
+                                                    Button::new("update-background")
+                                                        .label("后台下载")
+                                                        .on_click(
+                                                            cx.listener(
+                                                                Self::dismiss_update_dialog,
+                                                            ),
+                                                        ),
+                                                )
+                                                .child(
+                                                    Button::new("update-downloading")
+                                                        .primary()
+                                                        .loading(true)
+                                                        .label(percent_label.clone()),
+                                                )
+                                            }),
+                                    ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn render_modal(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.update_dialog.is_some() {
+            return self.render_update_dialog(cx);
+        }
         let Some(modal) = self.modal.as_ref() else {
             return div().into_any_element();
         };
@@ -6709,6 +7265,61 @@ impl KiteApp {
             )
             .into_any_element()
     }
+}
+
+fn update_meta_pill(label: &str, value: SharedString, emphasized: bool, cx: &App) -> AnyElement {
+    v_flex()
+        .flex_shrink_0()
+        .gap_0p5()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .bg(if emphasized {
+            cx.theme().primary.opacity(0.12)
+        } else {
+            cx.theme().background.opacity(0.72)
+        })
+        .border_1()
+        .border_color(if emphasized {
+            cx.theme().primary.opacity(0.28)
+        } else {
+            cx.theme().border
+        })
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.to_string()),
+        )
+        .child(
+            div()
+                .text_sm()
+                .font_medium()
+                .text_color(if emphasized {
+                    cx.theme().primary
+                } else {
+                    cx.theme().foreground
+                })
+                .child(value),
+        )
+        .into_any_element()
+}
+
+fn update_scrollbar_element(handle: &ScrollHandle, cx: &App) -> AnyElement {
+    Scrollbar::vertical(handle)
+        .id("update-notes-scrollbar")
+        .mode(ScrollbarMode::Scrolling)
+        .styles(|styles| {
+            let track = cx.theme().muted.opacity(0.42);
+            let thumb = cx.theme().muted_foreground.opacity(0.62);
+            let thumb_hover = cx.theme().muted_foreground.opacity(0.9);
+            styles
+                .track(|style| style.bg(track).width(px(9.)))
+                .thumb(|style| style.bg(thumb).width(px(5.)).inset(px(2.)).radius(px(99.)))
+                .thumb_hover(|style| style.bg(thumb_hover))
+        })
+        .viewport_from_layout()
+        .into_any_element()
 }
 
 fn favorite_name(path: &Path) -> String {
@@ -6839,29 +7450,6 @@ fn update_download_notice(
     let percent = (fraction * 100.0).round() as u32;
     let total = format_size(progress.total_bytes);
     format!("正在下载 Kite {version}… {percent}% · {downloaded} / {total}")
-}
-
-fn update_notes_summary(notes: &str) -> String {
-    let normalized = notes
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(
-            "
-",
-        );
-    if normalized.is_empty() {
-        return "GitHub Release 未提供更新说明。".to_string();
-    }
-    const LIMIT: usize = 1800;
-    let mut chars = normalized.chars();
-    let summary = chars.by_ref().take(LIMIT).collect::<String>();
-    if chars.next().is_some() {
-        format!("{summary}\n…")
-    } else {
-        summary
-    }
 }
 
 fn load_directory_snapshot(path: &Path, sort: SortSpec) -> Result<DirectorySnapshot, String> {
@@ -8093,27 +8681,13 @@ mod clipboard_tests {
 
 #[cfg(test)]
 mod update_ui_tests {
-    use super::{update_download_notice, update_notes_summary};
+    use super::update_download_notice;
     use crate::updater::UpdateDownloadProgress;
-
-    #[test]
-    fn empty_release_notes_have_a_fallback() {
-        assert!(update_notes_summary(" \n ").contains("未提供更新说明"));
-    }
-
-    #[test]
-    fn long_release_notes_are_bounded() {
-        let notes = "a".repeat(2_000);
-        let summary = update_notes_summary(&notes);
-
-        assert!(summary.ends_with('…'));
-        assert!(summary.chars().count() < 1_810);
-    }
 
     #[test]
     fn download_notice_includes_percent_and_size() {
         let notice = update_download_notice(
-            "0.6.34",
+            "0.6.73",
             UpdateDownloadProgress {
                 downloaded_bytes: 1024 * 1024,
                 total_bytes: 2 * 1024 * 1024,
@@ -8128,7 +8702,7 @@ mod update_ui_tests {
     #[test]
     fn download_notice_handles_unknown_total_size() {
         let notice = update_download_notice(
-            "0.6.34",
+            "0.6.73",
             UpdateDownloadProgress {
                 downloaded_bytes: 1024,
                 total_bytes: 0,
