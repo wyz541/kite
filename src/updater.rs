@@ -575,7 +575,7 @@ pub fn install_windows_update(
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 const WINDOWS_UPDATE_TARGET_REPLACEMENT: &str = r#"
 # Windows executable images can share delete access while running.
 # Rename the target directly instead of requiring an exclusive write lock.
@@ -606,7 +606,7 @@ function Move-UpdateTargetToBackup {
 }
 "#;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn windows_update_helper() -> String {
     WINDOWS_UPDATE_HELPER.replace(
         "__MOVE_UPDATE_TARGET_TO_BACKUP__",
@@ -614,7 +614,7 @@ fn windows_update_helper() -> String {
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 const WINDOWS_UPDATE_HELPER: &str = r#"
 param(
     [Parameter(Mandatory=$true)][int]$ProcessId,
@@ -628,6 +628,20 @@ $ErrorActionPreference = 'Stop'
 function Write-UpdateLog([string]$Message) {
     $line = "$(Get-Date -Format o) $Message"
     Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}
+function Get-Sha256Hex([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = $sha.ComputeHash($stream)
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
 }
 function Show-UpdateError([string]$Message) {
     try {
@@ -673,7 +687,7 @@ try {
     Stop-KiteProcesses
     Move-UpdateTargetToBackup -TargetPath $Target -BackupPath $backup
     Copy-Item -LiteralPath $Source -Destination $Target -Force
-    $actualHash = (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualHash = Get-Sha256Hex $Target
     if ($actualHash -ne $ExpectedHash) { throw "SHA-256 mismatch" }
     Write-UpdateLog "Installed Kite update at $Target"
     $started = Start-Process -FilePath $Target -WorkingDirectory $targetDirectory -PassThru
@@ -951,6 +965,14 @@ Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
             target_contents.as_deref(),
             Some(b"new executable".as_slice())
         );
+    }
+
+    #[test]
+    fn windows_update_helper_hashes_without_powershell_modules() {
+        let helper = windows_update_helper();
+        assert!(helper.contains("function Get-Sha256Hex"));
+        assert!(helper.contains("Get-Sha256Hex $Target"));
+        assert!(!helper.contains("Get-FileHash"));
     }
 
     #[cfg(target_os = "windows")]
