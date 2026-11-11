@@ -13,6 +13,8 @@ on:
       - src/**
       - build.ps1
       - README.md
+      - docs/**
+      - .gitignore
       - .github/workflows/ci.yml
       - .github/scripts/**
   pull_request:
@@ -27,6 +29,8 @@ on:
       - src/**
       - build.ps1
       - README.md
+      - docs/**
+      - .gitignore
       - .github/workflows/ci.yml
       - .github/scripts/**
   workflow_dispatch:
@@ -46,6 +50,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check privacy
+        run: python3 .github/scripts/check-privacy.py
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
