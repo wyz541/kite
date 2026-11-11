@@ -4828,7 +4828,8 @@ impl KiteApp {
     }
 
     fn open_settings_window(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        match settings_window::open_settings_window(cx.entity(), cx) {
+        let initial_update_status = self.settings_update_status();
+        match settings_window::open_settings_window(cx.entity(), initial_update_status, cx) {
             Ok(()) => {
                 self.error = None;
             }

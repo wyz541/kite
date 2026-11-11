@@ -92,11 +92,14 @@ pub(crate) struct SettingsWindow {
 impl SettingsWindow {
     pub(crate) fn new(
         main_app: Entity<KiteApp>,
+        initial_update_status: (bool, Option<SharedString>),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // The main app is mutably leased while its click handler opens this window.
+        // Use the caller's snapshot instead of reading the entity here.
         let preferences = ui_preferences::load_ui_preferences();
-        let (update_in_progress, status) = main_app.read(cx).settings_update_status();
+        let (update_in_progress, status) = initial_update_status;
         let subscription = cx.observe_in(&main_app, window, |this, main_app, _, cx| {
             let (update_in_progress, status) = main_app.read(cx).settings_update_status();
             this.update_in_progress = update_in_progress;
@@ -762,7 +765,11 @@ impl Render for SettingsWindow {
     }
 }
 
-pub(crate) fn open_settings_window(main_app: Entity<KiteApp>, cx: &mut App) -> Result<(), String> {
+pub(crate) fn open_settings_window(
+    main_app: Entity<KiteApp>,
+    initial_update_status: (bool, Option<SharedString>),
+    cx: &mut App,
+) -> Result<(), String> {
     let options = WindowOptions {
         titlebar: Some(TitlebarOptions {
             title: Some("Kite 设置".into()),
@@ -773,7 +780,7 @@ pub(crate) fn open_settings_window(main_app: Entity<KiteApp>, cx: &mut App) -> R
         ..Default::default()
     };
     gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| SettingsWindow::new(main_app.clone(), window, cx))
+        cx.new(|cx| SettingsWindow::new(main_app.clone(), initial_update_status, window, cx))
     })
     .map(|_| ())
     .map_err(|error| format!("无法打开设置窗口：{error}"))
