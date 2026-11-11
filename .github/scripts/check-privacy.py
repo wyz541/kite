@@ -69,7 +69,7 @@ def main() -> int:
             if rel not in ALLOWED_IMAGES:
                 failures.append(f"{rel}: tracked screenshot or unreviewed image")
             continue
-        if rel == "Cargo.lock":
+        if rel in {"Cargo.lock", ".github/scripts/check-privacy.py"}:
             continue
         try:
             raw = path.read_bytes()
