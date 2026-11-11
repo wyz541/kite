@@ -5,6 +5,10 @@
 /apps/macos/build/
 cargo-check.log
 *.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
 !assets/kite-icon-master.png
 !assets/kite-icon-preview.png
 /docs/screenshots/
