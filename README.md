@@ -44,11 +44,11 @@ Kite 适合需要频繁移动文件的开发者、设计人员和经常整理大
 
 下图来自 macOS 实机运行。
 示例使用只读合成目录。
-截图已裁掉系统标题栏、页签栏、地址栏和侧边栏。
+截图展示完整 Kite 窗口，并隐藏侧边栏。
 
 <p align="center">
   <a href="docs/images/kite-product-preview.png">
-    <img src="docs/images/kite-product-preview.png" alt="Kite macOS 实机界面：三栏文件浏览和 Markdown 预览" width="100%">
+    <img src="docs/images/kite-product-preview.png" alt="Kite macOS 完整窗口：四栏文件浏览和图片预览" width="100%">
   </a>
 </p>
 
