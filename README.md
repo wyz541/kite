@@ -40,6 +40,20 @@ Kite 适合需要频繁移动文件的开发者、设计人员和经常整理大
 
 > 看见路径，理解位置，然后直接行动。
 
+## 产品预览
+
+下图来自 macOS 实机运行。
+示例使用只读合成目录。
+截图已裁掉系统标题栏、页签栏、地址栏和侧边栏。
+
+<p align="center">
+  <a href="docs/images/kite-product-preview.png">
+    <img src="docs/images/kite-product-preview.png" alt="Kite macOS 实机界面：三栏文件浏览和 Markdown 预览" width="100%">
+  </a>
+</p>
+
+公开截图遵守[截图隐私规则](docs/SCREENSHOT_POLICY.md)。
+
 ## 下载
 
 请从 [GitHub Releases](https://github.com/wyz541/kite/releases/latest) 下载最新版本。

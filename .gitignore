@@ -11,6 +11,7 @@ cargo-check.log
 *.bmp
 !assets/kite-icon-master.png
 !assets/kite-icon-preview.png
+!docs/images/kite-product-preview.png
 /docs/screenshots/
 
 __pycache__/
