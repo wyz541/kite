@@ -12,7 +12,7 @@ ALLOWED_IMAGES = {
     "assets/kite.ico",
     "assets/kite-icon-master.png",
     "assets/kite-icon-preview.png",
-    "docs/images/kite-product-preview-full.png",
+    "docs/images/kite-product-preview-sidebar.png",
 }
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 ALLOWED_WINDOWS_USERS = {"Example", "Kite", "Public", "runner", "runneradmin", "<name>"}
