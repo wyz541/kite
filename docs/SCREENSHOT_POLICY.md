@@ -37,7 +37,7 @@ Kite 仓库不保存真实本机数据截图。
 
 - 仓库默认忽略 `docs/screenshots/` 和图片文件。
 - `assets/kite-icon-master.png`、`assets/kite-icon-preview.png` 和图标文件是允许的产品图片。
-- `docs/images/kite-product-preview.png` 是允许的公开产品预览图。
+- `docs/images/kite-product-preview-full.png` 是允许的公开产品预览图。
 - 审查后的公开图片必须加入隐私检查允许列表。
 - 截图源文件和中间截图只放本机临时目录，不提交。
 - 发布包不包含截图目录。

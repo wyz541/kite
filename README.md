@@ -47,8 +47,8 @@ Kite 适合需要频繁移动文件的开发者、设计人员和经常整理大
 截图展示完整 Kite 窗口，并隐藏侧边栏。
 
 <p align="center">
-  <a href="docs/images/kite-product-preview.png">
-    <img src="docs/images/kite-product-preview.png" alt="Kite macOS 完整窗口：四栏文件浏览和图片预览" width="100%">
+  <a href="docs/images/kite-product-preview-full.png">
+    <img src="docs/images/kite-product-preview-full.png" alt="Kite macOS 完整窗口：四栏文件浏览和图片预览" width="100%">
   </a>
 </p>
 
