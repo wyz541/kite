@@ -63,10 +63,15 @@ Windows 与 macOS 不共享安装脚本。
 
 Kite 使用以下顺序：
 
-1. 读取 `https://api.github.com/repos/wyz541/kite/releases/latest`。
-2. API 失败时读取 `https://github.com/wyz541/kite/releases/latest` 的最终跳转地址。
-3. 根据跳转标签读取 `SHA256SUMS.txt`。
+1. 读取 `https://raw.githubusercontent.com/wyz541/kite/main/Cargo.toml` 的包版本。
+2. 主分支版本不高于当前版本时，Kite 直接报告已是最新版本。
+3. 需要更新时读取 `https://api.github.com/repos/wyz541/kite/releases/latest`。
+4. API 失败时读取 `https://github.com/wyz541/kite/releases/latest` 的最终跳转地址。
+5. 页面回退路径根据跳转标签读取 `SHA256SUMS.txt`。
 
+主分支版本只用于提前结束检查。
+自动更新信息必须来自 API 或 Release 页面。
+主分支版本不能替代资产 SHA-256。
 GitHub API 提供发布说明和资产摘要。
 GitHub 页面回退路径规避匿名 API 限流。
 回退路径只接受稳定版本标签。
@@ -205,7 +210,10 @@ macOS 不实现第二套版本比较或资产选择逻辑。
 
 ## 失败处理
 
+- 当前版本已是最新时，Kite 不请求 Release API。
 - API 限流时使用 Release 页面回退。
+- 自动更新信息不可用时，Kite 提示稍后重试或手动下载。
+- 界面不显示底层 `HTTP`、`TLS` 和库文档错误。
 - 网络失败时保留当前版本。
 - 下载失败时保留当前版本。
 - 校验失败时删除临时文件。
