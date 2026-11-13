@@ -52,7 +52,7 @@ enum KiteSettingsPane: String, CaseIterable, Identifiable {
         case .appearance: return "主题和界面外观"
         case .layout: return "侧边栏、预览和栏位"
         case .fileHandling: return "默认文件查看器"
-        case .updates: return "版本和更新记录"
+        case .updates: return "版本、更新与诊断"
         case .about: return "Kite 版本信息"
         }
     }
@@ -370,14 +370,25 @@ struct KiteSettingsView: View {
                         title: "当前版本",
                         detail: "Kite \(KiteSettingsView.appVersion)"
                     ) {
-                        Button(model.updateInProgress ? "正在检查…" : "检查更新…") {
+                        Button {
                             model.checkForUpdates()
+                        } label: {
+                            HStack(spacing: 6) {
+                                if model.updateInProgress {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                }
+                                Text("检查更新…")
+                            }
                         }
                         .controlSize(.small)
                         .disabled(model.updateInProgress)
                     }
 
-                    if let message = model.updateStatusMessage {
+                    if let message = model.updateStatusMessage,
+                       model.updateDownload != nil {
                         SettingsDivider()
                         SettingsRow(title: message, detail: nil) {
                             if let download = model.updateDownload,
@@ -401,8 +412,8 @@ struct KiteSettingsView: View {
             settingsSection("诊断") {
                 SettingsCard {
                     SettingsRow(
-                        title: "更新日志",
-                        detail: "查看下载和安装记录。"
+                        title: "更新诊断日志",
+                        detail: "查看下载、校验和安装记录。"
                     ) {
                         Button("在 Finder 中显示") {
                             revealUpdateLog()

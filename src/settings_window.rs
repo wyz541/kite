@@ -8,8 +8,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, StyledExt as _, Theme, ThemeMode,
-    h_flex, v_flex,
+    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, Theme, ThemeMode, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -52,7 +51,7 @@ impl SettingsPage {
             Self::Appearance => "主题和界面外观",
             Self::Layout => "侧边栏、预览和详细信息",
             Self::FileHandling => "默认资源管理器",
-            Self::Updates => "版本和更新记录",
+            Self::Updates => "版本、更新与诊断",
             Self::About => "Kite 版本信息",
         }
     }
@@ -483,12 +482,9 @@ impl SettingsWindow {
         let check = Button::new("check-updates")
             .small()
             .outline()
-            .label(if self.update_in_progress {
-                "正在检查…"
-            } else {
-                "检查更新…"
-            })
-            .disabled(self.update_in_progress)
+            .icon(IconName::RefreshCw)
+            .label("检查更新…")
+            .loading(self.update_in_progress)
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 this.main_app.update(cx, |app, cx| {
                     app.check_for_updates_from_settings(window, cx);
@@ -498,7 +494,7 @@ impl SettingsWindow {
         let log = Button::new("show-update-log")
             .small()
             .outline()
-            .label("打开更新日志")
+            .label("打开日志位置")
             .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
                 if let Err(error) = open_update_log() {
                     this.status = Some(error.into());
@@ -507,37 +503,37 @@ impl SettingsWindow {
             }))
             .into_any_element();
 
-        let mut content = v_flex().gap_6().child(self.section(
-            "版本",
-            vec![
-                self.row(
-                    "updates-version",
-                    "当前版本",
-                    Some(env!("CARGO_PKG_VERSION")),
-                    check,
-                    cx,
-                ),
-                self.separator(cx),
-                self.row(
-                    "updates-log",
-                    "更新日志",
-                    Some("查看下载和安装记录。"),
-                    log,
-                    cx,
-                ),
-            ],
-            Some("Kite 只在用户选择“检查更新…”后访问更新服务。"),
+        let mut rows = vec![self.row(
+            "updates-version",
+            "当前版本",
+            Some(env!("CARGO_PKG_VERSION")),
+            check,
+            cx,
+        )];
+        if !self.update_in_progress
+            && let Some(status) = self.status.clone()
+        {
+            rows.push(self.separator(cx));
+            rows.push(self.update_status_row(status, cx));
+        }
+        rows.push(self.separator(cx));
+        rows.push(self.row(
+            "updates-log",
+            "更新诊断日志",
+            Some("查看下载、校验和安装记录。"),
+            log,
             cx,
         ));
-        if let Some(status) = self.status.clone() {
-            content = content.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
-            );
-        }
-        content.into_any_element()
+
+        v_flex()
+            .gap_6()
+            .child(self.section(
+                "版本",
+                rows,
+                Some("Kite 只在用户选择“检查更新…”后访问更新服务。"),
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn render_about(&self, cx: &App) -> AnyElement {
@@ -637,6 +633,32 @@ impl SettingsWindow {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(detail),
+            )
+            .into_any_element()
+    }
+
+    fn update_status_row(&self, status: SharedString, cx: &App) -> AnyElement {
+        h_flex()
+            .id("updates-status")
+            .w_full()
+            .gap_3()
+            .items_start()
+            .px_4()
+            .py_3()
+            .child(
+                Icon::new(IconName::Info)
+                    .size_4()
+                    .mt(px(1.))
+                    .text_color(cx.theme().muted_foreground),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .line_height(relative(1.35))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status),
             )
             .into_any_element()
     }
@@ -788,11 +810,12 @@ pub(crate) fn open_settings_window(
 
 fn open_update_log() -> Result<(), String> {
     let updates = dirs::data_local_dir()
-        .ok_or_else(|| "无法确定更新日志目录".to_string())?
+        .ok_or_else(|| "无法确定更新诊断日志目录".to_string())?
         .join("Kite")
         .join("updates");
-    std::fs::create_dir_all(&updates).map_err(|error| format!("无法创建更新日志目录：{error}"))?;
+    std::fs::create_dir_all(&updates)
+        .map_err(|error| format!("无法创建更新诊断日志目录：{error}"))?;
     let log = updates.join("update.log");
     let target: PathBuf = if log.is_file() { log } else { updates };
-    open::that(target).map_err(|error| format!("无法打开更新日志：{error}"))
+    open::that(target).map_err(|error| format!("无法打开更新诊断日志：{error}"))
 }
