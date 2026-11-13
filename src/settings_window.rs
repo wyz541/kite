@@ -593,9 +593,9 @@ impl SettingsWindow {
                     ),
                     self.separator(cx),
                     self.info_row(
-                        "about-native",
-                        "原生实现",
-                        "Windows 使用 Rust、GPUI 和 Windows Shell。",
+                        "about-system-integration",
+                        "系统集成",
+                        "Kite 支持文件剪贴板、回收站和系统右键菜单。",
                         cx,
                     ),
                     self.separator(cx),
