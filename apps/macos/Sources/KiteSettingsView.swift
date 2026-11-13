@@ -447,8 +447,8 @@ struct KiteSettingsView: View {
                     }
                     SettingsDivider()
                     SettingsRow(
-                        title: "原生实现",
-                        detail: "macOS 使用 SwiftUI 和 AppKit。文件系统语义来自共享 Rust Core。"
+                        title: "系统集成",
+                        detail: "Kite 支持 Finder 文件剪贴板、快速预览和分享菜单。"
                     ) {
                         EmptyView()
                     }
