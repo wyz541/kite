@@ -228,8 +228,8 @@ Windows 更新助手会结束现有 Kite 进程。
 下载完成后，Kite 校验 SHA-256，再替换当前版本。
 更新失败时，安装器恢复旧版本。
 
-Windows 更新日志位于 `%LOCALAPPDATA%\Kite\updates\update.log`。
-macOS 更新日志位于 `~/Library/Application Support/Kite/updates/update.log`。
+Windows 更新诊断日志位于 `%LOCALAPPDATA%\Kite\updates\update.log`。
+macOS 更新诊断日志位于 `~/Library/Application Support/Kite/updates/update.log`。
 
 ## 从源码构建
 

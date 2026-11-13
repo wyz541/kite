@@ -647,7 +647,7 @@ function Show-UpdateError([string]$Message) {
     try {
         Add-Type -AssemblyName PresentationFramework
         [System.Windows.MessageBox]::Show(
-            "$Message`n`n更新日志：$LogPath",
+            "$Message`n`n更新诊断日志：$LogPath",
             "Kite 更新失败",
             [System.Windows.MessageBoxButton]::OK,
             [System.Windows.MessageBoxImage]::Error
