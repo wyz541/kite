@@ -10,8 +10,10 @@ use sha2::{Digest, Sha256};
 
 const RELEASE_API_URL: &str = "https://api.github.com/repos/wyz541/kite/releases/latest";
 const LATEST_RELEASE_PAGE_URL: &str = "https://github.com/wyz541/kite/releases/latest";
+const MAIN_MANIFEST_URL: &str = "https://raw.githubusercontent.com/wyz541/kite/main/Cargo.toml";
 const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/wyz541/kite/releases/download/";
 const MAX_RELEASE_JSON_BYTES: u64 = 1024 * 1024;
+const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
 const MAX_UPDATE_BYTES: u64 = 256 * 1024 * 1024;
 const USER_AGENT: &str = concat!(
     "Kite/",
@@ -126,8 +128,92 @@ pub fn check_for_update() -> Result<UpdateInfo, String> {
     let current = Version::parse(current_version())
         .map_err(|error| format!("无法读取当前 Kite 版本：{error}"))?;
     let target = current_target()?;
-    let release = fetch_latest_release()?;
-    resolve_release(release, &current, target)
+    let manifest_version = fetch_main_manifest_version().ok();
+
+    if let Some(latest) = manifest_version.as_ref()
+        && latest <= &current
+    {
+        return Ok(latest_only_update_info(&current, latest.clone()));
+    }
+
+    let result =
+        fetch_latest_release().and_then(|release| resolve_release(release, &current, target));
+    match result {
+        Ok(update) => Ok(update),
+        Err(error) => {
+            eprintln!("Kite update lookup failed: {error}");
+            Err(update_check_failure_message(manifest_version.as_ref()))
+        }
+    }
+}
+
+fn latest_only_update_info(current: &Version, latest: Version) -> UpdateInfo {
+    let latest_version = current.max(&latest).to_string();
+    UpdateInfo {
+        current_version: current.to_string(),
+        latest_version: latest_version.clone(),
+        update_available: false,
+        release_name: format!("Kite {latest_version}"),
+        release_url: format!("https://github.com/wyz541/kite/releases/tag/v{latest_version}"),
+        release_notes: String::new(),
+        published_at: None,
+        asset_name: String::new(),
+        asset_url: String::new(),
+        asset_sha256: String::new(),
+        asset_size: 0,
+    }
+}
+
+fn update_check_failure_message(latest: Option<&Version>) -> String {
+    match latest {
+        Some(latest) => format!(
+            "检测到 Kite {latest}，但 GitHub 暂时无法提供自动更新信息。请稍后重试，或前往 GitHub Releases 手动下载。"
+        ),
+        None => "GitHub 暂时无法提供更新信息。请检查网络或代理设置后重试，或前往 GitHub Releases 手动下载。"
+            .to_string(),
+    }
+}
+
+fn fetch_main_manifest_version() -> Result<Version, String> {
+    let bytes = http_get_bytes(
+        MAIN_MANIFEST_URL,
+        "text/plain",
+        MAX_MANIFEST_BYTES,
+        "Kite 主分支版本",
+    )?;
+    let manifest = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("Kite 主分支 Cargo.toml 不是 UTF-8：{error}"))?;
+    parse_package_version(manifest)
+}
+
+fn parse_package_version(manifest: &str) -> Result<Version, String> {
+    let mut in_package = false;
+    for line in manifest.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') {
+            if in_package {
+                break;
+            }
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "version" {
+            continue;
+        }
+        let value = value.trim().trim_matches('"');
+        return Version::parse(value)
+            .map_err(|error| format!("Kite 主分支 Cargo.toml 版本无效：{error}"));
+    }
+    Err("Kite 主分支 Cargo.toml 缺少 package.version".to_string())
 }
 
 fn fetch_latest_release() -> Result<GithubRelease, String> {
@@ -1019,6 +1105,42 @@ Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
         assert_eq!(info.latest_version, "0.6.13");
         assert_eq!(info.asset_name, "Kite.exe");
         assert_eq!(info.asset_sha256, digest);
+    }
+
+    #[test]
+    fn main_manifest_version_reads_package_version_only() {
+        let manifest = r#"
+[package]
+name = "kite-explorer"
+version = "0.6.74"
+
+[dependencies]
+semver = { version = "1" }
+"#;
+        assert_eq!(
+            parse_package_version(manifest).unwrap(),
+            Version::new(0, 6, 74)
+        );
+    }
+
+    #[test]
+    fn main_manifest_equal_version_reports_no_update() {
+        let info = latest_only_update_info(&Version::new(0, 6, 74), Version::new(0, 6, 74));
+        assert!(!info.update_available);
+        assert_eq!(info.current_version, "0.6.74");
+        assert_eq!(info.latest_version, "0.6.74");
+        assert!(info.asset_name.is_empty());
+    }
+
+    #[test]
+    fn update_failure_uses_actionable_message_without_network_details() {
+        let latest = Version::new(0, 6, 74);
+        let message = update_check_failure_message(Some(&latest));
+        assert!(message.contains("Kite 0.6.74"));
+        assert!(message.contains("GitHub Releases"));
+        assert!(!message.contains("status code"));
+        assert!(!message.contains("docs.rs"));
+        assert!(!message.contains("TLS"));
     }
 
     #[test]
