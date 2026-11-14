@@ -7,6 +7,14 @@ import subprocess
 from pathlib import Path
 
 ALLOWED_IMAGES = {
+    "assets/file-icons/file-archive.svg",
+    "assets/file-icons/file-audio.svg",
+    "assets/file-icons/file-code.svg",
+    "assets/file-icons/file-image.svg",
+    "assets/file-icons/file-text.svg",
+    "assets/file-icons/file-video.svg",
+    "assets/file-icons/file.svg",
+    "assets/file-icons/folder.svg",
     "assets/icon/kite-icon.svg",
     "assets/kite.icns",
     "assets/kite.ico",
