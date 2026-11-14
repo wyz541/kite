@@ -347,6 +347,91 @@ impl TableDelegate for FileTableDelegate {
     }
 }
 
+const FOLDER_ICON: &[u8] = include_bytes!("../assets/file-icons/folder.svg");
+const GENERIC_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file.svg");
+const IMAGE_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file-image.svg");
+const AUDIO_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file-audio.svg");
+const VIDEO_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file-video.svg");
+const ARCHIVE_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file-archive.svg");
+const CODE_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file-code.svg");
+const TEXT_FILE_ICON: &[u8] = include_bytes!("../assets/file-icons/file-text.svg");
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileIconKind {
+    Folder,
+    GenericFile,
+    Image,
+    Audio,
+    Video,
+    Archive,
+    Code,
+    Text,
+}
+
+impl FileIconKind {
+    fn for_entry(entry: &FileEntry) -> Self {
+        if entry.is_dir() {
+            Self::Folder
+        } else {
+            Self::for_extension(&entry.extension)
+        }
+    }
+
+    fn for_extension(extension: &str) -> Self {
+        match extension {
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" | "avif" | "heic"
+            | "tif" | "tiff" => Self::Image,
+            "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a" | "opus" | "wma" | "ape" => Self::Audio,
+            "mp4" | "mkv" | "mov" | "avi" | "webm" | "m4v" | "wmv" | "flv" | "mpeg" | "mpg" => {
+                Self::Video
+            }
+            "zip" | "7z" | "rar" | "tar" | "gz" | "bz2" | "xz" | "zst" | "tgz" | "apk" | "aab"
+            | "hap" | "hsp" | "ipa" => Self::Archive,
+            "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "html" | "css" | "c" | "cpp" | "h"
+            | "cs" | "java" | "go" | "kt" | "sh" | "bash" | "zsh" | "ps1" | "bat" | "cmd"
+            | "swift" | "rb" | "php" | "lua" | "sql" | "r" | "dart" | "vue" | "svelte" | "xml" => {
+                Self::Code
+            }
+            "txt" | "md" | "log" | "ini" | "toml" | "yaml" | "yml" | "json" | "pdf" | "doc"
+            | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "csv" | "tsv" | "rtf" | "epub" | "tex"
+            | "cfg" | "conf" | "env" => Self::Text,
+            _ => Self::GenericFile,
+        }
+    }
+
+    fn svg(self) -> &'static [u8] {
+        match self {
+            Self::Folder => FOLDER_ICON,
+            Self::GenericFile => GENERIC_FILE_ICON,
+            Self::Image => IMAGE_FILE_ICON,
+            Self::Audio => AUDIO_FILE_ICON,
+            Self::Video => VIDEO_FILE_ICON,
+            Self::Archive => ARCHIVE_FILE_ICON,
+            Self::Code => CODE_FILE_ICON,
+            Self::Text => TEXT_FILE_ICON,
+        }
+    }
+}
+
+impl From<FileIconKind> for Icon {
+    fn from(kind: FileIconKind) -> Self {
+        Icon::default().data(kind.svg())
+    }
+}
+
+pub(crate) fn column_icon_for(entry: &FileEntry) -> FileIconKind {
+    FileIconKind::for_entry(entry)
+}
+
+pub(crate) fn folder_icon_color(cx: &App) -> Hsla {
+    if cx.theme().mode.is_dark() {
+        rgb(0xf97316).into()
+    } else {
+        // Keep the icon distinctly orange with at least 3:1 contrast on the light column surface.
+        rgb(0xe8540a).into()
+    }
+}
+
 pub(crate) fn icon_for(entry: &FileEntry) -> IconName {
     if entry.is_dir() {
         return IconName::Folder;
@@ -365,19 +450,32 @@ pub(crate) fn icon_for(entry: &FileEntry) -> IconName {
 }
 
 pub(crate) fn icon_color(entry: &FileEntry, cx: &App) -> Hsla {
-    if entry.is_dir() {
-        return rgb(0xf3b64b).into();
+    let kind = FileIconKind::for_entry(entry);
+    if kind == FileIconKind::GenericFile {
+        return cx.theme().muted_foreground;
     }
-    match entry.extension.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" => rgb(0x5ea7ff).into(),
-        "mp3" | "wav" | "flac" | "aac" | "ogg" => rgb(0xe58cff).into(),
-        "mp4" | "mkv" | "mov" | "avi" | "webm" => rgb(0xff7f8b).into(),
-        "zip" | "7z" | "rar" | "tar" | "gz" => rgb(0xf1a85b).into(),
-        "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "html" | "css" | "c" | "cpp" | "h" | "cs"
-        | "java" | "go" | "kt" => rgb(0x65c88a).into(),
-        "txt" | "md" | "log" | "ini" | "toml" | "yaml" | "yml" | "json" | "pdf" | "doc"
-        | "docx" | "xls" | "xlsx" | "ppt" | "pptx" => rgb(0x9aa7b8).into(),
-        _ => cx.theme().muted_foreground,
+    if cx.theme().mode.is_dark() {
+        match kind {
+            FileIconKind::Folder => folder_icon_color(cx),
+            FileIconKind::Image => rgb(0x5ea7ff).into(),
+            FileIconKind::Audio => rgb(0xd78cff).into(),
+            FileIconKind::Video => rgb(0xff7f8b).into(),
+            FileIconKind::Archive => rgb(0xf1a85b).into(),
+            FileIconKind::Code => rgb(0x65c88a).into(),
+            FileIconKind::Text => rgb(0x9aa7b8).into(),
+            FileIconKind::GenericFile => unreachable!(),
+        }
+    } else {
+        match kind {
+            FileIconKind::Folder => folder_icon_color(cx),
+            FileIconKind::Image => rgb(0x2563eb).into(),
+            FileIconKind::Audio => rgb(0x9333ea).into(),
+            FileIconKind::Video => rgb(0xe11d48).into(),
+            FileIconKind::Archive => rgb(0xb45309).into(),
+            FileIconKind::Code => rgb(0x15803d).into(),
+            FileIconKind::Text => rgb(0x64748b).into(),
+            FileIconKind::GenericFile => unreachable!(),
+        }
     }
 }
 
@@ -447,9 +545,40 @@ fn vcs_cell_text(entry: &FileEntry) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::FileTableDelegate;
+    use super::{FileIconKind, FileTableDelegate};
     use crate::fs::SortSpec;
     use std::path::PathBuf;
+
+    #[test]
+    fn column_icon_kinds_distinguish_common_file_types() {
+        assert_eq!(FileIconKind::for_extension("jpg"), FileIconKind::Image);
+        assert_eq!(FileIconKind::for_extension("flac"), FileIconKind::Audio);
+        assert_eq!(FileIconKind::for_extension("mp4"), FileIconKind::Video);
+        assert_eq!(FileIconKind::for_extension("hap"), FileIconKind::Archive);
+        assert_eq!(FileIconKind::for_extension("rs"), FileIconKind::Code);
+        assert_eq!(FileIconKind::for_extension("md"), FileIconKind::Text);
+        assert_eq!(FileIconKind::for_extension(""), FileIconKind::GenericFile);
+    }
+
+    #[test]
+    fn column_icon_kinds_use_distinct_artwork() {
+        let kinds = [
+            FileIconKind::Folder,
+            FileIconKind::GenericFile,
+            FileIconKind::Image,
+            FileIconKind::Audio,
+            FileIconKind::Video,
+            FileIconKind::Archive,
+            FileIconKind::Code,
+            FileIconKind::Text,
+        ];
+
+        for (index, left) in kinds.iter().enumerate() {
+            for right in &kinds[index + 1..] {
+                assert_ne!(left.svg(), right.svg());
+            }
+        }
+    }
 
     #[test]
     fn directory_context_menu_target_uses_the_view_directory() {
