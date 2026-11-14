@@ -27,7 +27,10 @@ use crate::platform::{default_root_path, root_directory};
 use crate::preview_window::PreviewWindow;
 use crate::settings_window;
 use crate::shell_fs;
-use crate::table::{FileTableDelegate, icon_color, icon_for, vcs_icon_badge};
+use crate::table::{
+    FileIconKind, FileTableDelegate, column_icon_for, folder_icon_color, icon_color, icon_for,
+    vcs_icon_badge,
+};
 use crate::text_editor;
 use crate::ui_preferences::{
     self, AppearancePreference, ColumnGroupPreference as ColumnGroup, ColumnViewRule, UiPreferences,
@@ -5464,6 +5467,7 @@ impl KiteApp {
             .items_stretch()
             .gap_2()
             .p_2()
+            .bg(cx.theme().background)
             .overflow_hidden()
             .track_scroll(&scroll_handle);
         if self.column_panes.is_empty() {
@@ -6014,21 +6018,29 @@ impl KiteApp {
             .items_center()
             .border_b_1()
             .border_color(border)
+            .bg(cx.theme().title_bar)
             .when(active, |this| this.bg(accent.opacity(0.5)))
-            .child(Icon::new(IconName::Folder).size_4().text_color(if active {
-                accent
-            } else {
-                muted
-            }))
             .child(
-                div()
+                h_flex()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(if active { cx.theme().foreground } else { muted })
-                    .child(title),
+                    .items_center()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(FileIconKind::Folder)
+                            .size_4()
+                            .text_color(folder_icon_color(cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(if active { cx.theme().foreground } else { muted })
+                            .child(title),
+                    ),
             )
             .when(search_loading, |this| {
                 this.child(div().text_xs().text_color(muted).child("搜索中…"))
@@ -6318,9 +6330,10 @@ impl KiteApp {
             .flex_shrink_0()
             .rounded_lg()
             .overflow_hidden()
-            .bg(cx.theme().title_bar)
+            .bg(cx.theme().secondary.opacity(0.72))
             .border_1()
             .border_color(border)
+            .shadow_sm()
             .child(header);
         if let Some(details_header) = details_header {
             column = column.child(details_header);
@@ -6524,7 +6537,7 @@ impl KiteApp {
                 .h(px(30.))
                 .w_full()
                 .px_2()
-                .gap_2()
+                .gap_1p5()
                 .items_center()
                 .cursor_pointer()
                 .text_sm()
@@ -6535,10 +6548,10 @@ impl KiteApp {
                 .child(
                     div()
                         .relative()
-                        .size_4()
+                        .size(px(18.))
                         .child(
-                            Icon::new(icon_for(&entry))
-                                .size_4()
+                            Icon::new(column_icon_for(&entry))
+                                .size(px(18.))
                                 .text_color(icon_color(&entry, cx)),
                         )
                         .when_some(icon_status, |this, status| {
@@ -6552,6 +6565,12 @@ impl KiteApp {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis_middle()
+                        .font_medium()
+                        .text_color(if selected {
+                            accent_foreground
+                        } else {
+                            cx.theme().foreground
+                        })
                         .child(entry.name.clone()),
                 );
             if entry.is_dir() {
